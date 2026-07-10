@@ -61,8 +61,8 @@ export function DashboardPage() {
     <SelectionProvider>
     <DashboardLayout tabs={TABS} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as TabId)}>
       {activeTab === "overview" && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <div className="xl:col-span-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="lg:col-span-2">
             <ExecutiveThreatSummary
               onNavigateToActors={() => setActiveTab("threat-actors")}
               onNavigateToCountry={goToCountry}
@@ -72,7 +72,7 @@ export function DashboardPage() {
               onNavigateNewsSource={goToNewsSource}
             />
           </div>
-          <div className="xl:col-span-1">
+          <div className="lg:col-span-1">
             <TopThreatActorsToday onNavigateToActors={() => setActiveTab("threat-actors")} />
           </div>
         </div>
