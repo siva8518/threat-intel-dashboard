@@ -1,0 +1,36 @@
+# Fly.io app config. Builds from the existing Dockerfile (unchanged from the
+# Render setup -- exposes 8080, has a working healthcheck). `auto_stop_machines
+# = "off"` + `min_machines_running = 1` are the two settings that matter most
+# here: together they keep the app always-on (the whole reason for choosing
+# Fly over Render's free tier, which sleeps after ~15 min idle), staying
+# within Fly's free allowance for a single shared-cpu-1x/256mb machine.
+#
+# API keys (see .env.example) are NOT set here -- run, after `fly auth login`:
+#   fly secrets set NVD_API_KEY=... OTX_API_KEY=... GITHUB_TOKEN=...
+# (repeat for whichever of the .env.example keys you have; all are optional).
+
+app = "threat-intel-dashboard"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "20s"
+  method = "GET"
+  path = "/api/dashboard/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
