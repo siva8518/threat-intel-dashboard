@@ -27,7 +27,7 @@ const TABS = [
   { id: "correlation-engine", label: "Correlation Engine", icon: Network },
   { id: "actor-profiles", label: "Threat Actor Profiles", icon: UserSearch },
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },
-  { id: "threat-actors", label: "Threat Actors & Tools", icon: Skull },
+  { id: "threat-actors", label: "Ransomware Data", icon: Skull },
   { id: "github-intel", label: "GitHub Intel", icon: Github },
   { id: "ioc-search", label: "IOC Search", icon: Search },
   { id: "news", label: "Security News", icon: Newspaper },
