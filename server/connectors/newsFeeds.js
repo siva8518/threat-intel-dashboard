@@ -34,7 +34,15 @@ import { parseRss } from "../lib/rss.js";
 // categories beyond the general and ICS-specific ones already present.
 // CISA's alerts.xml (a feed of "N vulnerabilities added to KEV" announcement
 // posts) was deliberately skipped -- redundant with the KEV catalog already
-// tracked directly and fully via the cisa-kev connector. Deliberately NOT added:
+// tracked directly and fully via the cisa-kev connector. JPCERT/CC's English
+// alerts feed (confirmed live, RSS 1.0/RDF using <dc:date> instead of
+// <pubDate> -- see server/lib/rss.js's fallback for that) adds Japan's
+// national CERT to the government-advisory coverage already here from
+// CISA/UK NCSC. Two other national-CERT candidates were evaluated and
+// dropped: ACSC (Australia)'s RSS endpoints connection-refused outright from
+// this environment, the same signature as Sophos below (likely a WAF/IP
+// range block, not a missing feed); and FBI/IC3's cyber-alerts RSS returned
+// a Cloudflare bot-check challenge page (HTTP 403) instead of XML. Deliberately NOT added:
 // Secureworks (acquired by Sophos in 2025, its domain now just redirects to
 // sophos.com), Sophos X-Ops (every sophos.com/news.sophos.com URL refused the
 // connection outright from this environment -- likely a WAF blocking the
@@ -51,6 +59,7 @@ const FEEDS = [
   { source: "CISA Malware Analysis Reports", url: "https://www.cisa.gov/cybersecurity-advisories/analysis-reports.xml" },
   { source: "CISA Cybersecurity Advisories", url: "https://www.cisa.gov/cybersecurity-advisories/cybersecurity-advisories.xml" },
   { source: "UK NCSC", url: "https://www.ncsc.gov.uk/api/1/services/v1/report-rss-feed.xml" },
+  { source: "JPCERT/CC", url: "https://www.jpcert.or.jp/english/rss/jpcert-en.rdf" },
   { source: "The Hacker News", url: "https://feeds.feedburner.com/TheHackersNews" },
   { source: "BleepingComputer", url: "https://www.bleepingcomputer.com/feed/" },
   { source: "Krebs on Security", url: "https://krebsonsecurity.com/feed/" },

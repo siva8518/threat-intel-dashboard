@@ -25,7 +25,7 @@ function citesId(entity, cveId) {
 }
 
 export function buildCveProfile(cveId, sources = {}) {
-  const { attackData, newsItems, githubRepos } = sources;
+  const { attackData, newsItems, githubRepos, exploitIndex } = sources;
   const groups = attackData?.groups ?? [];
   const software = attackData?.software ?? [];
   const campaigns = attackData?.campaigns ?? [];
@@ -83,6 +83,18 @@ export function buildCveProfile(cveId, sources = {}) {
 
   const relatedCampaigns = citingCampaigns.map((c) => ({ name: c.name, description: c.description, date: c.firstSeen, url: c.url }));
 
+  // Exploit-DB PoC/exploit availability for this CVE, if any -- see
+  // server/connectors/exploitdb.js's cveIndex (built once per sync cycle,
+  // keyed by CVE ID).
+  const exploits = (exploitIndex?.[cveId.toUpperCase()] ?? []).map((e) => ({
+    exploitId: e.exploitId,
+    title: e.title,
+    url: e.url,
+    verified: e.verified,
+    datePublished: e.datePublished,
+    platform: e.platform,
+  }));
+
   return {
     cveId,
     relatedActors: relatedGroups.map((g) => ({ attackId: g.attackId, name: g.name, country: g.country, url: g.url })),
@@ -92,5 +104,6 @@ export function buildCveProfile(cveId, sources = {}) {
     relatedIocs,
     githubPocs,
     relatedNews,
+    exploits,
   };
 }

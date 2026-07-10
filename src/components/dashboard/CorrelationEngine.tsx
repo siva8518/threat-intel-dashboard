@@ -59,7 +59,7 @@ function IntelligenceCard({ card }: { card: CorrelationCard }) {
           </div>
           <div className="flex flex-wrap gap-1.5">
             {card.malware.map((m) => (
-              <CardChip key={m} onClick={() => selectMalware({ family: m, count: 0, sources: [], techniques: [] })}>
+              <CardChip key={m} onClick={() => selectMalware({ family: m, count: 0, sources: [], techniques: [], detectionRules: [] })}>
                 {m}
               </CardChip>
             ))}

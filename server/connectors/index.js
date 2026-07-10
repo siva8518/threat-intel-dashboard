@@ -20,6 +20,9 @@ import emergingThreats from "./emergingThreats.js";
 import spamhaus from "./spamhaus.js";
 import cveProject from "./cveProject.js";
 import malpedia from "./malpedia.js";
+import exploitdb from "./exploitdb.js";
+import vulncheckKev from "./vulncheckKev.js";
+import detectionRules from "./detectionRules.js";
 import { githubDiscoveryConnector, githubEnrichmentConnector } from "../githubIntel/index.js";
 
 /** Every scheduled (bulk, background-synced) connector. IOC-search lookups live in server/lookups/ instead. */
@@ -46,6 +49,9 @@ export const connectors = [
   spamhaus,
   cveProject,
   malpedia,
+  exploitdb,
+  vulncheckKev,
+  detectionRules,
   githubDiscoveryConnector,
   githubEnrichmentConnector,
 ];

@@ -1,4 +1,4 @@
-import { ExternalLink, Github, Newspaper, ShieldAlert, Skull, Swords, Target } from "lucide-react";
+import { Bug, ExternalLink, Github, Newspaper, ShieldAlert, Skull, Swords, Target } from "lucide-react";
 import { DetailDrawer, DrawerSection } from "./DetailDrawer";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -124,6 +124,34 @@ export function CveDetailDrawer() {
                   ? "None of the malware tied to this CVE currently appears in the live threat feed."
                   : "No malware family is attributed to this CVE, so there's nothing to match against the threat feed."}
               </p>
+            )}
+          </DrawerSection>
+
+          <DrawerSection title="Exploits (Exploit-DB)" icon={<Bug className="h-4 w-4" />}>
+            {profile.isLoading ? (
+              <Skeleton className="h-12 w-full" />
+            ) : profile.data?.exploits.length ? (
+              <ul className="space-y-1.5">
+                {profile.data.exploits.map((e) => (
+                  <li key={e.exploitId}>
+                    <a
+                      href={e.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs transition-colors hover:border-primary/40"
+                    >
+                      <span className="truncate text-foreground">{e.title}</span>
+                      {e.verified && (
+                        <Badge variant="low" className="shrink-0">
+                          verified
+                        </Badge>
+                      )}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted">No Exploit-DB entry references this CVE ID.</p>
             )}
           </DrawerSection>
 

@@ -7,6 +7,7 @@ import type {
   CveRecord,
   DailySummary,
   ExecutiveSummary,
+  ExploitIntelligence,
   GithubIntelStats,
   GithubRepoDetail,
   GithubRepoSummary,
@@ -24,6 +25,7 @@ import type {
   TodaySecurityEvents,
   TopThreatActor,
   TrendingMalwareEntry,
+  VulnCheckKevCatalog,
 } from "@/types/threat-intel";
 
 // Thin client over the backend aggregation service (server/routes/dashboard.js).
@@ -64,6 +66,14 @@ export interface KevCatalog {
 
 export async function fetchKev(): Promise<KevCatalog> {
   return fetchJson("/api/dashboard/kev", { source: "Dashboard API" });
+}
+
+export async function fetchVulnCheckKev(): Promise<VulnCheckKevCatalog> {
+  return fetchJson("/api/dashboard/vulncheck-kev", { source: "Dashboard API" });
+}
+
+export async function fetchExploits(): Promise<ExploitIntelligence> {
+  return fetchJson("/api/dashboard/exploits", { source: "Dashboard API" });
 }
 
 export async function fetchThreatFeed(): Promise<{ iocs: IocRecord[] }> {
