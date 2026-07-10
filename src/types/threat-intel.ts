@@ -414,3 +414,14 @@ export interface TopThreatActor {
   score: number;
   trend: ActorTrend;
 }
+
+export interface TopExploitedCve {
+  cveId: string;
+  vendorProject: string;
+  product: string;
+  vulnerabilityName: string;
+  dateAdded: string;
+  sourceUrl: string;
+  ransomwareUse: boolean;
+  actors: string[];
+}

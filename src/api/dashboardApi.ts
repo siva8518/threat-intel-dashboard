@@ -22,6 +22,7 @@ import type {
   ThreatActorProfile,
   ThreatActorSummary,
   TodaySecurityEvents,
+  TopExploitedCve,
   TopThreatActor,
   TrendingMalwareEntry,
 } from "@/types/threat-intel";
@@ -121,6 +122,10 @@ export async function fetchDailySummary(): Promise<DailySummary> {
 
 export async function fetchTopThreatActorsToday(): Promise<{ actors: TopThreatActor[] }> {
   return fetchJson("/api/dashboard/top-threat-actors-today", { source: "Dashboard API" });
+}
+
+export async function fetchTopExploitedCvesToday(): Promise<{ cves: TopExploitedCve[] }> {
+  return fetchJson("/api/dashboard/top-exploited-cves-today", { source: "Dashboard API" });
 }
 
 export async function fetchCveById(cveId: string): Promise<CveRecord> {

@@ -24,6 +24,7 @@ import { getTaggedNewsItems } from "../newsCorrelation.js";
 import { buildTodaySecurityEvents } from "../todaySecurityEvents.js";
 import { buildDailySummary } from "../dailySummary.js";
 import { buildTopThreatActorsToday } from "../topThreatActorsToday.js";
+import { buildTopExploitedCvesToday } from "../topExploitedCvesToday.js";
 
 export const router = Router();
 
@@ -311,6 +312,28 @@ router.get("/dashboard/top-threat-actors-today", (_req, res) => {
 
   const actors = buildTopThreatActorsToday({ ransomwareCampaigns, otxActorSignals, newsItems, attackData });
   res.json({ actors });
+});
+
+// --- Top CVEs Exploited by Threat Actors Today (see server/topExploitedCvesToday.js) ---
+// vulncheck-kev is read defensively (cache.getEntry returns a safe empty
+// entry for a sourceId with no registered connector) so this route works
+// the same whether or not that optional connector is wired in.
+router.get("/dashboard/top-exploited-cves-today", (_req, res) => {
+  const attackData = cache.getEntry("attack").data;
+  const kevEntries = cache.getEntry("cisa-kev").data?.entries;
+  const vulncheckKevEntries = cache.getEntry("vulncheck-kev").data?.entries;
+  const ransomwareCampaigns = getRansomwareCampaigns();
+  const newsItems = getTaggedNewsItems({
+    newsItems: cache.getEntry("news").data?.items,
+    attackData,
+    ransomwareCampaigns,
+    threatFeedIocs: threatFeedIocs(),
+    kevEntries,
+    epssScores: cache.getEntry("epss").data,
+  });
+
+  const cves = buildTopExploitedCvesToday({ kevEntries, vulncheckKevEntries, attackData, newsItems });
+  res.json({ cves });
 });
 
 // --- GitHub Intel (repo discovery, classification, extraction, correlation, scoring) ---

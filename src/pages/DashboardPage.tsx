@@ -3,6 +3,7 @@ import { Github, LayoutDashboard, Network, Newspaper, Search, ShieldAlert, Skull
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
 import { TopThreatActorsToday } from "@/components/dashboard/TopThreatActorsToday";
+import { TopExploitedCvesToday } from "@/components/dashboard/TopExploitedCvesToday";
 import { CveStatsHeader } from "@/components/dashboard/CveStatsHeader";
 import { CveTable } from "@/components/dashboard/CveTable";
 import { CveProgramActivity } from "@/components/dashboard/CveProgramActivity";
@@ -72,8 +73,9 @@ export function DashboardPage() {
               onNavigateNewsSource={goToNewsSource}
             />
           </div>
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 space-y-4">
             <TopThreatActorsToday onNavigateToActors={() => setActiveTab("threat-actors")} />
+            <TopExploitedCvesToday />
           </div>
         </div>
       )}
