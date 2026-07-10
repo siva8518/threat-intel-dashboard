@@ -67,18 +67,11 @@ export interface AttackTechnique {
   observedCount?: number;
 }
 
-export interface DetectionRuleRef {
-  label: "YARA-Rules" | "SigmaHQ";
-  path: string;
-  url: string;
-}
-
 export interface TrendingMalwareEntry {
   family: string;
   count: number;
   sources: string[];
   techniques: AttackTechnique[];
-  detectionRules: DetectionRuleRef[];
 }
 
 export interface RansomwareCampaign {
@@ -372,7 +365,6 @@ export interface CveProfile {
   relatedIocs: IocRecord[];
   githubPocs: CveProfileGithubPoc[];
   relatedNews: NewsItem[];
-  exploits: CveProfileExploit[];
 }
 
 export interface CorrelationCard {
@@ -421,53 +413,4 @@ export interface TopThreatActor {
   name: string;
   score: number;
   trend: ActorTrend;
-}
-
-export interface ExploitEntry {
-  exploitId: string;
-  title: string;
-  url: string;
-  type: string;
-  platform: string;
-  datePublished: string | null;
-  verified: boolean;
-  cveIds: string[];
-}
-
-export interface ExploitIntelligence {
-  totalCount: number;
-  recentEntries: ExploitEntry[];
-}
-
-export interface CveProfileExploit {
-  exploitId: string;
-  title: string;
-  url: string;
-  verified: boolean;
-  datePublished: string | null;
-  platform: string;
-}
-
-export interface VulnCheckExploitReference {
-  id: string;
-  url: string;
-  type: string;
-}
-
-export interface VulnCheckKevEntry {
-  cveIds: string[];
-  vendorProject: string;
-  product: string;
-  vulnerabilityName: string;
-  dateAdded: string | null;
-  dueDate: string | null;
-  requiredAction: string | null;
-  ransomwareUse: boolean;
-  exploitReferences: VulnCheckExploitReference[];
-}
-
-export interface VulnCheckKevCatalog {
-  count: number;
-  entries: VulnCheckKevEntry[];
-  notConfigured?: boolean;
 }

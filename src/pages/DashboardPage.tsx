@@ -6,7 +6,6 @@ import { TopThreatActorsToday } from "@/components/dashboard/TopThreatActorsToda
 import { CveStatsHeader } from "@/components/dashboard/CveStatsHeader";
 import { CveTable } from "@/components/dashboard/CveTable";
 import { CveProgramActivity } from "@/components/dashboard/CveProgramActivity";
-import { ExploitIntelligence } from "@/components/dashboard/ExploitIntelligence";
 import { ThreatFeedTable } from "@/components/dashboard/ThreatFeedTable";
 import { CorrelationEngine } from "@/components/dashboard/CorrelationEngine";
 import { AttackTechniques } from "@/components/dashboard/AttackTechniques";
@@ -82,10 +81,7 @@ export function DashboardPage() {
         <>
           <CveStatsHeader />
           <CveTable />
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <CveProgramActivity />
-            <ExploitIntelligence />
-          </div>
+          <CveProgramActivity />
         </>
       )}
       {activeTab === "threat-feed" && <ThreatFeedTable />}

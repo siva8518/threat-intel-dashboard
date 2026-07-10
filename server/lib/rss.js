@@ -28,9 +28,6 @@ export function parseRss(xml) {
   return items.map((itemXml) => ({
     title: extractTag(itemXml, "title") ?? "Untitled",
     link: extractTag(itemXml, "link") ?? "#",
-    // RSS 2.0 uses <pubDate> (RFC 822); RSS 1.0/RDF feeds (e.g. JPCERT) use
-    // Dublin Core's <dc:date> (ISO 8601) instead -- fall back to it so those
-    // feeds don't all report a fabricated "just now" timestamp.
-    pubDate: extractTag(itemXml, "pubDate") ?? extractTag(itemXml, "dc:date"),
+    pubDate: extractTag(itemXml, "pubDate"),
   }));
 }

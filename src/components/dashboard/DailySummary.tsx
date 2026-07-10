@@ -30,7 +30,7 @@ export function DailySummary({ onNavigateTab, onNavigateNewsSource }: DailySumma
         onNavigateTab(bullet.action.tab);
         break;
       case "malware":
-        selectMalware({ family: bullet.action.family, count: 0, sources: [], techniques: [], detectionRules: [] });
+        selectMalware({ family: bullet.action.family, count: 0, sources: [], techniques: [] });
         break;
       case "news-source":
         onNavigateNewsSource(bullet.action.source);

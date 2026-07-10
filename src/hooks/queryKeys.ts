@@ -8,8 +8,6 @@ export const queryKeys = {
   dailySummary: ["daily-summary"] as const,
   topThreatActorsToday: ["top-threat-actors-today"] as const,
   kev: ["kev"] as const,
-  vulncheckKev: ["vulncheck-kev"] as const,
-  exploits: ["exploits"] as const,
   cves: (paramsKey: string) => ["cves", paramsKey] as const,
   cveProgramActivity: ["cve-program-activity"] as const,
   threatFeed: ["threat-feed"] as const,

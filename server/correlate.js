@@ -70,44 +70,11 @@ function resolveTechnique(id, attackIndex) {
 }
 
 /**
- * Cross-references a name (malware family or threat actor) against the
- * YARA-Rules/SigmaHQ filename-word index (server/connectors/detectionRules.js)
- * via case-insensitive substring match -- same matching philosophy as
- * techniqueIdsForFamily above. Filenames in both repos are consistently
- * organized by what they detect, so this is a reasonable "does a public
- * detection rule likely exist for this?" signal, not a guarantee.
- */
-// Below this length, a substring match is too likely to be a coincidence
-// (e.g. the generic rule-filename word "fake" matching inside the malware
-// family name "ClearFake") -- only exact-length-or-longer words are trusted
-// for substring matching; shorter ones must match exactly.
-const MIN_FUZZY_WORD_LENGTH = 6;
-
-export function detectionRulesFor(name, ruleIndex) {
-  if (!name || !ruleIndex?.length) return [];
-  const lower = name.toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (lower.length < 3) return [];
-
-  const seen = new Set();
-  const matches = [];
-  for (const row of ruleIndex) {
-    const isMatch = row.word === lower || (row.word.length >= MIN_FUZZY_WORD_LENGTH && (lower.includes(row.word) || row.word.includes(lower)));
-    if (!isMatch) continue;
-    const key = `${row.label}:${row.path}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    matches.push({ label: row.label, path: row.path, url: row.url });
-    if (matches.length >= 5) break;
-  }
-  return matches;
-}
-
-/**
  * Aggregates IOC malware-family frequency into a "trending malware" list.
  * Each entry gets whatever ATT&CK techniques the curated map associates with
  * it, so this doubles as the raw material for computeAttackTechniques below.
  */
-export function computeTrendingMalware(iocs, attackIndex, ruleIndex = []) {
+export function computeTrendingMalware(iocs, attackIndex) {
   const counts = new Map();
   for (const ioc of iocs) {
     if (!ioc.malwareFamily || ioc.malwareFamily === "Unknown" || ioc.malwareFamily === "N/A") continue;
@@ -128,7 +95,6 @@ export function computeTrendingMalware(iocs, attackIndex, ruleIndex = []) {
       count: entry.count,
       sources: Array.from(entry.sources),
       techniques: techniqueIdsForFamily(entry.family).map((id) => resolveTechnique(id, attackIndex)),
-      detectionRules: detectionRulesFor(entry.family, ruleIndex),
     }));
 }
 

@@ -41,9 +41,7 @@ server/
   scheduler.js     runs every connector once at boot, then on its own intervalMs forever
   connectors/      one module per scheduled/bulk source (see table below); index.js registers them all
   lookups/         on-demand-only single-indicator lookups (VirusTotal, GreyNoise, Shodan,
-                  Hybrid Analysis, LeakIX, crt.sh, RIPEstat, Team Cymru, Hudson Rock, CIRCL) --
-                  never scheduled/cached in bulk, called live by IOC Search (CIRCL is called from
-                  the single-CVE route instead, as an NVD fallback)
+                  Hybrid Analysis) -- never scheduled/cached in bulk, called live by IOC Search
   data/
     malware-attack-map.json   curated malware-family -> ATT&CK technique-id seed list (see caveats below)
   correlate.js     CVE+KEV+EPSS join, cross-source IOC dedup, malware->ATT&CK mapping,
@@ -53,9 +51,8 @@ server/
   githubIntel/     GitHub repo discovery/classification/extraction/correlation/scoring -- own
                   two-connector cadence + disk-backed store, see "GitHub Intel" section below
   routes/dashboard.js   GET /api/dashboard/{summary,cves,cve-trend,cve-program-activity,kev,
-                        vulncheck-kev,exploits,threat-feed,malware-trending,attack-techniques,
-                        ransomware,threat-actors,threat-actor-profiles,github-intel,news,health},
-                        GET /api/ioc-search
+                        threat-feed,malware-trending,attack-techniques,ransomware,threat-actors,
+                        threat-actor-profiles,github-intel,news,health}, GET /api/ioc-search
   index.js         mounts the router, starts the scheduler, serves dist/ in production
 ```
 
@@ -70,12 +67,9 @@ server/
 | Top malicious IPs | [AbuseIPDB](https://www.abuseipdb.com/) `/blacklist` | Key optional | Bulk |
 | Ransomware campaigns + actor activity | [ransomware.live](https://ransomware.live/) + [RansomWatch](https://github.com/joshhighet/ransomwatch) + [RansomLook](https://www.ransomlook.io/) (merged/deduped, see `server/ransomwareCampaigns.js`) + OTX adversary tags | No (OTX optional) | Bulk |
 | Malware family reference | [Malpedia](https://malpedia.caad.fkie.fraunhofer.de/) (Fraunhofer FKIE) -- family/actor taxonomy synced daily; per-actor family attribution fetched live only when a Threat Actor Profile is viewed | No | Bulk (list) + live (per-actor detail) |
-| Security news | 32 RSS feeds: CISA Advisories, CISA ICS Advisories, CISA Malware Analysis Reports, CISA Cybersecurity Advisories, UK NCSC, JPCERT/CC, The Hacker News, BleepingComputer, Krebs on Security, Dark Reading, SecurityWeek, Infosecurity Magazine, The Record, CyberScoop, Malwarebytes Labs, SANS ISC, Graham Cluley, The DFIR Report, Red Canary, Cisco Talos, CrowdStrike, Unit 42, Recorded Future, Google Threat Intelligence (covers Mandiant research), Microsoft Security, SentinelLabs, Rapid7, Check Point Research, ESET Research, Kaspersky Securelist, Elastic Security Labs, FortiGuard Labs | No | Bulk |
+| Security news | 31 RSS feeds: CISA Advisories, CISA ICS Advisories, CISA Malware Analysis Reports, CISA Cybersecurity Advisories, UK NCSC, The Hacker News, BleepingComputer, Krebs on Security, Dark Reading, SecurityWeek, Infosecurity Magazine, The Record, CyberScoop, Malwarebytes Labs, SANS ISC, Graham Cluley, The DFIR Report, Red Canary, Cisco Talos, CrowdStrike, Unit 42, Recorded Future, Google Threat Intelligence (covers Mandiant research), Microsoft Security, SentinelLabs, Rapid7, Check Point Research, ESET Research, Kaspersky Securelist, Elastic Security Labs, FortiGuard Labs | No | Bulk |
 | CVE Program recent activity | [CVE Program](https://www.cve.org/) (`cve.org`/CVEProject) `delta.json` -- newly reserved/updated CVE IDs, distinct from NVD's enriched records | No | Bulk |
-| Exploit intelligence | [Exploit-DB](https://gitlab.com/exploit-database/exploitdb) CSV mirror (CVE<->PoC correlation) + [VulnCheck KEV](https://vulncheck.com/kev) (larger, exploit-linked exploited-CVE catalog vs CISA's own) | Exploit-DB keyless; VulnCheck key optional | Bulk |
-| Detection rule coverage | [YARA-Rules](https://github.com/Yara-Rules/rules) + [SigmaHQ](https://github.com/SigmaHQ/sigma) -- filename-based family/actor index, cross-referenced against Trending Malware (see Known limitations) | No | Bulk (periodic tree sync) |
-| Single-CVE lookup fallback | [CIRCL CVE Search](https://cve.circl.lu/) -- used only when NVD doesn't have a record | No | Live, fallback only |
-| IOC Search (on-demand) | OTX, AbuseIPDB, Pulsedive, VirusTotal, GreyNoise, Shodan, Hybrid Analysis, [LeakIX](https://leakix.net/), [crt.sh](https://crt.sh/) (domain/cert transparency), [RIPEstat](https://stat.ripe.net/) (IP/ASN), [Team Cymru](https://www.team-cymru.com/) (IP/hash, DNS-based), [Hudson Rock Cavalier](https://www.hudsonrock.com/) (domain/infostealer exposure) | All keys optional; crt.sh/RIPEstat/Team Cymru/Hudson Rock are fully keyless | **Lookup-only** -- these free tiers don't offer a bulk feed (or, for Hybrid Analysis, its old bulk feed no longer exists), so they only run when you search a specific indicator. Each is throttled server-side (`server/lib/lookupLimiter.js`) to its own free-tier rate limit and cached for 10 minutes per indicator. |
+| IOC Search (on-demand) | OTX, AbuseIPDB, Pulsedive, VirusTotal, GreyNoise, Shodan, Hybrid Analysis, [LeakIX](https://leakix.net/) | All keys optional (Hybrid Analysis and LeakIX each require one for their only endpoints) | **Lookup-only** -- these free tiers don't offer a bulk feed (or, for Hybrid Analysis, its old bulk feed no longer exists), so they only run when you search a specific indicator. Each is throttled server-side (`server/lib/lookupLimiter.js`) to its own free-tier rate limit and cached for 10 minutes per indicator. |
 | GitHub Intel | [GitHub Search + REST API](https://docs.github.com/en/rest) -- repo discovery, README/rule-file content, correlated against every source above | `GITHUB_TOKEN` strongly recommended (works without one) | Bulk, two-tier cadence (see below) |
 
 If a source is unreachable or its key isn't configured, its panel/contribution shows a clean
@@ -550,28 +544,3 @@ read server-side only and never reach the browser bundle -- none are `VITE_`-pre
   single-indicator lookups) -- they never appear as bulk dashboard sections.
 - **In-memory cache**: resets on process restart (an immediate resync follows). Not shared across
   multiple instances -- fine for a single-process deployment, would need Redis for horizontal scaling.
-- **Detection rule coverage (`detectionRules` on Trending Malware) is a filename-based signal, not
-  parsed rule content**: `server/connectors/detectionRules.js` indexes YARA-Rules/SigmaHQ file *paths*
-  (e.g. `malware/RANSOM_Lockbit.yar`), then `server/correlate.js#detectionRulesFor` substring-matches
-  a malware family name against those path segments. A rule whose filename doesn't mention the family
-  by name (generic/behavioral rules, differently-spelled families) won't be found even if it would
-  actually detect that malware -- this is "a rule that looks related exists", not a guarantee of
-  coverage or a false-negative-free check.
-- **CIRCL CVE Search (`server/lookups/circl.js`) is an NVD fallback only**, used solely when NVD
-  doesn't have a record. Confirmed live its CVE Record v5 payload has no structured CVSS score --
-  its `metrics` field is free-text (e.g. `{"content":{"other":"critical"}}`), not a numeric vector --
-  so `cvssScore` stays `null` for CIRCL-sourced records rather than guessing a number, and `severity`
-  is only set when that free text unambiguously names one of NVD's own bands.
-- **Team Cymru (`server/lookups/teamCymru.js`) is DNS-based, not REST** -- IP-to-ASN and the Malware
-  Hash Registry are both DNS TXT record zones (confirmed live via direct `nslookup`), queried with
-  Node's `dns.resolveTxt`. A non-existent-domain DNS response means "not in the registry", not an
-  error, and is treated as such rather than surfaced as a failure.
-- **3 national CERT RSS feeds evaluated, only 1 added**: JPCERT/CC's English feed is confirmed live
-  (RSS 1.0/RDF using `<dc:date>` instead of `<pubDate>` -- `server/lib/rss.js` now falls back to it).
-  ACSC (Australia)'s RSS endpoints connection-refused outright from this environment, the same
-  WAF/IP-range-block signature as Sophos above. FBI/IC3's cyber-alerts RSS returned a Cloudflare
-  bot-check challenge page (HTTP 403) instead of XML. Neither was added.
-- **VulnCheck KEV, Exploit-DB and the detection-rule sync are untested against live keys/data beyond
-  endpoint-shape verification** -- VulnCheck specifically returned `{"error":true,"errors":["unauthorized"]}`
-  during verification (no real Community key was available), confirming the endpoint/auth-header shape
-  but not a full authenticated response.
