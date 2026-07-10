@@ -1,0 +1,29 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# env files (server-side secrets: NVD_API_KEY, ABUSECH_AUTH_KEY)
+.env
+.env.*
+!.env.example
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.claude
+
+.DS_Store
+
+# GitHub intel: disk-backed cache of discovered/enriched repos (expensive to
+# rebuild given GitHub's free-tier rate limits -- see server/githubIntel/store.js)
+server/githubIntel/.cache
+
+# AI Daily Brief: rolling daily malware-trend snapshots -- see server/malwareTrendHistory.js
+server/.cache

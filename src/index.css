@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    /* Tells the browser this page is dark-themed so it renders native
+       widgets (select dropdown popups, scrollbars, etc.) with a dark
+       system palette instead of defaulting to a light one -- without this,
+       the <select> itself picks up our dark Tailwind classes but its
+       native options popup renders white-on-white/unreadable, since that
+       popup is OS-drawn chrome the page's own CSS can't otherwise reach. */
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    background-image: theme("backgroundImage.gradient-mesh");
+    background-attachment: fixed;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-md;
+  }
+  ::selection {
+    background: rgba(109, 91, 255, 0.35);
+  }
+  /* Explicit solid colors for the native options popup -- color-scheme:
+     dark above covers most native-widget theming, but confirmed live that
+     Chrome/Edge still render an <option> list with the browser's own
+     default white/black unless the options themselves carry solid
+     (non-transparent) author colors to override it. */
+  select,
+  option {
+    background-color: #0d0f1a;
+    color: #eef0fa;
+  }
+}
+
+@layer components {
+  /* Base glass surface used by Card and any floating/overlay panel. */
+  .glass-panel {
+    @apply relative rounded-xl border border-white/[0.08] bg-surface/60 shadow-glass backdrop-blur-xl;
+  }
+  .glass-panel::before {
+    content: "";
+    @apply pointer-events-none absolute inset-0 rounded-xl;
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.05), transparent 40%);
+  }
+
+  /* Gradient text used for headline/brand moments, not body copy. */
+  .text-gradient {
+    @apply bg-gradient-primary bg-clip-text text-transparent;
+  }
+}

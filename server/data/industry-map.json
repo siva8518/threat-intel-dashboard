@@ -1,0 +1,7 @@
+{
+  "_comment": "Maps ransomware.live's own 'activity' sector strings (confirmed live: Business Services, Technology, Healthcare, Manufacturing, Consumer Services, Construction, Transportation/Logistics, Financial Services, Public Sector, Agriculture and Food Production, Education, Hospitality and Tourism, Energy, Telecommunication, Not Found) into the four industry buckets requested for the homepage heat map. Case-insensitive substring match; anything not listed here falls into 'Other'.",
+  "LSHC": ["healthcare", "health care", "life sciences", "pharma", "medical", "biotech"],
+  "TMT": ["technology", "telecommunication", "media", "software", "it services", "entertainment"],
+  "FSI": ["financial services", "banking", "insurance", "finance"],
+  "Consumer": ["consumer services", "consumer goods", "retail", "hospitality", "tourism", "food and beverage"]
+}
