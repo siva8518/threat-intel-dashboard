@@ -34,7 +34,15 @@ import { parseRss } from "../lib/rss.js";
 // categories beyond the general and ICS-specific ones already present.
 // CISA's alerts.xml (a feed of "N vulnerabilities added to KEV" announcement
 // posts) was deliberately skipped -- redundant with the KEV catalog already
-// tracked directly and fully via the cisa-kev connector. Deliberately NOT added:
+// tracked directly and fully via the cisa-kev connector. JPCERT/CC's English
+// alerts feed (confirmed live, RSS 1.0/RDF using <dc:date> instead of
+// <pubDate> -- see server/lib/rss.js's fallback for that) adds Japan's
+// national CERT to the government-advisory coverage already here from
+// CISA/UK NCSC. Two other national-CERT candidates were evaluated and
+// dropped: ACSC (Australia)'s RSS endpoints connection-refused outright from
+// this environment, the same signature as Sophos below (likely a WAF/IP
+// range block, not a missing feed); and FBI/IC3's cyber-alerts RSS returned
+// a Cloudflare bot-check challenge page (HTTP 403) instead of XML. Deliberately NOT added:
 // Secureworks (acquired by Sophos in 2025, its domain now just redirects to
 // sophos.com), Sophos X-Ops (every sophos.com/news.sophos.com URL refused the
 // connection outright from this environment -- likely a WAF blocking the
@@ -44,13 +52,28 @@ import { parseRss } from "../lib/rss.js";
 // feed exists; the only public RSS is /us/rss.xml, which is a general
 // newsroom/press-release feed -- confirmed live it's roughly half PR
 // announcements like new product launches, not threat research, so adding it
-// would dilute signal rather than add it).
+// would dilute signal rather than add it). AWS Security Bulletins (confirmed
+// live at the /rss/feed/ path -- the more obvious /rss/ path serves an HTML
+// app shell, not XML, despite returning 200) and Palo Alto Networks Security
+// Advisories (confirmed live, distinct from the Unit 42 threat-research feed
+// already above -- these are CVE-style product advisories, e.g. "CVE-2026-...
+// PAN-OS: ... (Severity: HIGH)" right in the title) add cloud/vendor product
+// advisory coverage, a gap next to the threat-research and government-CERT
+// feeds already here. Neither is added to MAJOR_VENDOR_SOURCES below --
+// that set is specifically threat-research blogs, and these are vendor
+// patch/product advisories, closer in kind to CISA's advisories than to
+// Talos/Unit 42 research. Google Threat Analysis Group's blog was also
+// evaluated and dropped: every RSS URL variant 404s and the blog's own page
+// has no discoverable feed `<link>` tag -- its dedicated feed appears to no
+// longer exist (its threat-intel content is likely folded into the "Google
+// Threat Intelligence" feed already tracked above).
 const FEEDS = [
   { source: "CISA", url: "https://www.cisa.gov/cybersecurity-advisories/all.xml" },
   { source: "CISA ICS Advisories", url: "https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml" },
   { source: "CISA Malware Analysis Reports", url: "https://www.cisa.gov/cybersecurity-advisories/analysis-reports.xml" },
   { source: "CISA Cybersecurity Advisories", url: "https://www.cisa.gov/cybersecurity-advisories/cybersecurity-advisories.xml" },
   { source: "UK NCSC", url: "https://www.ncsc.gov.uk/api/1/services/v1/report-rss-feed.xml" },
+  { source: "JPCERT/CC", url: "https://www.jpcert.or.jp/english/rss/jpcert-en.rdf" },
   { source: "The Hacker News", url: "https://feeds.feedburner.com/TheHackersNews" },
   { source: "BleepingComputer", url: "https://www.bleepingcomputer.com/feed/" },
   { source: "Krebs on Security", url: "https://krebsonsecurity.com/feed/" },
@@ -77,6 +100,8 @@ const FEEDS = [
   { source: "Kaspersky Securelist", url: "https://securelist.com/feed/" },
   { source: "Elastic Security Labs", url: "https://www.elastic.co/security-labs/rss/feed.xml" },
   { source: "FortiGuard Labs", url: "https://feeds.fortinet.com/fortinet/blog/threat-research" },
+  { source: "AWS Security Bulletins", url: "https://aws.amazon.com/security/security-bulletins/rss/feed/" },
+  { source: "Palo Alto Security Advisories", url: "https://security.paloaltonetworks.com/rss.xml" },
 ];
 
 /**
