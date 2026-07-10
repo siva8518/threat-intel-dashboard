@@ -1,4 +1,12 @@
-const DEFAULT_TIMEOUT_MS = 12_000;
+// Confirmed live: on Render's free tier, an idle instance spinning back up
+// (cold start) can take up to ~50s -- a 12s timeout here meant every first
+// page load after the free instance went to sleep hard-failed with a raw
+// "Dashboard API timed out after 12000ms" error, even though the backend
+// was genuinely still booting, not actually broken. 60s comfortably covers
+// that without meaningfully changing the experience on an always-warm
+// backend (local dev, or Render's paid tier), where responses are fast
+// regardless of the ceiling.
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 export class ApiError extends Error {
   constructor(
