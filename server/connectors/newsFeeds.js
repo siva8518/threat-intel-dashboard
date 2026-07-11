@@ -247,14 +247,23 @@ const ITEMS_PER_SOURCE = 40;
 
 // Not every publisher's timestamp format is one `new Date()` can parse --
 // confirmed live that CERT-EU's "13:55:39 CEST"-style timezone abbreviation
-// (as opposed to a numeric offset or GMT/UTC) produces an Invalid Date,
-// which then threw inside .toISOString() and took CERT-EU's entire fetch
-// down as "failed" every cycle. Falling back to "now" for an unparseable
-// date loses that one item's real recency, but that's strictly better than
-// losing the whole source.
+// (as opposed to a numeric offset or GMT/UTC, which Date does understand) is
+// unrecognized and produces an Invalid Date. An earlier version of this
+// function fell back to "now" for any unparseable date -- which stopped the
+// crash, but silently stamped CERT-EU's entire archive (advisories spanning
+// January through June 2026) as published this exact second, making months-
+// old items masquerade as breaking news in the "Breaking · Last 6 hours"
+// panel (caught live: a user noticed 2026-001 through 2026-008 all showing
+// as "just now"). Normalizing the known European abbreviations to a numeric
+// offset first means these parse correctly instead of needing the fallback
+// at all; "now" is now only reached for a genuinely unrecognized format.
+const TIMEZONE_OFFSETS = { CEST: "+0200", CET: "+0100", EEST: "+0300", EET: "+0200", BST: "+0100" };
+
 function parseDate(pubDate) {
   if (!pubDate) return new Date();
-  const parsed = new Date(pubDate);
+  const abbrMatch = pubDate.match(/ ([A-Z]{2,4})$/);
+  const normalized = abbrMatch && TIMEZONE_OFFSETS[abbrMatch[1]] ? pubDate.slice(0, -abbrMatch[1].length) + TIMEZONE_OFFSETS[abbrMatch[1]] : pubDate;
+  const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
