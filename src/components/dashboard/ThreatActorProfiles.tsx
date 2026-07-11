@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,11 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useThreatActorList, useThreatActorProfile, useThreatActorSearch } from "@/hooks/useThreatActorProfiles";
 import type { ThreatActorSummary } from "@/types/threat-intel";
 
+interface ThreatActorProfilesProps {
+  /** Pre-fills the search box -- set from the platform search palette (see CommandPalette.tsx) when the user picks an actor result. */
+  initialQuery?: string | null;
+}
+
 /**
  * Threat Actor Profile tab: MITRE ATT&CK Groups as the primary source
  * (name/aliases/description/country/motivation/industries/active-since/
@@ -16,10 +21,14 @@ import type { ThreatActorSummary } from "@/types/threat-intel";
  * threat feed (ThreatFox/MalwareBazaar/etc.), ransomware.live, security
  * news, and live NVD keyword search -- see server/actorProfile.js.
  */
-export function ThreatActorProfiles() {
-  const [query, setQuery] = useState("");
+export function ThreatActorProfiles({ initialQuery }: ThreatActorProfilesProps = {}) {
+  const [query, setQuery] = useState(initialQuery ?? "");
   const [selected, setSelected] = useState<ThreatActorSummary | null>(null);
   const debouncedQuery = useDebouncedValue(query, 400);
+
+  useEffect(() => {
+    if (initialQuery) setQuery(initialQuery);
+  }, [initialQuery]);
 
   const list = useThreatActorList();
   const search = useThreatActorSearch(debouncedQuery);

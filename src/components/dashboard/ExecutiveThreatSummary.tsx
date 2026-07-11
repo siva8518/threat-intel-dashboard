@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "./ErrorState";
 import { TopSecurityEventsToday, type TodayEventsTargetTab } from "./TopSecurityEventsToday";
-import { DailySummary, type DailySummaryTargetTab } from "./DailySummary";
 import { useExecutiveSummary } from "@/hooks/useExecutiveSummary";
 import { useSelection } from "@/context/SelectionContext";
 import { fetchCveById } from "@/api/dashboardApi";
@@ -41,12 +40,12 @@ function useCountUp(value: number) {
 function ScoreGauge({ score, level }: { score: number; level: ThreatLevel }) {
   const animatedScore = useCountUp(score);
   const style = LEVEL_STYLE[level];
-  const radius = 54;
+  const radius = 50;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - animatedScore / 100);
 
   return (
-    <div className={cn("relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full", style.glow)}>
+    <div className={cn("relative flex h-28 w-28 shrink-0 items-center justify-center rounded-full", style.glow)}>
       <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
         <circle cx="60" cy="60" r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="10" />
         <circle
@@ -63,8 +62,8 @@ function ScoreGauge({ score, level }: { score: number; level: ThreatLevel }) {
         />
       </svg>
       <div className="absolute flex flex-col items-center">
-        <span className="text-4xl font-bold tabular-nums">{Math.round(animatedScore)}</span>
-        <span className="text-[11px] uppercase tracking-wider text-muted">/ 100</span>
+        <span className="text-3xl font-bold tabular-nums">{Math.round(animatedScore)}</span>
+        <span className="text-[10px] uppercase tracking-wider text-muted">/ 100</span>
       </div>
     </div>
   );
@@ -75,10 +74,11 @@ interface FactCardProps {
   label: string;
   onClick?: () => void;
   loading?: boolean;
+  title?: string;
   children: React.ReactNode;
 }
 
-function FactCard({ icon, label, onClick, loading, children }: FactCardProps) {
+function FactCard({ icon, label, onClick, loading, title, children }: FactCardProps) {
   // A plain div, not a <button> -- "Industries Targeted"/"Countries Under
   // Attack" nest their own per-item <button>s inside this (see below), and
   // a <button> can't validly contain another <button>. Confirmed live: with
@@ -92,6 +92,7 @@ function FactCard({ icon, label, onClick, loading, children }: FactCardProps) {
       role={onClick ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
       onClick={clickable ? onClick : undefined}
+      title={title}
       onKeyDown={
         clickable
           ? (e) => {
@@ -103,7 +104,7 @@ function FactCard({ icon, label, onClick, loading, children }: FactCardProps) {
           : undefined
       }
       className={cn(
-        "flex w-full flex-col gap-1.5 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5 text-left transition-all duration-200",
+        "flex w-full flex-col gap-1 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-left transition-all duration-200",
         clickable && "cursor-pointer hover:-translate-y-0.5 hover:border-primary/30 hover:bg-white/[0.05]",
       )}
     >
@@ -121,8 +122,6 @@ interface ExecutiveThreatSummaryProps {
   onNavigateToCountry: (countryCode: string) => void;
   onNavigateToIndustry: (industry: string) => void;
   onNavigateTodayEvent: (tab: TodayEventsTargetTab) => void;
-  onNavigateSummaryTab: (tab: DailySummaryTargetTab) => void;
-  onNavigateNewsSource: (source: string) => void;
 }
 
 export function ExecutiveThreatSummary({
@@ -130,8 +129,6 @@ export function ExecutiveThreatSummary({
   onNavigateToCountry,
   onNavigateToIndustry,
   onNavigateTodayEvent,
-  onNavigateSummaryTab,
-  onNavigateNewsSource,
 }: ExecutiveThreatSummaryProps) {
   const { data, isLoading, isError, error } = useExecutiveSummary();
   const { selectMalware, selectCve } = useSelection();
@@ -153,9 +150,9 @@ export function ExecutiveThreatSummary({
   if (isLoading) {
     return (
       <Card>
-        <CardContent className="flex flex-col items-center gap-6 p-8 md:flex-row">
-          <Skeleton className="h-36 w-36 shrink-0 rounded-full" />
-          <div className="grid w-full flex-1 grid-cols-2 gap-3 md:grid-cols-3">
+        <CardContent className="flex flex-col items-center gap-5 p-5 md:flex-row">
+          <Skeleton className="h-28 w-28 shrink-0 rounded-full" />
+          <div className="grid w-full flex-1 grid-cols-2 gap-2.5 md:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-16 w-full" />
             ))}
@@ -180,9 +177,9 @@ export function ExecutiveThreatSummary({
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <Card className="overflow-visible">
-        <CardContent className="p-6">
-          <div className="flex flex-col items-center gap-6 lg:flex-row lg:items-start">
-            <div className="flex flex-col items-center gap-2">
+        <CardContent className="p-5">
+          <div className="flex flex-col items-center gap-5 lg:flex-row lg:items-start">
+            <div className="flex flex-col items-center gap-1.5">
               <ScoreGauge score={data.score} level={data.level} />
               <Badge variant={style.badge} className="text-sm">
                 {data.level} Threat Level
@@ -192,7 +189,7 @@ export function ExecutiveThreatSummary({
               </span>
             </div>
 
-            <div className="grid w-full flex-1 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid w-full flex-1 grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
               <FactCard icon={<Skull className="h-3.5 w-3.5" />} label="Most Active Threat Actor" onClick={onNavigateToActors}>
                 {data.mostActiveActor ? (
                   <>
@@ -235,8 +232,17 @@ export function ExecutiveThreatSummary({
                 )}
               </FactCard>
 
-              <FactCard icon={<Flame className="h-3.5 w-3.5" />} label="Total Active Campaigns">
+              <FactCard
+                icon={<Flame className="h-3.5 w-3.5" />}
+                label="Total Active Campaigns"
+                onClick={onNavigateToActors}
+                title="Ransomware victim disclosures (ransomware.live, RansomWatch & RansomLook) + named MITRE ATT&CK threat-actor campaigns + OTX adversary-tagged pulses -- click to view ransomware activity"
+              >
                 <AnimatedCount value={data.totalActiveCampaigns} />
+                <div className="mt-0.5 text-xs font-normal text-muted">
+                  {data.campaignsBreakdown.ransomware} ransomware · {data.campaignsBreakdown.attackCampaigns} ATT&amp;CK campaigns ·{" "}
+                  {data.campaignsBreakdown.otxPulses} OTX pulses
+                </div>
               </FactCard>
 
               <FactCard icon={<TrendingUp className="h-3.5 w-3.5" />} label="Industries Targeted">
@@ -276,15 +282,11 @@ export function ExecutiveThreatSummary({
             </div>
           </div>
 
-          <div className="mt-5 border-t border-white/[0.06] pt-5">
+          <div className="mt-4 border-t border-white/[0.06] pt-4">
             <TopSecurityEventsToday onNavigate={onNavigateTodayEvent} />
           </div>
 
-          <div className="mt-5 border-t border-white/[0.06] pt-5">
-            <DailySummary onNavigateTab={onNavigateSummaryTab} onNavigateNewsSource={onNavigateNewsSource} />
-          </div>
-
-          <details className="mt-5 border-t border-white/[0.06] pt-3 text-xs text-muted">
+          <details className="mt-4 border-t border-white/[0.06] pt-3 text-xs text-muted">
             <summary className="flex w-fit cursor-pointer items-center gap-1.5 select-none hover:text-foreground">
               <AlertTriangle className="h-3.5 w-3.5" />
               How is this score calculated?

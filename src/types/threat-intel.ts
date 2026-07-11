@@ -1,5 +1,13 @@
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
 
+/** CVEs published in the last 30 days, bucketed by CVSS v3 severity -- see server/connectors/nvd.js. */
+export interface CveSeverityDistribution {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+
 export interface CveRecord {
   id: string;
   severity: Severity;
@@ -67,11 +75,32 @@ export interface AttackTechnique {
   observedCount?: number;
 }
 
+export interface AttackTacticHeatmapTechnique {
+  id: string;
+  name: string;
+  url: string;
+  count: number;
+}
+
+export interface AttackTacticHeatmapCell {
+  tactic: string;
+  total: number;
+  intensity: number; // 0-1, relative to the hottest tactic
+  techniques: AttackTacticHeatmapTechnique[];
+}
+
+export interface DetectionRuleRef {
+  label: "YARA-Rules" | "SigmaHQ";
+  path: string;
+  url: string;
+}
+
 export interface TrendingMalwareEntry {
   family: string;
   count: number;
   sources: string[];
   techniques: AttackTechnique[];
+  detectionRules: DetectionRuleRef[];
 }
 
 export interface RansomwareCampaign {
@@ -97,6 +126,12 @@ export interface GeoTargetingCountry {
   numericId: string; // ISO 3166-1 numeric, matches the world-atlas topojson id
   count: number;
   topActors: Array<{ name: string; count: number }>;
+}
+
+/** Full (unsliced) country list -- see server/correlate.js#computeGeoTargeting. */
+export interface GeoTargeting {
+  countries: GeoTargetingCountry[];
+  sampleSize: number;
 }
 
 export interface ThreatActorSummary {
@@ -291,12 +326,18 @@ export interface GithubIntelStats {
   topCves: Array<{ cveId: string; repoCount: number }>;
 }
 
+export interface SourceReliability {
+  score: number | null; // 0-100, null until at least 2 days of history exist
+  trackedDays: number;
+}
+
 export interface SourceHealth {
   key: string;
   label: string;
   online: boolean;
   lastSynchronized: number | null; // epoch ms
   error?: string;
+  reliability: SourceReliability | null; // null for lookup-only sources, which have no real uptime signal
 }
 
 export interface MalwareProfile {
@@ -343,6 +384,19 @@ export interface IndustryTarget {
   count: number;
 }
 
+export interface CampaignsBreakdown {
+  ransomware: number;
+  attackCampaigns: number;
+  otxPulses: number;
+}
+
+/** One rolling daily snapshot of the score -- see server/threatScoreHistory.js. */
+export interface ThreatScoreSnapshot {
+  date: string; // YYYY-MM-DD
+  score: number;
+  totalActiveCampaigns: number;
+}
+
 export interface ExecutiveSummary {
   score: number; // 0-100
   level: ThreatLevel;
@@ -353,7 +407,11 @@ export interface ExecutiveSummary {
   mostExploitedCve: MostExploitedCve | null;
   industriesTargeted: IndustryTarget[];
   countriesUnderAttack: GeoTargetingCountry[];
+  /** Ransomware victim disclosures + MITRE ATT&CK named campaigns + OTX adversary-tagged pulses -- see campaignsBreakdown for the per-source split. */
   totalActiveCampaigns: number;
+  campaignsBreakdown: CampaignsBreakdown;
+  /** Oldest-first rolling daily history, one snapshot per calendar day (up to 30 days). */
+  scoreHistory: ThreatScoreSnapshot[];
 }
 
 export interface CveProfile {
@@ -365,6 +423,7 @@ export interface CveProfile {
   relatedIocs: IocRecord[];
   githubPocs: CveProfileGithubPoc[];
   relatedNews: NewsItem[];
+  exploits: CveProfileExploit[];
 }
 
 export interface CorrelationCard {
@@ -378,6 +437,20 @@ export interface CorrelationCard {
   entityTypeCount: number;
   recordCount: number;
   totalIocCount: number;
+}
+
+export type ThreatTimelineEventType = "kev" | "ransomware" | "malware" | "github" | "news";
+
+export interface ThreatTimelineEvent {
+  id: string;
+  type: ThreatTimelineEventType;
+  date: string; // ISO string
+  title: string;
+  detail: string | null;
+  url: string | null;
+  severity: "critical" | "high" | "medium" | "low";
+  cveId: string | null;
+  malwareFamily: string | null;
 }
 
 export interface TodaySecurityEvents {
@@ -406,22 +479,76 @@ export interface DailySummary {
   generatedAt: string;
 }
 
-export type ActorTrend = "up" | "down" | "steady";
-
-export interface TopThreatActor {
-  rank: number;
-  name: string;
-  score: number;
-  trend: ActorTrend;
+export interface ExploitEntry {
+  exploitId: string;
+  title: string;
+  url: string;
+  type: string;
+  platform: string;
+  datePublished: string | null;
+  verified: boolean;
+  cveIds: string[];
 }
 
-export interface TopExploitedCve {
-  cveId: string;
+export interface ExploitIntelligence {
+  totalCount: number;
+  recentEntries: ExploitEntry[];
+}
+
+export interface CveProfileExploit {
+  exploitId: string;
+  title: string;
+  url: string;
+  verified: boolean;
+  datePublished: string | null;
+  platform: string;
+}
+
+export interface VulnCheckExploitReference {
+  id: string;
+  url: string;
+  type: string;
+}
+
+export interface VulnCheckKevEntry {
+  cveIds: string[];
   vendorProject: string;
   product: string;
   vulnerabilityName: string;
-  dateAdded: string;
-  sourceUrl: string;
+  dateAdded: string | null;
+  dueDate: string | null;
+  requiredAction: string | null;
   ransomwareUse: boolean;
-  actors: string[];
+  exploitReferences: VulnCheckExploitReference[];
+}
+
+export interface VulnCheckKevCatalog {
+  count: number;
+  entries: VulnCheckKevEntry[];
+  notConfigured?: boolean;
+}
+
+/** Local RAG chatbot -- see server/rag/. Runs entirely against a local Ollama install, no paid API. */
+export interface ChatHealth {
+  ollamaAvailable: boolean;
+  missingModels: string[];
+  indexedChunks: number;
+  chatModel: string;
+  embedModel: string;
+}
+
+export type ChatRole = "user" | "assistant";
+
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
+
+/** One piece of platform intelligence the answer was actually grounded in -- see server/rag/ragChat.js. */
+export interface ChatSource {
+  id: string;
+  type: "cve" | "kev" | "ransomware" | "actor" | "technique" | "malware" | "news";
+  label: string;
+  url: string | null;
+  score: number;
 }

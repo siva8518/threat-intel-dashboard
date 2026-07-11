@@ -70,11 +70,44 @@ function resolveTechnique(id, attackIndex) {
 }
 
 /**
+ * Cross-references a name (malware family or threat actor) against the
+ * YARA-Rules/SigmaHQ filename-word index (server/connectors/detectionRules.js)
+ * via case-insensitive substring match -- same matching philosophy as
+ * techniqueIdsForFamily above. Filenames in both repos are consistently
+ * organized by what they detect, so this is a reasonable "does a public
+ * detection rule likely exist for this?" signal, not a guarantee.
+ */
+// Below this length, a substring match is too likely to be a coincidence
+// (e.g. the generic rule-filename word "fake" matching inside the malware
+// family name "ClearFake") -- only exact-length-or-longer words are trusted
+// for substring matching; shorter ones must match exactly.
+const MIN_FUZZY_WORD_LENGTH = 6;
+
+export function detectionRulesFor(name, ruleIndex) {
+  if (!name || !ruleIndex?.length) return [];
+  const lower = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (lower.length < 3) return [];
+
+  const seen = new Set();
+  const matches = [];
+  for (const row of ruleIndex) {
+    const isMatch = row.word === lower || (row.word.length >= MIN_FUZZY_WORD_LENGTH && (lower.includes(row.word) || row.word.includes(lower)));
+    if (!isMatch) continue;
+    const key = `${row.label}:${row.path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    matches.push({ label: row.label, path: row.path, url: row.url });
+    if (matches.length >= 5) break;
+  }
+  return matches;
+}
+
+/**
  * Aggregates IOC malware-family frequency into a "trending malware" list.
  * Each entry gets whatever ATT&CK techniques the curated map associates with
  * it, so this doubles as the raw material for computeAttackTechniques below.
  */
-export function computeTrendingMalware(iocs, attackIndex) {
+export function computeTrendingMalware(iocs, attackIndex, ruleIndex = []) {
   const counts = new Map();
   for (const ioc of iocs) {
     if (!ioc.malwareFamily || ioc.malwareFamily === "Unknown" || ioc.malwareFamily === "N/A") continue;
@@ -95,6 +128,7 @@ export function computeTrendingMalware(iocs, attackIndex) {
       count: entry.count,
       sources: Array.from(entry.sources),
       techniques: techniqueIdsForFamily(entry.family).map((id) => resolveTechnique(id, attackIndex)),
+      detectionRules: detectionRulesFor(entry.family, ruleIndex),
     }));
 }
 
@@ -111,6 +145,56 @@ export function computeAttackTechniquesObserved(iocs, attackIndex) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, ATTACK_TECHNIQUES_LIMIT)
     .map(([id, count]) => ({ ...resolveTechnique(id, attackIndex), observedCount: count }));
+}
+
+// The current MITRE ATT&CK Enterprise tactics, in kill-chain order -- spelled
+// exactly as `attack.js`'s connector produces them (STIX kill_chain_phases[0]
+// .phase_name with hyphens replaced by spaces). Confirmed live against the
+// real bundle rather than assumed: the classic 14-tactic list (with a single
+// "Defense Evasion" tactic) is stale -- the live Enterprise matrix has split
+// that into two separate tactics, "Defense Impairment" and "Stealth" (e.g.
+// T1055 Process Injection and T1027 Obfuscated Files or Information both
+// carry "stealth", not "defense-evasion", as of this bundle), making this a
+// 15-tactic list now.
+const ATTACK_TACTICS_ORDER = [
+  "reconnaissance", "resource development", "initial access", "execution", "persistence",
+  "privilege escalation", "defense impairment", "stealth", "credential access", "discovery",
+  "lateral movement", "collection", "command and control", "exfiltration", "impact",
+];
+const TOP_TECHNIQUES_PER_TACTIC = 5;
+
+/**
+ * ATT&CK Tactic Heat Map: same underlying technique-frequency data as
+ * computeAttackTechniquesObserved above, but grouped and summed by tactic
+ * (kill-chain stage) instead of truncated to the top 15 individual
+ * techniques -- a proper heat map needs every tactic represented, including
+ * the "cold" ones with zero hits, not just whichever techniques happen to
+ * rank highest overall.
+ */
+export function computeAttackTacticHeatmap(iocs, attackIndex) {
+  const techniqueCounts = new Map(); // techniqueId -> count
+  for (const ioc of iocs) {
+    for (const id of techniqueIdsForFamily(ioc.malwareFamily)) {
+      techniqueCounts.set(id, (techniqueCounts.get(id) ?? 0) + 1);
+    }
+  }
+
+  const byTactic = new Map(); // tactic -> [{id, name, url, count}]
+  for (const [id, count] of techniqueCounts) {
+    const technique = resolveTechnique(id, attackIndex);
+    const list = byTactic.get(technique.tactic) ?? [];
+    list.push({ id: technique.id, name: technique.name, url: technique.url, count });
+    byTactic.set(technique.tactic, list);
+  }
+
+  const tactics = ATTACK_TACTICS_ORDER.map((tactic) => {
+    const techniques = (byTactic.get(tactic) ?? []).sort((a, b) => b.count - a.count);
+    const total = techniques.reduce((sum, t) => sum + t.count, 0);
+    return { tactic, total, techniques: techniques.slice(0, TOP_TECHNIQUES_PER_TACTIC) };
+  });
+
+  const maxTotal = Math.max(1, ...tactics.map((t) => t.total));
+  return tactics.map((t) => ({ ...t, intensity: t.total / maxTotal }));
 }
 
 /**

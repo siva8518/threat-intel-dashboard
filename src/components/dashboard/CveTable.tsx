@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,14 +19,26 @@ const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 400;
 type SortKey = "cvssScore" | "publishedDate";
 
-export function CveTable() {
-  const [severity, setSeverity] = useState<Severity | "ALL">("ALL");
+interface CveTableProps {
+  /** Pre-selects the severity filter -- set from the CVE Severity Distribution widget (see CveSeverityDistribution.tsx) when the user clicks a segment. */
+  initialSeverity?: Severity | null;
+}
+
+export function CveTable({ initialSeverity }: CveTableProps = {}) {
+  const [severity, setSeverity] = useState<Severity | "ALL">(initialSeverity ?? "ALL");
   const [keyword, setKeyword] = useState("");
   const debouncedKeyword = useDebouncedValue(keyword, SEARCH_DEBOUNCE_MS);
   const [page, setPage] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const { selectCve } = useSelection();
+
+  useEffect(() => {
+    if (initialSeverity) {
+      setSeverity(initialSeverity);
+      setPage(0);
+    }
+  }, [initialSeverity]);
 
   const cves = useCves({
     severity: severity === "ALL" ? undefined : severity,

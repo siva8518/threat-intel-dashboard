@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { connectors } from "./connectors/index.js";
 import { startScheduler } from "./scheduler.js";
 import { router as dashboardRouter } from "./routes/dashboard.js";
+import { router as chatRouter } from "./routes/chat.js";
+import { startRagIndexer } from "./rag/indexer.js";
 import { log } from "./lib/log.js";
 
 const app = express();
@@ -31,6 +33,7 @@ const PORT = process.env.PORT || 8080;
 // "/dashboard/cves", ..., and "/ioc-search", which land at
 // /api/dashboard/summary, /api/dashboard/cves, ..., /api/ioc-search.
 app.use("/api", dashboardRouter);
+app.use("/api", chatRouter);
 
 // In production this also serves the built frontend; in dev, Vite serves the
 // frontend itself and only proxies /api/* here (see vite.config.ts).
@@ -42,6 +45,7 @@ app.get("*", (_req, res) => {
 });
 
 startScheduler(connectors);
+startRagIndexer();
 
 app.listen(PORT, () => {
   log.info("server", `Threat Intel Dashboard backend listening on port ${PORT}`);

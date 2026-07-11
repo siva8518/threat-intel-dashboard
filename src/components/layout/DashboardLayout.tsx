@@ -8,10 +8,12 @@ interface DashboardLayoutProps {
   tabs: readonly TabItem[];
   activeTab: string;
   onTabChange: (id: string) => void;
+  /** Called when the platform search palette's user picks a threat-actor result -- see CommandPalette.tsx. */
+  onSelectActor: (name: string) => void;
   children: ReactNode;
 }
 
-export function DashboardLayout({ tabs, activeTab, onTabChange, children }: DashboardLayoutProps) {
+export function DashboardLayout({ tabs, activeTab, onTabChange, onSelectActor, children }: DashboardLayoutProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
@@ -48,7 +50,7 @@ export function DashboardLayout({ tabs, activeTab, onTabChange, children }: Dash
           {children}
         </motion.div>
       </main>
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} tabs={tabs} onNavigate={onTabChange} />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} tabs={tabs} onNavigate={onTabChange} onSelectActor={onSelectActor} />
     </div>
   );
 }

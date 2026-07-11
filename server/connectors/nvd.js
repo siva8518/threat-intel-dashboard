@@ -129,13 +129,16 @@ export default {
     const yesterday = new Date(now);
     yesterday.setUTCHours(yesterday.getUTCHours() - 24);
 
-    const [latestCves, criticalCount30d, newCount24h, trend] = [
+    const [latestCves, criticalCount30d, highCount30d, mediumCount30d, lowCount30d, newCount24h, trend] = [
       await fetchLatestCves({ pubStartDate: start, pubEndDate: now, pageSize: 100 }),
       await countCves({ pubStartDate: start, pubEndDate: now, cvssV3Severity: "CRITICAL" }),
+      await countCves({ pubStartDate: start, pubEndDate: now, cvssV3Severity: "HIGH" }),
+      await countCves({ pubStartDate: start, pubEndDate: now, cvssV3Severity: "MEDIUM" }),
+      await countCves({ pubStartDate: start, pubEndDate: now, cvssV3Severity: "LOW" }),
       await countCves({ pubStartDate: yesterday, pubEndDate: now }),
       await fetchTrend(start, now),
     ];
 
-    return { latestCves, criticalCount30d, newCount24h, trend };
+    return { latestCves, criticalCount30d, highCount30d, mediumCount30d, lowCount30d, newCount24h, trend };
   },
 };

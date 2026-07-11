@@ -1,8 +1,9 @@
 import { Router } from "express";
+import { ApiError } from "../lib/http.js";
 import * as cache from "../cache.js";
 import { connectors } from "../connectors/index.js";
 import { fetchLatestCves, queryCves } from "../connectors/nvd.js";
-import { correlateCves, computeTrendingMalware, computeAttackTechniquesObserved, mergeThreatActors, computeActorIndustryHeatmap, computeGeoTargeting, industryForSector } from "../correlate.js";
+import { correlateCves, computeTrendingMalware, computeAttackTechniquesObserved, computeAttackTacticHeatmap, mergeThreatActors, computeActorIndustryHeatmap, computeGeoTargeting, industryForSector } from "../correlate.js";
 import { threatFeedIocs } from "../threatFeed.js";
 import { ransomwareCampaigns as getRansomwareCampaigns } from "../ransomwareCampaigns.js";
 import { checkIndicator as checkOtx } from "../connectors/otx.js";
@@ -13,6 +14,12 @@ import { checkIndicator as checkGreyNoise } from "../lookups/greynoise.js";
 import { checkIndicator as checkShodan } from "../lookups/shodan.js";
 import { checkIndicator as checkHybridAnalysis } from "../lookups/hybridAnalysis.js";
 import { checkIndicator as checkLeakix } from "../lookups/leakix.js";
+import { checkIndicator as checkCrtsh } from "../lookups/crtsh.js";
+import { checkIndicator as checkRipestat } from "../lookups/ripestat.js";
+import { checkIndicator as checkTeamCymru } from "../lookups/teamCymru.js";
+import { checkIndicator as checkHudsonRock } from "../lookups/hudsonRock.js";
+import { lookupCve as lookupCveCircl } from "../lookups/circl.js";
+import { matchWarninglists } from "../connectors/mispWarninglists.js";
 import { throttleAndCache } from "../lib/lookupLimiter.js";
 import { listThreatActors, searchThreatActors, buildThreatActorProfile } from "../actorProfile.js";
 import { getAllGithubRepos, computeTopCves } from "../githubIntel/index.js";
@@ -23,8 +30,10 @@ import { buildCorrelationClusters } from "../correlationEngine.js";
 import { getTaggedNewsItems } from "../newsCorrelation.js";
 import { buildTodaySecurityEvents } from "../todaySecurityEvents.js";
 import { buildDailySummary } from "../dailySummary.js";
-import { buildTopThreatActorsToday } from "../topThreatActorsToday.js";
-import { buildTopExploitedCvesToday } from "../topExploitedCvesToday.js";
+import { buildThreatTimeline } from "../threatTimeline.js";
+import { recordAndGetSourceHistory, computeReliability } from "../sourceReliabilityHistory.js";
+import { recordAndGetPriorSnapshot } from "../malwareTrendHistory.js";
+import { recordAndGetScoreHistory } from "../threatScoreHistory.js";
 
 export const router = Router();
 
@@ -61,14 +70,26 @@ router.get("/dashboard/executive-summary", (_req, res) => {
     kevEntries,
     threatFeedIocs: iocs,
     ransomwareCampaigns: campaigns,
-    trendingMalware: computeTrendingMalware(iocs, attackData?.techniques ?? []),
+    trendingMalware: computeTrendingMalware(iocs, attackData?.techniques ?? [], cache.getEntry("detection-rules").data?.index),
     githubTopCves: computeTopCves(getAllGithubRepos(), 10),
     industryHeatmap: computeActorIndustryHeatmap(campaigns, { country: null }),
     geoTargeting: computeGeoTargeting(campaigns),
     mergedActors: mergeThreatActors(campaigns, otxSignals),
+    attackCampaignsCount: attackData?.campaigns?.length ?? 0,
+    otxActorSignalsCount: otxSignals.length,
   });
 
-  res.json(summary);
+  const scoreHistory = recordAndGetScoreHistory(summary.score, summary.totalActiveCampaigns);
+  res.json({ ...summary, scoreHistory });
+});
+
+// --- Geographic Targeting (full country list, see server/correlate.js#computeGeoTargeting) ---
+// Executive Summary above only ever needed the top 5 (for the "Countries
+// Under Attack" chips), sliced inline there. The World Threat Map needs
+// every country with data, so this exposes computeGeoTargeting's full,
+// unsliced output as its own route rather than widening that inline slice.
+router.get("/dashboard/geo-targeting", (_req, res) => {
+  res.json(computeGeoTargeting(getRansomwareCampaigns()));
 });
 
 // --- Threat Correlation Engine (see server/correlationEngine.js) --------
@@ -122,6 +143,17 @@ router.get("/dashboard/cve-trend", (_req, res) => {
   res.json(nvd?.trend ?? []);
 });
 
+// --- CVE Severity Distribution (last 30 days, see server/connectors/nvd.js) ---
+router.get("/dashboard/cve-severity-distribution", (_req, res) => {
+  const nvd = cache.getEntry("nvd").data;
+  res.json({
+    critical: nvd?.criticalCount30d ?? 0,
+    high: nvd?.highCount30d ?? 0,
+    medium: nvd?.mediumCount30d ?? 0,
+    low: nvd?.lowCount30d ?? 0,
+  });
+});
+
 // Live single-CVE lookup by ID -- unlike /dashboard/cves (which is scoped to
 // the last 30 days even for keyword searches), this reaches any CVE
 // regardless of age via NVD's own cveId= query param. Same enrichment
@@ -132,12 +164,24 @@ router.get("/dashboard/cve/:cveId", async (req, res) => {
   try {
     const result = await queryCves({ cveId, resultsPerPage: 1 });
     const record = result.records[0];
-    if (!record) return res.status(404).json({ error: `CVE ${cveId} not found` });
+    if (record) {
+      const kevEntries = cache.getEntry("cisa-kev").data?.entries ?? [];
+      const epssScores = cache.getEntry("epss").data ?? {};
+      const [enriched] = correlateCves([record], kevEntries, epssScores);
+      return res.json(enriched);
+    }
 
-    const kevEntries = cache.getEntry("cisa-kev").data?.entries ?? [];
-    const epssScores = cache.getEntry("epss").data ?? {};
-    const [enriched] = correlateCves([record], kevEntries, epssScores);
-    res.json(enriched);
+    // NVD doesn't have this one (too new to be synced yet, or pruned) --
+    // fall back to CIRCL's own CVE Record mirror before giving up. See
+    // server/lookups/circl.js for why this is a fallback, not primary.
+    let fallback = null;
+    try {
+      fallback = await lookupCveCircl(cveId);
+    } catch (circlError) {
+      if (!(circlError instanceof ApiError) || circlError.status !== 404) throw circlError;
+    }
+    if (!fallback) return res.status(404).json({ error: `CVE ${cveId} not found` });
+    res.json(fallback);
   } catch (error) {
     res.status(502).json({ error: error.message });
   }
@@ -154,6 +198,7 @@ router.get("/dashboard/cve-profile/:cveId", (req, res) => {
     attackData: cache.getEntry("attack").data,
     newsItems: cache.getEntry("news").data?.items ?? [],
     githubRepos: getAllGithubRepos(),
+    exploitIndex: cache.getEntry("exploitdb").data?.cveIndex,
   });
   res.json(profile);
 });
@@ -181,6 +226,21 @@ router.get("/dashboard/kev", (_req, res) => {
   res.json(kev.data ?? { count: 0, entries: [] });
 });
 
+// VulnCheck's Community KEV -- a separate, larger exploited-CVE catalog than
+// CISA's own (see server/connectors/vulncheckKev.js). Optional: returns an
+// empty catalog (not an error) if VULNCHECK_API_KEY isn't set, same "quiet
+// not-configured" UX as the other optional bulk sources.
+router.get("/dashboard/vulncheck-kev", (_req, res) => {
+  const entry = cache.getEntry("vulncheck-kev");
+  res.json(entry.data ?? { count: 0, entries: [], notConfigured: Boolean(entry.error) });
+});
+
+// --- Exploit Intelligence (Exploit-DB, see server/connectors/exploitdb.js) ---
+router.get("/dashboard/exploits", (_req, res) => {
+  const entry = cache.getEntry("exploitdb").data;
+  res.json({ totalCount: entry?.totalCount ?? 0, recentEntries: entry?.recentEntries ?? [] });
+});
+
 // --- Threat feed (deduped across all IOC sources incl. OTX) -------------
 router.get("/dashboard/threat-feed", (_req, res) => {
   res.json({ iocs: threatFeedIocs().slice(0, 200) });
@@ -191,12 +251,39 @@ router.get("/dashboard/threat-feed", (_req, res) => {
 // for Threat Actor Profiles) -- these two routes only ever need the flat technique list.
 router.get("/dashboard/malware-trending", (_req, res) => {
   const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
-  res.json(computeTrendingMalware(threatFeedIocs(), attackIndex));
+  res.json(computeTrendingMalware(threatFeedIocs(), attackIndex, cache.getEntry("detection-rules").data?.index));
+});
+
+// Per-family day-over-day trend, generalizing the single top-family
+// comparison server/dailySummary.js already does (see
+// server/malwareTrendHistory.js) to every family, so "which malware
+// families are increasing" is answerable with a real prior-day baseline
+// instead of a raw current-count snapshot.
+router.get("/dashboard/malware-trending/deltas", (_req, res) => {
+  const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
+  const trending = computeTrendingMalware(threatFeedIocs(), attackIndex, cache.getEntry("detection-rules").data?.index);
+  const prior = recordAndGetPriorSnapshot(trending);
+
+  const deltas = trending
+    .map((m) => {
+      const priorCount = prior?.families?.[m.family] ?? null;
+      const pctChange = priorCount ? Math.round(((m.count - priorCount) / priorCount) * 100) : null;
+      return { family: m.family, count: m.count, priorCount, pctChange };
+    })
+    .sort((a, b) => (b.pctChange ?? -Infinity) - (a.pctChange ?? -Infinity));
+
+  res.json({ deltas, hasPriorDay: Boolean(prior) });
 });
 
 router.get("/dashboard/attack-techniques", (_req, res) => {
   const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
   res.json(computeAttackTechniquesObserved(threatFeedIocs(), attackIndex));
+});
+
+// --- ATT&CK Tactic Heat Map (see server/correlate.js#computeAttackTacticHeatmap) ---
+router.get("/dashboard/attack-tactic-heatmap", (_req, res) => {
+  const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
+  res.json(computeAttackTacticHeatmap(threatFeedIocs(), attackIndex));
 });
 
 // --- Ransomware campaigns + threat actor activity ------------------------
@@ -289,51 +376,43 @@ router.get("/dashboard/daily-summary", (_req, res) => {
   });
 
   const todayEvents = buildTodaySecurityEvents({ kevEntries, otxActorSignals, ransomwareCampaigns, threatFeedIocs: iocs, githubRepos, newsItems });
-  const trendingMalware = computeTrendingMalware(iocs, attackData?.techniques ?? []);
+  const trendingMalware = computeTrendingMalware(iocs, attackData?.techniques ?? [], cache.getEntry("detection-rules").data?.index);
 
   const summary = buildDailySummary({ todayEvents, ransomwareCampaigns, threatFeedIocs: iocs, newsItems, trendingMalware });
   res.json(summary);
 });
 
-// --- Top Threat Actors Today (same-calendar-day leaderboard, see server/topThreatActorsToday.js) ---
-router.get("/dashboard/top-threat-actors-today", (_req, res) => {
-  const attackData = cache.getEntry("attack").data;
-  const kevEntries = cache.getEntry("cisa-kev").data?.entries;
-  const ransomwareCampaigns = getRansomwareCampaigns();
-  const otxActorSignals = cache.getEntry("otx").data?.actorSignals;
-  const newsItems = getTaggedNewsItems({
-    newsItems: cache.getEntry("news").data?.items,
-    attackData,
-    ransomwareCampaigns,
-    threatFeedIocs: threatFeedIocs(),
-    kevEntries,
-    epssScores: cache.getEntry("epss").data,
-  });
+// Note: the standalone "Top Threat Actors Today" / "Top CVEs Exploited This
+// Week" routes, and the later Executive Dashboard AI route that also
+// surfaced them, were removed -- all three were narrow, often-empty or
+// AI-generated cuts. The frontend's Top Threat Actors / Top CVEs widgets use
+// broader, reliably-populated data instead (see
+// server/routes/dashboard.js#/dashboard/threat-actors and
+// #/dashboard/github-intel/stats).
 
-  const actors = buildTopThreatActorsToday({ ransomwareCampaigns, otxActorSignals, newsItems, attackData });
-  res.json({ actors });
-});
-
-// --- Top CVEs Exploited by Threat Actors Today (see server/topExploitedCvesToday.js) ---
-// vulncheck-kev is read defensively (cache.getEntry returns a safe empty
-// entry for a sourceId with no registered connector) so this route works
-// the same whether or not that optional connector is wired in.
-router.get("/dashboard/top-exploited-cves-today", (_req, res) => {
+// --- Interactive Threat Timeline (see server/threatTimeline.js) ---
+router.get("/dashboard/threat-timeline", (req, res) => {
+  const days = Math.min(30, Math.max(1, Number(req.query.days) || 7));
   const attackData = cache.getEntry("attack").data;
   const kevEntries = cache.getEntry("cisa-kev").data?.entries;
   const vulncheckKevEntries = cache.getEntry("vulncheck-kev").data?.entries;
   const ransomwareCampaigns = getRansomwareCampaigns();
+  const iocs = threatFeedIocs();
+  const githubRepos = getAllGithubRepos();
   const newsItems = getTaggedNewsItems({
     newsItems: cache.getEntry("news").data?.items,
     attackData,
     ransomwareCampaigns,
-    threatFeedIocs: threatFeedIocs(),
+    threatFeedIocs: iocs,
     kevEntries,
     epssScores: cache.getEntry("epss").data,
   });
 
-  const cves = buildTopExploitedCvesToday({ kevEntries, vulncheckKevEntries, attackData, newsItems });
-  res.json({ cves });
+  const events = buildThreatTimeline(
+    { kevEntries, vulncheckKevEntries, ransomwareCampaigns, threatFeedIocs: iocs, githubRepos, newsItems },
+    { days },
+  );
+  res.json({ events, days });
 });
 
 // --- GitHub Intel (repo discovery, classification, extraction, correlation, scoring) ---
@@ -444,10 +523,39 @@ function buildHealth() {
   return health;
 }
 
+// Source Reliability Score: only tracked for bulk connectors + per-feed news
+// sources, which have a genuine online/offline signal from live sync
+// attempts (see server/sourceReliabilityHistory.js). LOOKUP_ONLY_SOURCES'
+// "online" just means "a key is configured" -- there's no real uptime
+// signal to track there, so a reliability score for them would be
+// meaningless (always 100% the moment a key is set, 0% forever if not).
+const LOOKUP_ONLY_KEYS = new Set(LOOKUP_ONLY_SOURCES.map((s) => s.key));
+
 router.get("/dashboard/health", (_req, res) => {
   const health = buildHealth();
-  res.json({ sources: health, onlineCount: health.filter((h) => h.online).length, totalCount: health.length });
+
+  const onlineBySourceKey = Object.fromEntries(health.filter((h) => !LOOKUP_ONLY_KEYS.has(h.key)).map((h) => [h.key, h.online]));
+  const history = recordAndGetSourceHistory(onlineBySourceKey);
+
+  const withReliability = health.map((h) => ({
+    ...h,
+    reliability: LOOKUP_ONLY_KEYS.has(h.key) ? null : computeReliability(history, h.key),
+  }));
+
+  res.json({ sources: withReliability, onlineCount: health.filter((h) => h.online).length, totalCount: health.length });
 });
+
+// MISP Warning Lists: a synced-in-memory lookup (server/connectors/mispWarninglists.js),
+// not a network call, so it needs no throttling. Flags known-benign
+// infrastructure (CDNs, cloud IP ranges, top-N domains, dynamic-DNS, etc)
+// that other sources sometimes over-flag due to shared hosting -- "clean"
+// when matched, "unknown" (not "malicious"/"clean") when it isn't, since
+// absence from these specific lists says nothing either way.
+async function checkMispWarninglists(type, value) {
+  const data = cache.getEntry("misp-warninglists").data;
+  const matches = matchWarninglists(type, value, data);
+  return { source: "MISP Warning Lists", verdict: matches.size > 0 ? "clean" : "unknown", matchedLists: Array.from(matches) };
+}
 
 // --- IOC Search: live fan-out across OTX/AbuseIPDB/Pulsedive/VirusTotal/GreyNoise/Shodan/Hybrid Analysis/LeakIX ---
 // Every free-tier lookup is wrapped in throttleAndCache: a short (10 min)
@@ -463,15 +571,27 @@ const IOC_LOOKUPS = {
     throttleAndCache("GreyNoise", 2_000, checkGreyNoise),
     throttleAndCache("Shodan", 1_000, checkShodan),
     throttleAndCache("LeakIX", 5_000, checkLeakix),
+    throttleAndCache("RIPEstat", 1_000, checkRipestat),
+    throttleAndCache("Team Cymru", 1_000, checkTeamCymru),
+    checkMispWarninglists,
   ],
   domain: [
     checkOtx,
     throttleAndCache("Pulsedive", 3_000, checkPulsedive),
     throttleAndCache("VirusTotal", 15_000, checkVirusTotal),
     throttleAndCache("LeakIX", 5_000, checkLeakix),
+    throttleAndCache("crt.sh", 3_000, checkCrtsh),
+    throttleAndCache("Hudson Rock", 3_000, checkHudsonRock),
+    checkMispWarninglists,
   ],
-  url: [checkOtx, throttleAndCache("Pulsedive", 3_000, checkPulsedive), throttleAndCache("VirusTotal", 15_000, checkVirusTotal)],
-  hash: [checkOtx, throttleAndCache("VirusTotal", 15_000, checkVirusTotal), throttleAndCache("Hybrid Analysis", 5_000, checkHybridAnalysis)],
+  url: [checkOtx, throttleAndCache("Pulsedive", 3_000, checkPulsedive), throttleAndCache("VirusTotal", 15_000, checkVirusTotal), checkMispWarninglists],
+  hash: [
+    checkOtx,
+    throttleAndCache("VirusTotal", 15_000, checkVirusTotal),
+    throttleAndCache("Hybrid Analysis", 5_000, checkHybridAnalysis),
+    throttleAndCache("Team Cymru", 1_000, checkTeamCymru),
+    checkMispWarninglists,
+  ],
 };
 
 router.get("/ioc-search", async (req, res) => {

@@ -1,13 +1,15 @@
 import { useState } from "react";
-import { Bug, ExternalLink, Github, Link2, ShieldAlert, Skull, Swords, Target } from "lucide-react";
+import { Bug, ExternalLink, Github, LayoutGrid, Link2, Share2, ShieldAlert, Skull, Swords, Target } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
+import { CorrelationGraph } from "./CorrelationGraph";
 import { useCorrelationEngine } from "@/hooks/useCorrelationEngine";
 import { useSelection } from "@/context/SelectionContext";
 import { fetchCveById } from "@/api/dashboardApi";
 import type { CorrelationCard } from "@/types/threat-intel";
+import { cn } from "@/lib/utils";
 
 function CardChip({ children, onClick, loading }: { children: React.ReactNode; onClick?: () => void; loading?: boolean }) {
   return (
@@ -59,7 +61,7 @@ function IntelligenceCard({ card }: { card: CorrelationCard }) {
           </div>
           <div className="flex flex-wrap gap-1.5">
             {card.malware.map((m) => (
-              <CardChip key={m} onClick={() => selectMalware({ family: m, count: 0, sources: [], techniques: [] })}>
+              <CardChip key={m} onClick={() => selectMalware({ family: m, count: 0, sources: [], techniques: [], detectionRules: [] })}>
                 {m}
               </CardChip>
             ))}
@@ -189,8 +191,42 @@ function IntelligenceCard({ card }: { card: CorrelationCard }) {
   );
 }
 
+function GraphCard({ card }: { card: CorrelationCard }) {
+  const { selectMalware, selectCve } = useSelection();
+
+  async function openCve(cveId: string) {
+    try {
+      selectCve(await fetchCveById(cveId));
+    } catch {
+      // best-effort -- if the live NVD lookup fails, just don't open the drawer
+    }
+  }
+
+  return (
+    <Card className="p-4">
+      <div className="mb-1 flex flex-wrap gap-1">
+        {Array.from({ length: card.entityTypeCount }).map((_, i) => (
+          <span key={i} className="h-1.5 w-1.5 rounded-full bg-gradient-primary" />
+        ))}
+        <span className="ml-1 text-[11px] uppercase tracking-wider text-muted">
+          {card.entityTypeCount} linked signal{card.entityTypeCount === 1 ? "" : "s"} · {card.recordCount} record
+          {card.recordCount === 1 ? "" : "s"}
+        </span>
+      </div>
+      <CorrelationGraph
+        card={card}
+        onSelectMalware={(family) => selectMalware({ family, count: 0, sources: [], techniques: [], detectionRules: [] })}
+        onSelectCve={openCve}
+      />
+    </Card>
+  );
+}
+
+type ViewMode = "cards" | "graph";
+
 export function CorrelationEngine() {
   const { cards, isLoading, isError, error } = useCorrelationEngine();
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
 
   return (
     <Card>
@@ -203,11 +239,35 @@ export function CorrelationEngine() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="mb-4 text-sm text-muted">
-          Every card below links two or more of the following signals from live data: CVE, malware family, threat
-          actor, and IP/domain/URL/hash indicators. Click a malware family or CVE to open its full correlated
-          detail view.
+        <p className="mb-3 text-sm text-muted">
+          Every {viewMode === "cards" ? "card" : "graph"} below links two or more of the following signals from live
+          data: CVE, malware family, threat actor, and IP/domain/URL/hash indicators. Click a malware family or CVE
+          to open its full correlated detail view.
         </p>
+
+        <div className="mb-4 flex gap-1.5">
+          <button
+            onClick={() => setViewMode("cards")}
+            className={cn(
+              "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+              viewMode === "cards" ? "bg-gradient-primary text-white shadow-glow-primary" : "border border-white/10 bg-white/[0.03] text-muted hover:text-foreground",
+            )}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            Cards
+          </button>
+          <button
+            onClick={() => setViewMode("graph")}
+            className={cn(
+              "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+              viewMode === "graph" ? "bg-gradient-primary text-white shadow-glow-primary" : "border border-white/10 bg-white/[0.03] text-muted hover:text-foreground",
+            )}
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            Graph
+          </button>
+        </div>
+
         {isLoading ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -218,10 +278,16 @@ export function CorrelationEngine() {
           <ErrorState message={(error as Error)?.message ?? "The correlation engine is unavailable right now."} />
         ) : cards.length === 0 ? (
           <EmptyState message="No cross-source correlations found in the current live data." />
-        ) : (
+        ) : viewMode === "cards" ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {cards.map((card, i) => (
               <IntelligenceCard key={i} card={card} />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {cards.map((card, i) => (
+              <GraphCard key={i} card={card} />
             ))}
           </div>
         )}

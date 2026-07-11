@@ -1,12 +1,16 @@
 import { fetchJson } from "@/lib/http";
 import type {
+  AttackTacticHeatmapCell,
   AttackTechnique,
   CorrelationCard,
   CveProfile,
   CveProgramActivity,
   CveRecord,
+  CveSeverityDistribution,
   DailySummary,
   ExecutiveSummary,
+  ExploitIntelligence,
+  GeoTargeting,
   GithubIntelStats,
   GithubRepoDetail,
   GithubRepoSummary,
@@ -21,10 +25,10 @@ import type {
   ThreatActor,
   ThreatActorProfile,
   ThreatActorSummary,
+  ThreatTimelineEvent,
   TodaySecurityEvents,
-  TopExploitedCve,
-  TopThreatActor,
   TrendingMalwareEntry,
+  VulnCheckKevCatalog,
 } from "@/types/threat-intel";
 
 // Thin client over the backend aggregation service (server/routes/dashboard.js).
@@ -57,6 +61,10 @@ export async function fetchCveProgramActivity(): Promise<CveProgramActivity> {
   return fetchJson("/api/dashboard/cve-program-activity", { source: "Dashboard API" });
 }
 
+export async function fetchCveSeverityDistribution(): Promise<CveSeverityDistribution> {
+  return fetchJson("/api/dashboard/cve-severity-distribution", { source: "Dashboard API" });
+}
+
 export interface KevCatalog {
   count: number;
   dateReleased: string;
@@ -65,6 +73,14 @@ export interface KevCatalog {
 
 export async function fetchKev(): Promise<KevCatalog> {
   return fetchJson("/api/dashboard/kev", { source: "Dashboard API" });
+}
+
+export async function fetchVulnCheckKev(): Promise<VulnCheckKevCatalog> {
+  return fetchJson("/api/dashboard/vulncheck-kev", { source: "Dashboard API" });
+}
+
+export async function fetchExploits(): Promise<ExploitIntelligence> {
+  return fetchJson("/api/dashboard/exploits", { source: "Dashboard API" });
 }
 
 export async function fetchThreatFeed(): Promise<{ iocs: IocRecord[] }> {
@@ -77,6 +93,10 @@ export async function fetchTrendingMalware(): Promise<TrendingMalwareEntry[]> {
 
 export async function fetchAttackTechniques(): Promise<AttackTechnique[]> {
   return fetchJson("/api/dashboard/attack-techniques", { source: "Dashboard API" });
+}
+
+export async function fetchAttackTacticHeatmap(): Promise<AttackTacticHeatmapCell[]> {
+  return fetchJson("/api/dashboard/attack-tactic-heatmap", { source: "Dashboard API" });
 }
 
 export async function fetchRansomwareCampaigns(): Promise<{ campaigns: RansomwareCampaign[] }> {
@@ -108,6 +128,10 @@ export async function fetchExecutiveSummary(): Promise<ExecutiveSummary> {
   return fetchJson("/api/dashboard/executive-summary", { source: "Dashboard API" });
 }
 
+export async function fetchGeoTargeting(): Promise<GeoTargeting> {
+  return fetchJson("/api/dashboard/geo-targeting", { source: "Dashboard API" });
+}
+
 export async function fetchCorrelationEngine(): Promise<{ cards: CorrelationCard[] }> {
   return fetchJson("/api/dashboard/correlation-engine", { source: "Dashboard API" });
 }
@@ -120,12 +144,8 @@ export async function fetchDailySummary(): Promise<DailySummary> {
   return fetchJson("/api/dashboard/daily-summary", { source: "Dashboard API" });
 }
 
-export async function fetchTopThreatActorsToday(): Promise<{ actors: TopThreatActor[] }> {
-  return fetchJson("/api/dashboard/top-threat-actors-today", { source: "Dashboard API" });
-}
-
-export async function fetchTopExploitedCvesToday(): Promise<{ cves: TopExploitedCve[] }> {
-  return fetchJson("/api/dashboard/top-exploited-cves-today", { source: "Dashboard API" });
+export async function fetchThreatTimeline(days: number): Promise<{ events: ThreatTimelineEvent[]; days: number }> {
+  return fetchJson(`/api/dashboard/threat-timeline?days=${days}`, { source: "Dashboard API" });
 }
 
 export async function fetchCveById(cveId: string): Promise<CveRecord> {

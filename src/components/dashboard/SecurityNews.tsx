@@ -101,7 +101,7 @@ function TagChips({ item }: { item: NewsItem }) {
       {item.tags.malware.map((m) => (
         <button
           key={m}
-          onClick={() => selectMalware({ family: m, count: 0, sources: [], techniques: [] })}
+          onClick={() => selectMalware({ family: m, count: 0, sources: [], techniques: [], detectionRules: [] })}
           className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[11px] transition-colors hover:border-primary/40"
         >
           {m}

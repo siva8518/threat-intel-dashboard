@@ -99,6 +99,8 @@ export function buildExecutiveSummary(sources) {
     industryHeatmap,
     geoTargeting,
     mergedActors,
+    attackCampaignsCount = 0,
+    otxActorSignalsCount = 0,
   } = sources;
 
   const kevAdded7d = countKevAddedSince(kevEntries, 7);
@@ -135,6 +137,16 @@ export function buildExecutiveSummary(sources) {
     mostExploitedCve: computeMostExploitedCve(kevEntries, githubTopCves),
     industriesTargeted: industryHeatmap.industryTotals.filter((i) => i.count > 0).sort((a, b) => b.count - a.count).slice(0, 5),
     countriesUnderAttack: geoTargeting.countries.slice(0, 5),
-    totalActiveCampaigns: ransomwareCampaigns.length,
+    // Broadened beyond ransomware.live/RansomWatch/RansomLook victim posts
+    // to also count real named threat-actor campaigns: MITRE ATT&CK's own
+    // Campaigns objects (e.g. "APT28 Nearest Neighbor Campaign") and OTX
+    // pulses with adversary attribution -- so this isn't just "how many
+    // ransomware gangs posted a victim today."
+    totalActiveCampaigns: ransomwareCampaigns.length + attackCampaignsCount + otxActorSignalsCount,
+    campaignsBreakdown: {
+      ransomware: ransomwareCampaigns.length,
+      attackCampaigns: attackCampaignsCount,
+      otxPulses: otxActorSignalsCount,
+    },
   };
 }
