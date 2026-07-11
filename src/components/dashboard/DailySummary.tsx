@@ -2,6 +2,7 @@ import { Clock, ClipboardList } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "./ErrorState";
+import { BreakingNewsStrip, useBreakingNews } from "./BreakingNewsStrip";
 import { useDailySummary } from "@/hooks/useDailySummary";
 import { useSelection } from "@/context/SelectionContext";
 import type { DailySummaryBullet } from "@/types/threat-intel";
@@ -19,9 +20,10 @@ interface DailySummaryProps {
   onNavigateNewsSource: (source: string) => void;
 }
 
-/** Short rule-based rollup of today's activity -- see server/dailySummary.js. Its own standalone card, paired next to Executive Dashboard AI at the top of Overview. */
+/** Short rule-based rollup of today's activity (see server/dailySummary.js) fronted by a Breaking News strip (see BreakingNewsStrip.tsx) -- clubbed into one card so Overview shows both "what's urgent right now" and "what happened today" in a single glance, instead of burying breaking news on the Security News tab. */
 export function DailySummary({ onNavigateTab, onNavigateNewsSource }: DailySummaryProps) {
   const { data, isLoading, isError, error } = useDailySummary();
+  const breaking = useBreakingNews();
   const { selectMalware } = useSelection();
 
   function handleClick(bullet: DailySummaryBullet) {
@@ -48,6 +50,7 @@ export function DailySummary({ onNavigateTab, onNavigateNewsSource }: DailySumma
         </CardTitle>
       </CardHeader>
       <CardContent>
+        <BreakingNewsStrip items={breaking} />
         {isLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 5 }).map((_, i) => (

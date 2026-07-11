@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { ExternalLink, Flame, Globe2, ShieldAlert, Skull, TrendingUp, Bug } from "lucide-react";
+import { ExternalLink, Globe2, ShieldAlert, Skull, TrendingUp, Bug } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
+import { BreakingNewsStrip, SEVERITY_STYLE, useBreakingNews } from "./BreakingNewsStrip";
 import { useSecurityNews } from "@/hooks/useSecurityNews";
 import { useSelection } from "@/context/SelectionContext";
 import { fetchCveById } from "@/api/dashboardApi";
-import type { NewsItem, NewsSeverity } from "@/types/threat-intel";
+import type { NewsItem } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
 const DISPLAY_LIMIT = 60;
@@ -60,13 +60,6 @@ const MAJOR_VENDOR_SOURCES = new Set([
   "Datadog Security Labs",
 ]);
 const MAJOR_VENDORS_FILTER = "__major-vendors__";
-
-const SEVERITY_STYLE: Record<NewsSeverity, { variant: "critical" | "high" | "medium" | "low"; label: string }> = {
-  critical: { variant: "critical", label: "Critical" },
-  high: { variant: "high", label: "High" },
-  medium: { variant: "medium", label: "Medium" },
-  low: { variant: "low", label: "Low" },
-};
 
 function timeAgo(iso: string) {
   const ms = Date.now() - new Date(iso).getTime();
@@ -168,54 +161,6 @@ function ArticleRow({ item }: { item: NewsItem }) {
   );
 }
 
-function BreakingNewsStrip({ items }: { items: NewsItem[] }) {
-  if (items.length === 0) return null;
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="mb-4 overflow-hidden rounded-xl border border-critical/30 bg-critical/[0.06]"
-    >
-      <div className="flex items-center gap-2 border-b border-critical/20 px-4 py-2">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-critical opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-critical" />
-        </span>
-        <Flame className="h-3.5 w-3.5 text-critical" />
-        <span className="text-xs font-bold uppercase tracking-wider text-critical">Breaking · Last 6 Hours</span>
-      </div>
-      <ul className="divide-y divide-critical/10 px-4">
-        <AnimatePresence initial={false}>
-          {items.slice(0, 6).map((item) => (
-            <motion.li
-              key={item.id}
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0 }}
-              className="py-2"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <a
-                  href={item.link}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary hover:underline"
-                >
-                  <span className="truncate">{item.title}</span>
-                  <ExternalLink className="h-3 w-3 shrink-0" />
-                </a>
-                <Badge variant={SEVERITY_STYLE[item.severity].variant} className="shrink-0">
-                  {SEVERITY_STYLE[item.severity].label}
-                </Badge>
-              </div>
-            </motion.li>
-          ))}
-        </AnimatePresence>
-      </ul>
-    </motion.div>
-  );
-}
-
 interface SecurityNewsProps {
   /** Deep-link target set by clicking a source in the AI Daily Brief ("{source} published N articles today"). */
   initialSourceFilter?: string | null;
@@ -251,10 +196,7 @@ export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
   // about each X currently in the news," not every unrelated headline too.
   const filtered = useMemo(() => sourceFiltered.slice(0, DISPLAY_LIMIT), [sourceFiltered]);
 
-  const breaking = useMemo(
-    () => items.filter((i) => i.isBreaking && (i.severity === "critical" || i.severity === "high")),
-    [items],
-  );
+  const breaking = useBreakingNews();
 
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
