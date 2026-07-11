@@ -34,3 +34,50 @@ export function parseRss(xml) {
     pubDate: extractTag(itemXml, "pubDate") ?? extractTag(itemXml, "dc:date"),
   }));
 }
+
+function extractAttr(tagXml, attrName) {
+  const match = tagXml.match(new RegExp(`${attrName}\\s*=\\s*"([^"]*)"`, "i"));
+  return match ? match[1] : null;
+}
+
+/**
+ * Atom's <link> is a self-closing tag carrying an href attribute, not a text
+ * node like RSS's <link>text</link> -- and one <entry> can have several
+ * (rel="alternate", "self", "related", ...). Per the Atom spec a <link> with
+ * no rel defaults to "alternate" (the human-readable page), so prefer an
+ * explicit or implied "alternate" link, else the first href found, else fall
+ * back to <id> (Atom entries always have one, and it's a valid URL on many
+ * feeds even when no clean "alternate" link exists).
+ */
+function extractAtomLink(entryXml) {
+  const links = (entryXml.match(/<link\b[^>]*\/?>/gi) || [])
+    .map((tag) => ({ rel: extractAttr(tag, "rel"), href: extractAttr(tag, "href") }))
+    .filter((l) => l.href);
+  const alternate = links.find((l) => !l.rel || l.rel === "alternate");
+  return (alternate ?? links[0])?.href ?? extractTag(entryXml, "id") ?? "#";
+}
+
+/** Atom 1.0 (<entry>-based) equivalent of parseRss -- see parseFeed below for auto-detection between the two. */
+export function parseAtom(xml) {
+  const entries = xml.match(/<entry[^>]*>[\s\S]*?<\/entry>/gi) || [];
+  return entries.map((entryXml) => ({
+    title: extractTag(entryXml, "title") ?? "Untitled",
+    link: extractAtomLink(entryXml),
+    // Atom has no <pubDate> -- <published> (creation time) is closer to
+    // RSS's <pubDate> semantics than <updated> (last-edited time, which
+    // every entry has but which bumps on any edit, not just new posts).
+    pubDate: extractTag(entryXml, "published") ?? extractTag(entryXml, "updated"),
+  }));
+}
+
+/**
+ * Auto-detects RSS 2.0/1.0 (<item>-based) vs Atom 1.0 (<entry>-based) and
+ * parses accordingly. Feeds fetched by server/connectors/newsFeeds.js are a
+ * mix of both, and callers there don't know or care which format a given
+ * publisher happens to use -- this is what let feeds like Schneier on
+ * Security and The Register (both Atom-only) go from "unsupported format" to
+ * just another entry in that connector's FEEDS list.
+ */
+export function parseFeed(xml) {
+  return /<entry[\s>]/i.test(xml) ? parseAtom(xml) : parseRss(xml);
+}

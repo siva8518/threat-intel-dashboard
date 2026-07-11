@@ -1,10 +1,21 @@
 import { fetchText } from "../lib/http.js";
-import { parseRss } from "../lib/rss.js";
+import { parseFeed } from "../lib/rss.js";
 
-// All free, keyless, standard RSS 2.0 (<item>-based) feeds -- Atom-only feeds
-// (e.g. Schneier on Security, The Register) are deliberately excluded since
-// server/lib/rss.js is a small regex parser that only understands <item>,
-// not Atom's <entry>. Widened from 4 to 15 sources so no single publisher's
+// A generic Node fetch (no User-Agent at all) gets a flat 403 from Sucuri's
+// WAF, confirmed live -- but confirmed live the opposite way too: sending
+// this same browser UA to every feed broke BleepingComputer, which had been
+// working fine with no UA at all and instead 403s when it sees a browser-
+// looking one (its WAF apparently flags stale/generic Chrome UA strings
+// specifically, rather than the absence of one). So this is opt-in per feed
+// (see the `headers` field on individual FEEDS entries below), not applied
+// blanket -- there's no single UA setting that satisfies both, and each
+// publisher's WAF is a black box from the outside.
+const BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+// All free, keyless feeds -- a mix of RSS 2.0/1.0 (<item>-based) and Atom 1.0
+// (<entry>-based); server/lib/rss.js#parseFeed auto-detects which and parses
+// accordingly (Atom support added specifically to stop excluding real feeds
+// like Schneier on Security and The Register purely on format). Widened from 4 to 15 sources so no single publisher's
 // posting cadence dominates the merged, recency-sorted list. SC Media was
 // tried and dropped -- confirmed live that scmagazine.com/feed now 301s to
 // scworld.com/feed (rebranded), which returns a Cloudflare-protected 403
@@ -67,6 +78,36 @@ import { parseRss } from "../lib/rss.js";
 // has no discoverable feed `<link>` tag -- its dedicated feed appears to no
 // longer exist (its threat-intel content is likely folded into the "Google
 // Threat Intelligence" feed already tracked above).
+//
+// Widened again from 34 to 74 sources (driven by a "get to 100 total
+// dashboard sources" goal) after adding Atom support to server/lib/rss.js.
+// Every URL below was fetched and confirmed live with real parsed items
+// before being added -- same discipline as everything above. Also
+// confirmed live but deliberately NOT added, for quality/relevance reasons
+// rather than technical failure: ZDNet's "security" tag feed (sampled
+// items were general consumer-tech content -- a Fitbit review, a Best Buy
+// TV deal -- not security news, the tag appears mistagged on ZDNet's end);
+// IT Security Guru (roughly half sponsored/PR-adjacent posts, same
+// rejection reason as Proofpoint above); vpnMentor and Comparitech (both
+// consumer VPN/privacy content, off-topic, and Comparitech's feed was
+// serving French-language items); BankInfoSecurity/DataBreachToday (ISMG's
+// two sites syndicate the same top stories and neither feed exposes a
+// parseable date field). Confirmed dead/unreachable and skipped: Zscaler,
+// Trellix, Bitdefender Labs, Group-IB, Akamai's dedicated security tag,
+// Dragos, Claroty, Nozomi Networks, NCSC-NL, ENISA, CERT NZ, Anomali,
+// Censys, HackerOne, Cyware (all 404 on every URL pattern tried); Volexity,
+// NCC Group Research, PortSwigger Daily Swig, WithSecure Labs, Avast
+// Decoded, Bugcrowd (all serve an HTML shell at their /feed path instead of
+// XML, likely behind the same kind of WAF/JS-rendered-page issue as Sophos
+// above); Intezer (the /feed/ path is WordPress's *comments* feed, not
+// posts, and is empty); Cybernews (403); SC World and Naked Security
+// (still returning empty/blocked, same as previously confirmed). CERT-FR's
+// "alerte" category feed was tried alongside its "avis" feed below and
+// dropped -- confirmed live its most recent entry is from 2023, i.e. no
+// longer actively published, while "avis" is current. BSI (Germany)'s
+// CERT-Bund feed is confirmed live and current (250 entries) but was left
+// out since every title is German-language, which would read as broken/
+// mistranslated noise in an otherwise all-English feed list.
 const FEEDS = [
   { source: "CISA", url: "https://www.cisa.gov/cybersecurity-advisories/all.xml" },
   { source: "CISA ICS Advisories", url: "https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml" },
@@ -102,6 +143,60 @@ const FEEDS = [
   { source: "FortiGuard Labs", url: "https://feeds.fortinet.com/fortinet/blog/threat-research" },
   { source: "AWS Security Bulletins", url: "https://aws.amazon.com/security/security-bulletins/rss/feed/" },
   { source: "Palo Alto Security Advisories", url: "https://security.paloaltonetworks.com/rss.xml" },
+
+  // -- Government/CERT advisories --
+  { source: "CERT-EU", url: "https://cert.europa.eu/publications/security-advisories-rss" },
+  { source: "CERT-FR (ANSSI)", url: "https://www.cert.ssi.gouv.fr/avis/feed/" },
+  { source: "Canadian Centre for Cyber Security", url: "https://www.cyber.gc.ca/webservice/en/rss/alerts" },
+
+  // -- Major vendor / security-firm threat research (see MAJOR_VENDOR_SOURCES below) --
+  { source: "Huntress", url: "https://www.huntress.com/blog/rss.xml" },
+  { source: "Cybereason", url: "https://www.cybereason.com/blog/rss.xml" },
+  { source: "Wiz Research", url: "https://www.wiz.io/blog/rss.xml" },
+  { source: "GreyNoise Labs", url: "https://www.greynoise.io/blog/rss.xml" },
+  { source: "Bishop Fox", url: "https://bishopfox.com/blog/rss.xml" },
+  { source: "Trail of Bits", url: "https://blog.trailofbits.com/feed/" },
+  { source: "Tenable", url: "https://www.tenable.com/blog/feed" },
+  { source: "Qualys", url: "https://blog.qualys.com/feed" },
+  { source: "Orca Security", url: "https://orca.security/resources/blog/feed/" },
+  { source: "Praetorian", url: "https://www.praetorian.com/blog/feed/" },
+  { source: "Datadog Security Labs", url: "https://securitylabs.datadoghq.com/rss/feed.xml" },
+
+  // -- Broader vendor blogs (real signal, mixed with non-security posts -- same tradeoff already accepted for Microsoft Security above) --
+  { source: "Akamai", url: "https://www.akamai.com/blog/rss.xml" },
+  { source: "Snyk", url: "https://snyk.io/blog/feed/" },
+  { source: "Cloudflare", url: "https://blog.cloudflare.com/tag/security/rss/" },
+
+  // -- Consumer-security / detection vendors --
+  { source: "Emsisoft", url: "https://blog.emsisoft.com/en/feed/" },
+  { source: "Sucuri", url: "https://blog.sucuri.net/feed", headers: { "User-Agent": BROWSER_USER_AGENT } },
+  { source: "Wordfence", url: "https://www.wordfence.com/blog/feed/" },
+  { source: "ThreatFabric", url: "https://www.threatfabric.com/blogs/rss.xml" },
+  { source: "Cofense", url: "https://cofense.com/feed/" },
+  { source: "Shodan Blog", url: "https://blog.shodan.io/feed/" },
+
+  // -- Independent researchers / small specialist blogs --
+  { source: "Objective-See", url: "https://objective-see.org/rss.xml" },
+  { source: "Malware Traffic Analysis", url: "https://www.malware-traffic-analysis.net/blog-entries.rss" },
+  { source: "GitHub Security Lab", url: "https://github.blog/tag/github-security-lab/feed/" },
+
+  // -- Journalism / aggregators (Atom feeds, unlocked by server/lib/rss.js's new parseFeed) --
+  { source: "Schneier on Security", url: "https://www.schneier.com/feed/atom/" },
+  { source: "The Register", url: "https://www.theregister.com/security/headlines.atom" },
+  { source: "Reddit r/netsec", url: "https://www.reddit.com/r/netsec/.rss" },
+
+  // -- Journalism / aggregators (RSS) --
+  { source: "Security Affairs", url: "https://securityaffairs.com/feed" },
+  { source: "Troy Hunt", url: "https://www.troyhunt.com/rss/" },
+  { source: "Hackread", url: "https://www.hackread.com/feed/" },
+  { source: "GBHackers", url: "https://gbhackers.com/feed/" },
+  { source: "The Cyber Express", url: "https://thecyberexpress.com/feed/" },
+  { source: "DataBreaches.net", url: "https://databreaches.net/feed/" },
+  { source: "TechCrunch Security", url: "https://techcrunch.com/category/security/feed/" },
+  { source: "Ars Technica Security", url: "https://arstechnica.com/tag/security/feed/" },
+  { source: "CSO Online", url: "https://www.csoonline.com/feed" },
+  { source: "The CyberWire", url: "https://thecyberwire.com/feeds/rss.xml" },
+  { source: "Help Net Security", url: "https://www.helpnetsecurity.com/feed/" },
 ];
 
 /**
@@ -131,6 +226,17 @@ export const MAJOR_VENDOR_SOURCES = new Set([
   "Kaspersky Securelist",
   "Elastic Security Labs",
   "FortiGuard Labs",
+  "Huntress",
+  "Cybereason",
+  "Wiz Research",
+  "GreyNoise Labs",
+  "Bishop Fox",
+  "Trail of Bits",
+  "Tenable",
+  "Qualys",
+  "Orca Security",
+  "Praetorian",
+  "Datadog Security Labs",
 ]);
 
 // Widened from 15 -- the Threat Actor Profile feature matches this pool
@@ -139,18 +245,32 @@ export const MAJOR_VENDOR_SOURCES = new Set([
 // existed somewhere in that publisher's recent history.
 const ITEMS_PER_SOURCE = 40;
 
+// Not every publisher's timestamp format is one `new Date()` can parse --
+// confirmed live that CERT-EU's "13:55:39 CEST"-style timezone abbreviation
+// (as opposed to a numeric offset or GMT/UTC) produces an Invalid Date,
+// which then threw inside .toISOString() and took CERT-EU's entire fetch
+// down as "failed" every cycle. Falling back to "now" for an unparseable
+// date loses that one item's real recency, but that's strictly better than
+// losing the whole source.
+function parseDate(pubDate) {
+  if (!pubDate) return new Date();
+  const parsed = new Date(pubDate);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
 function toNewsItems(xml, source) {
-  return parseRss(xml).map((item) => ({
+  return parseFeed(xml).map((item) => ({
     id: item.link,
     title: item.title,
     link: item.link,
     source,
-    publishedDate: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
+    publishedDate: parseDate(item.pubDate).toISOString(),
   }));
 }
 
+
 /**
- * All four security-news RSS feeds share one connector (one sync cycle)
+ * All security-news RSS/Atom feeds share one connector (one sync cycle)
  * since they're the same shape and none need frequent refresh -- but each
  * feed's success/failure is tracked individually in `sources` so a single
  * dead feed doesn't hide the others' health status.
@@ -161,8 +281,8 @@ export default {
   intervalMs: 15 * 60 * 1000,
   async fetch() {
     const results = await Promise.allSettled(
-      FEEDS.map(async ({ source, url }) => {
-        const xml = await fetchText(url, { source });
+      FEEDS.map(async ({ source, url, headers }) => {
+        const xml = await fetchText(url, { source, headers });
         return toNewsItems(xml, source);
       }),
     );

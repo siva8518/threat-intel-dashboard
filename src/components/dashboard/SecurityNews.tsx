@@ -26,11 +26,13 @@ const GROUP_OPTIONS: Array<{ value: GroupBy; label: string; icon: typeof Skull }
 ];
 
 // Confirmed commercial security-vendor threat-research feeds among this
-// app's 31 news sources (see server/connectors/newsFeeds.js) -- as opposed
+// app's 74 news sources (see server/connectors/newsFeeds.js) -- as opposed
 // to security journalism/aggregator outlets (BleepingComputer, The Hacker
 // News, Krebs, etc.) or government/CERT advisories (CISA, UK NCSC). A
 // selectable grouping in the source filter below, and the landing spot for
-// the AI Daily Brief's "published N articles today" bullet.
+// the AI Daily Brief's "published N articles today" bullet. Kept in sync
+// manually with server/connectors/newsFeeds.js#MAJOR_VENDOR_SOURCES -- this
+// app has no shared client/server code layer.
 const MAJOR_VENDOR_SOURCES = new Set([
   "Cisco Talos",
   "CrowdStrike",
@@ -45,6 +47,17 @@ const MAJOR_VENDOR_SOURCES = new Set([
   "Kaspersky Securelist",
   "Elastic Security Labs",
   "FortiGuard Labs",
+  "Huntress",
+  "Cybereason",
+  "Wiz Research",
+  "GreyNoise Labs",
+  "Bishop Fox",
+  "Trail of Bits",
+  "Tenable",
+  "Qualys",
+  "Orca Security",
+  "Praetorian",
+  "Datadog Security Labs",
 ]);
 const MAJOR_VENDORS_FILTER = "__major-vendors__";
 
