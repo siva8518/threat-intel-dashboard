@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, Github, LayoutDashboard, Network, Newspaper, Search, ShieldAlert, Skull, Radar, UserSearch, Wifi } from "lucide-react";
+import { Bot, Bug, Github, LayoutDashboard, Network, Newspaper, Search, ShieldAlert, Skull, Radar, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
 import { WorldThreatMap } from "@/components/dashboard/WorldThreatMap";
@@ -28,6 +28,7 @@ import { SourcesHealthPanel } from "@/components/dashboard/SourcesHealthPanel";
 import { McpServerPanel } from "@/components/dashboard/McpServerPanel";
 import { GithubIntel } from "@/components/dashboard/GithubIntel";
 import { Chatbot } from "@/components/dashboard/Chatbot";
+import { MalwareIntelligence } from "@/components/dashboard/MalwareIntelligence";
 import { CveDetailDrawer } from "@/components/dashboard/CveDetailDrawer";
 import { MalwareDetailDrawer } from "@/components/dashboard/MalwareDetailDrawer";
 import { SelectionProvider } from "@/context/SelectionContext";
@@ -42,6 +43,7 @@ const TABS = [
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },
   { id: "threat-actors", label: "Ransomware Data", icon: Skull },
   { id: "github-intel", label: "GitHub Intel", icon: Github },
+  { id: "malware-intelligence", label: "Malware Intelligence", icon: Bug },
   { id: "ioc-search", label: "IOC Search", icon: Search },
   { id: "news", label: "Security News", icon: Newspaper },
   { id: "ai-assistant", label: "AI Assistant", icon: Bot },
@@ -97,7 +99,6 @@ export function DashboardPage() {
                 onNavigateTodayEvent={(tab) => setActiveTab(tab)}
               />
               <WorldThreatMap onSelectCountry={goToCountry} />
-              <TopMitreTechniques />
             </div>
             <div className="space-y-4">
               <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
@@ -115,6 +116,7 @@ export function DashboardPage() {
             <TopThreatActors onNavigateToActors={() => setActiveTab("threat-actors")} />
             <TopCves />
           </div>
+          <TopMitreTechniques />
         </div>
       )}
       {activeTab === "cves" && (
@@ -150,6 +152,7 @@ export function DashboardPage() {
         />
       )}
       {activeTab === "github-intel" && <GithubIntel />}
+      {activeTab === "malware-intelligence" && <MalwareIntelligence />}
       {activeTab === "ioc-search" && <IocSearch />}
       {activeTab === "news" && <SecurityNews initialSourceFilter={newsSourceFilter} />}
       {activeTab === "ai-assistant" && <Chatbot />}

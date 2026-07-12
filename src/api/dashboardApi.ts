@@ -18,6 +18,7 @@ import type {
   IocSearchIndicatorType,
   IocSearchResult,
   KevEntry,
+  MalwareIntelligenceEntity,
   MalwareProfile,
   NewsItem,
   RansomwareCampaign,
@@ -89,6 +90,10 @@ export async function fetchThreatFeed(): Promise<{ iocs: IocRecord[] }> {
 
 export async function fetchTrendingMalware(): Promise<TrendingMalwareEntry[]> {
   return fetchJson("/api/dashboard/malware-trending", { source: "Dashboard API" });
+}
+
+export async function fetchMalwareIntelligence(): Promise<{ entities: MalwareIntelligenceEntity[] }> {
+  return fetchJson("/api/dashboard/malware-intelligence", { source: "Dashboard API" });
 }
 
 export async function fetchAttackTechniques(): Promise<AttackTechnique[]> {

@@ -528,6 +528,36 @@ export interface VulnCheckKevCatalog {
   notConfigured?: boolean;
 }
 
+/** One article a malware family was mentioned in -- see server/malwareIntelligence.js. */
+export interface MalwareIntelligenceArticleRef {
+  title: string;
+  link: string;
+  source: string;
+  publishedDate: string;
+}
+
+/**
+ * One canonical, deduped malware-family record -- built by automatically
+ * extracting names from news article text (server/malwareExtraction.js), no
+ * manually maintained list. `verified` means confirmed against MITRE ATT&CK's
+ * Software list or a live indicator feed; unverified records are reported by
+ * news coverage alone and haven't been corroborated elsewhere yet.
+ */
+export interface MalwareIntelligenceEntity {
+  id: string;
+  name: string;
+  aliases: string[];
+  description: string | null;
+  attackId: string | null;
+  attackUrl: string | null;
+  verified: boolean;
+  iocSightings: number;
+  firstSeen: string;
+  lastSeen: string;
+  mentionCount: number;
+  articles: MalwareIntelligenceArticleRef[];
+}
+
 /** Local RAG chatbot -- see server/rag/. Runs entirely against a local Ollama install, no paid API. */
 export interface ChatHealth {
   ollamaAvailable: boolean;

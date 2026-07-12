@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
-import { BreakingNewsStrip, SEVERITY_STYLE, useBreakingNews } from "./BreakingNewsStrip";
+import { SEVERITY_STYLE } from "./BreakingNewsStrip";
 import { useSecurityNews } from "@/hooks/useSecurityNews";
 import { useSelection } from "@/context/SelectionContext";
 import { fetchCveById } from "@/api/dashboardApi";
@@ -196,8 +196,6 @@ export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
   // about each X currently in the news," not every unrelated headline too.
   const filtered = useMemo(() => sourceFiltered.slice(0, DISPLAY_LIMIT), [sourceFiltered]);
 
-  const breaking = useBreakingNews();
-
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
     const map = new Map<string, NewsItem[]>();
@@ -215,7 +213,6 @@ export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
 
   return (
     <div className="space-y-4">
-      <BreakingNewsStrip items={breaking} />
       <Card>
         <CardHeader className="flex-col items-start gap-3 md:flex-row md:items-center">
           <CardTitle className="text-base font-semibold text-foreground">

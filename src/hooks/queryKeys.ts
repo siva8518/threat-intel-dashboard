@@ -32,4 +32,5 @@ export const queryKeys = {
   cveProfile: (cveId: string) => ["cve-profile", cveId] as const,
   malwareProfile: (family: string) => ["malware-profile", family] as const,
   chatHealth: ["chat-health"] as const,
+  malwareIntelligence: ["malware-intelligence"] as const,
 };

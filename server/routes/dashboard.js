@@ -34,6 +34,7 @@ import { buildThreatTimeline } from "../threatTimeline.js";
 import { recordAndGetSourceHistory, computeReliability } from "../sourceReliabilityHistory.js";
 import { recordAndGetPriorSnapshot } from "../malwareTrendHistory.js";
 import { recordAndGetScoreHistory } from "../threatScoreHistory.js";
+import { getAllEntities as getMalwareIntelligenceEntities } from "../malwareIntelligence.js";
 
 export const router = Router();
 
@@ -273,6 +274,16 @@ router.get("/dashboard/malware-trending/deltas", (_req, res) => {
     .sort((a, b) => (b.pctChange ?? -Infinity) - (a.pctChange ?? -Infinity));
 
   res.json({ deltas, hasPriorDay: Boolean(prior) });
+});
+
+// --- Malware Intelligence (canonical, deduped entity store, see server/malwareIntelligence.js) ---
+// One record per malware family, built from names automatically extracted
+// from news article text (server/malwareExtraction.js + malwareExtractionJob.js)
+// and enriched/validated against MITRE ATT&CK's Software list and the live
+// IOC feed -- distinct from /dashboard/malware-trending above, which is a
+// live IOC-frequency snapshot with no memory and no article linkage.
+router.get("/dashboard/malware-intelligence", (_req, res) => {
+  res.json({ entities: getMalwareIntelligenceEntities() });
 });
 
 router.get("/dashboard/attack-techniques", (_req, res) => {

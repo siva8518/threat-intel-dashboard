@@ -6,8 +6,8 @@
 // nothing more.
 import * as cache from "../cache.js";
 import { ransomwareCampaigns as getRansomwareCampaigns } from "../ransomwareCampaigns.js";
-import { threatFeedIocs } from "../threatFeed.js";
-import { correlateCves, computeTrendingMalware } from "../correlate.js";
+import { correlateCves } from "../correlate.js";
+import { getAllEntities as getMalwareEntities } from "../malwareIntelligence.js";
 import { MAX_CHUNKS_PER_SOURCE as CAP } from "./config.js";
 
 function cveChunks() {
@@ -72,16 +72,28 @@ function techniqueChunks() {
   }));
 }
 
+// Sourced from server/malwareIntelligence.js -- the canonical, deduped "one
+// record per family" store built by automatically extracting names from news
+// article text (server/malwareExtraction.js) and enriching/merging against
+// MITRE ATT&CK's Software list and the live IOC feed (server/malwareIntelligence.js#reconcile).
+// This is what actually fixed "the chatbot can't answer 'What is Bumblebee?'"
+// -- unlike the old IOC-frequency-only view, a family with real news
+// coverage but modest current IOC volume still gets a real, citable chunk.
 function malwareChunks() {
-  const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
-  const trending = computeTrendingMalware(threatFeedIocs(), attackIndex, cache.getEntry("detection-rules").data?.index).slice(0, CAP.malware);
-  return trending.map((m) => ({
-    id: `malware:${m.family}`,
-    text:
-      `Malware family "${m.family}" has ${m.count} indicators currently observed across ${m.sources.join(", ")}. ` +
-      `${m.techniques?.length ? `Associated ATT&CK techniques: ${m.techniques.map((t) => t.id).join(", ")}.` : ""}`,
-    metadata: { type: "malware", label: m.family, url: null, date: null },
-  }));
+  const entities = getMalwareEntities().slice(0, CAP.malware);
+  return entities.map((m) => {
+    const recentArticles = m.articles.slice(0, 5).map((a) => `"${a.title}" (${a.source}, ${a.publishedDate?.slice(0, 10)})`).join("; ");
+    return {
+      id: `malware:${m.id}`,
+      text:
+        `Malware family "${m.name}"${m.aliases.length ? ` (aliases: ${m.aliases.join(", ")})` : ""}` +
+        `${m.verified ? " -- confirmed" : " -- reported in news coverage, not yet confirmed via MITRE ATT&CK or a live indicator feed"}. ` +
+        `${m.description ? `${m.description} ` : ""}` +
+        `${m.iocSightings ? `Currently has ${m.iocSightings} live indicator sighting(s). ` : ""}` +
+        `${recentArticles ? `Recent coverage: ${recentArticles}.` : ""}`,
+      metadata: { type: "malware", label: m.name, url: m.attackUrl, date: m.lastSeen },
+    };
+  });
 }
 
 function newsChunks() {

@@ -33,9 +33,17 @@ async function request(path, body) {
   return response;
 }
 
-/** Non-streaming JSON call (used by embeddings, and by chat when streaming isn't needed). */
+/**
+ * Non-streaming JSON call (used by embeddings, and by chat when streaming
+ * isn't needed, e.g. server/malwareExtraction.js). Ollama's /api/chat
+ * defaults to `stream: true` unless told otherwise -- confirmed live that
+ * omitting this here made response.json() choke trying to parse a multi-line
+ * NDJSON body as one JSON value ("Unexpected non-whitespace character after
+ * JSON"). Explicit `stream: false` here means no caller of this function has
+ * to remember that per-endpoint default themselves.
+ */
 export async function ollamaJson(path, body) {
-  const response = await request(path, body);
+  const response = await request(path, { ...body, stream: false });
   return response.json();
 }
 
