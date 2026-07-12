@@ -9,6 +9,7 @@ import { ransomwareCampaigns as getRansomwareCampaigns } from "../ransomwareCamp
 import { correlateCves } from "../correlate.js";
 import { getAllEntities as getMalwareEntities } from "../malwareIntelligence.js";
 import { getAllEntities as getActorEntities } from "../threatActorIntelligence.js";
+import { getAllEntities as getCampaignEntities } from "../campaignIntelligence.js";
 import { MAX_CHUNKS_PER_SOURCE as CAP } from "./config.js";
 
 function cveChunks() {
@@ -127,6 +128,31 @@ function malwareChunks() {
   });
 }
 
+// Sourced from server/campaignIntelligence.js -- one record per named
+// campaign/operation, automatically extracted from news article text (no
+// manually maintained list, see server/campaignExtraction.js), cross-
+// referenced against the actor and malware entity stores for co-mentions.
+function campaignIntelligenceChunks() {
+  const entities = getCampaignEntities().slice(0, CAP.campaigns);
+  return entities.map((c) => {
+    const recentArticles = c.articles.slice(0, 5).map((a) => `"${a.title}" (${a.source}, ${a.publishedDate?.slice(0, 10)})`).join("; ");
+    return {
+      id: `campaign:${c.id}`,
+      text:
+        `Campaign/operation "${c.name}"${c.aliases.length ? ` (aliases: ${c.aliases.join(", ")})` : ""}` +
+        `${c.verified ? " -- corroborated by multiple sources" : " -- reported by a single source so far, not yet corroborated"}. ` +
+        `${c.description ? `${c.description} ` : ""}` +
+        `${c.associatedActors.length ? `Associated actors: ${c.associatedActors.join(", ")}. ` : ""}` +
+        `${c.associatedMalware.length ? `Associated malware/tools: ${c.associatedMalware.join(", ")}. ` : ""}` +
+        `${c.targetedIndustries.length ? `Targets industries: ${c.targetedIndustries.join(", ")}. ` : ""}` +
+        `${c.targetedCountries.length ? `Targets countries: ${c.targetedCountries.join(", ")}. ` : ""}` +
+        `${c.cveExploited.length ? `Exploits: ${c.cveExploited.join(", ")}. ` : ""}` +
+        `${recentArticles ? `Recent coverage: ${recentArticles}.` : ""}`,
+      metadata: { type: "campaign", label: c.name, url: c.attackUrl, date: c.lastSeen },
+    };
+  });
+}
+
 function newsChunks() {
   const items = (cache.getEntry("news").data?.items ?? []).slice(0, CAP.news);
   return items.map((n) => ({
@@ -138,5 +164,14 @@ function newsChunks() {
 
 /** Every chunk the RAG index is built from. See server/rag/indexer.js for how this is embedded and stored. */
 export function buildChunks() {
-  return [...cveChunks(), ...kevChunks(), ...ransomwareChunks(), ...actorChunks(), ...techniqueChunks(), ...malwareChunks(), ...newsChunks()];
+  return [
+    ...cveChunks(),
+    ...kevChunks(),
+    ...ransomwareChunks(),
+    ...actorChunks(),
+    ...techniqueChunks(),
+    ...malwareChunks(),
+    ...campaignIntelligenceChunks(),
+    ...newsChunks(),
+  ];
 }

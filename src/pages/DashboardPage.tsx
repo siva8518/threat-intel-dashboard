@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, Bug, Github, LayoutDashboard, Network, Newspaper, Search, ShieldAlert, Skull, UserSearch, Wifi } from "lucide-react";
+import { Bot, Bug, Crosshair, Github, LayoutDashboard, Network, Newspaper, Search, ShieldAlert, Skull, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
 import { WorldThreatMap } from "@/components/dashboard/WorldThreatMap";
@@ -20,7 +20,6 @@ import { CorrelationEngine } from "@/components/dashboard/CorrelationEngine";
 import { AttackTechniques } from "@/components/dashboard/AttackTechniques";
 import { AttackTacticHeatmap } from "@/components/dashboard/AttackTacticHeatmap";
 import { ThreatActorsHub } from "@/components/dashboard/ThreatActorsHub";
-import { ThreatActorProfiles } from "@/components/dashboard/ThreatActorProfiles";
 import { SecurityNews } from "@/components/dashboard/SecurityNews";
 import { SourcesHealthPanel } from "@/components/dashboard/SourcesHealthPanel";
 import { McpServerPanel } from "@/components/dashboard/McpServerPanel";
@@ -28,6 +27,7 @@ import { GithubIntel } from "@/components/dashboard/GithubIntel";
 import { Chatbot } from "@/components/dashboard/Chatbot";
 import { MalwareIntelligence } from "@/components/dashboard/MalwareIntelligence";
 import { ThreatActorIntelligence } from "@/components/dashboard/ThreatActorIntelligence";
+import { CampaignIntelligence } from "@/components/dashboard/CampaignIntelligence";
 import { CveDetailDrawer } from "@/components/dashboard/CveDetailDrawer";
 import { MalwareDetailDrawer } from "@/components/dashboard/MalwareDetailDrawer";
 import { SelectionProvider } from "@/context/SelectionContext";
@@ -38,12 +38,12 @@ const TABS = [
   { id: "cves", label: "Latest CVEs", icon: ShieldAlert },
   { id: "threat-feed", label: "IOCs", icon: Search },
   { id: "correlation-engine", label: "Correlation Engine", icon: Network },
-  { id: "actor-profiles", label: "Threat Actor Profiles", icon: UserSearch },
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },
   { id: "threat-actors", label: "Ransomware Data", icon: Skull },
   { id: "github-intel", label: "GitHub Intel", icon: Github },
   { id: "malware-intelligence", label: "Malware Intelligence", icon: Bug },
   { id: "actor-intelligence", label: "Threat Actor Intelligence", icon: UserSearch },
+  { id: "campaign-intelligence", label: "Campaign Intelligence", icon: Crosshair },
   { id: "news", label: "Security News", icon: Newspaper },
   { id: "ai-assistant", label: "AI Assistant", icon: Bot },
   { id: "sources", label: "Sources", icon: Wifi },
@@ -61,7 +61,7 @@ export function DashboardPage() {
 
   function goToActorSearch(name: string) {
     setActorSearchQuery(name);
-    setActiveTab("actor-profiles");
+    setActiveTab("actor-intelligence");
   }
 
   function goToCveSeverity(severity: Severity) {
@@ -130,7 +130,6 @@ export function DashboardPage() {
       )}
       {activeTab === "threat-feed" && <IocsHub />}
       {activeTab === "correlation-engine" && <CorrelationEngine />}
-      {activeTab === "actor-profiles" && <ThreatActorProfiles initialQuery={actorSearchQuery} />}
       {activeTab === "attack-techniques" && (
         <>
           <AttackTacticHeatmap />
@@ -147,7 +146,8 @@ export function DashboardPage() {
       )}
       {activeTab === "github-intel" && <GithubIntel />}
       {activeTab === "malware-intelligence" && <MalwareIntelligence />}
-      {activeTab === "actor-intelligence" && <ThreatActorIntelligence />}
+      {activeTab === "actor-intelligence" && <ThreatActorIntelligence initialQuery={actorSearchQuery} />}
+      {activeTab === "campaign-intelligence" && <CampaignIntelligence />}
       {activeTab === "news" && <SecurityNews initialSourceFilter={newsSourceFilter} />}
       {activeTab === "ai-assistant" && <Chatbot />}
       {activeTab === "sources" && (

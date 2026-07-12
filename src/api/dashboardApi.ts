@@ -2,6 +2,7 @@ import { fetchJson } from "@/lib/http";
 import type {
   AttackTacticHeatmapCell,
   AttackTechnique,
+  CampaignIntelligenceEntity,
   CorrelationCard,
   CveProfile,
   CveProgramActivity,
@@ -25,7 +26,6 @@ import type {
   SourceHealth,
   ThreatActor,
   ThreatActorIntelligenceEntity,
-  ThreatActorProfile,
   ThreatActorSummary,
   ThreatTimelineEvent,
   TodaySecurityEvents,
@@ -101,6 +101,10 @@ export async function fetchThreatActorIntelligence(): Promise<{ entities: Threat
   return fetchJson("/api/dashboard/threat-actor-intelligence", { source: "Dashboard API" });
 }
 
+export async function fetchCampaignIntelligence(): Promise<{ entities: CampaignIntelligenceEntity[] }> {
+  return fetchJson("/api/dashboard/campaign-intelligence", { source: "Dashboard API" });
+}
+
 export async function fetchAttackTechniques(): Promise<AttackTechnique[]> {
   return fetchJson("/api/dashboard/attack-techniques", { source: "Dashboard API" });
 }
@@ -171,23 +175,14 @@ export async function searchIoc(type: IocSearchIndicatorType, value: string): Pr
   return fetchJson(`/api/ioc-search?${search.toString()}`, { source: "IOC Search" });
 }
 
-export async function fetchThreatActorList(): Promise<{ actors: ThreatActorSummary[] }> {
-  return fetchJson("/api/dashboard/threat-actor-profiles", { source: "Dashboard API" });
-}
-
+// The full-profile (fetchThreatActorProfile) and list (fetchThreatActorList)
+// endpoints are still live on the backend (used by the MCP server's
+// get_threat_actor_profile tool, see server/mcpServer.js) but no longer have
+// a frontend consumer since the Threat Actor Profiles tab was removed in
+// favor of Threat Actor Intelligence -- only the search endpoint (used by
+// the platform search palette, see CommandPalette.tsx) is still called here.
 export async function searchThreatActorProfiles(query: string): Promise<{ actors: ThreatActorSummary[] }> {
   return fetchJson(`/api/dashboard/threat-actor-profiles/search?q=${encodeURIComponent(query)}`, { source: "Dashboard API" });
-}
-
-export async function fetchThreatActorProfile(attackId: string): Promise<ThreatActorProfile> {
-  // Longer than the default 12s: this endpoint does a live OTX pulse search
-  // (confirmed live to take up to ~16s) plus live single-CVE NVD lookups,
-  // both server-side, before responding -- the default timeout was aborting
-  // this fetch client-side before the backend ever finished.
-  return fetchJson(`/api/dashboard/threat-actor-profiles/${encodeURIComponent(attackId)}`, {
-    source: "Dashboard API",
-    timeoutMs: 35_000,
-  });
 }
 
 export interface GithubIntelListParams {

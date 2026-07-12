@@ -23,6 +23,7 @@ import { startRagIndexer } from "./rag/indexer.js";
 import { startMalwareExtractionJob } from "./malwareExtractionJob.js";
 import { startAttackTechniqueExtractionJob } from "./attackTechniqueExtractionJob.js";
 import { startThreatActorExtractionJob } from "./threatActorExtractionJob.js";
+import { startCampaignExtractionJob } from "./campaignExtractionJob.js";
 import { log } from "./lib/log.js";
 
 const app = express();
@@ -52,6 +53,7 @@ startRagIndexer();
 startMalwareExtractionJob();
 startAttackTechniqueExtractionJob();
 startThreatActorExtractionJob();
+startCampaignExtractionJob();
 
 app.listen(PORT, () => {
   log.info("server", `Threat Intel Dashboard backend listening on port ${PORT}`);

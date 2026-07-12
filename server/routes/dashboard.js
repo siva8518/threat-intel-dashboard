@@ -37,6 +37,7 @@ import { recordAndGetPriorSnapshot } from "../malwareTrendHistory.js";
 import { recordAndGetScoreHistory } from "../threatScoreHistory.js";
 import { getAllEntities as getMalwareIntelligenceEntities } from "../malwareIntelligence.js";
 import { getAllEntities as getThreatActorIntelligenceEntities } from "../threatActorIntelligence.js";
+import { getAllEntities as getCampaignIntelligenceEntities } from "../campaignIntelligence.js";
 import { getNewsTechniqueCounts } from "../attackTechniqueIntelligence.js";
 
 export const router = Router();
@@ -299,6 +300,15 @@ router.get("/dashboard/malware-intelligence", (_req, res) => {
 // ATT&CK-only correlation with no persisted news-derived actors at all).
 router.get("/dashboard/threat-actor-intelligence", (_req, res) => {
   res.json({ entities: getThreatActorIntelligenceEntities() });
+});
+
+// --- Campaign Intelligence (canonical, deduped entity store, see server/campaignIntelligence.js) ---
+// One record per named campaign/operation, built from names automatically
+// extracted from news article text (server/campaignExtraction.js +
+// campaignExtractionJob.js), cross-referenced with actor and malware
+// co-mentions from the same articles.
+router.get("/dashboard/campaign-intelligence", (_req, res) => {
+  res.json({ entities: getCampaignIntelligenceEntities() });
 });
 
 router.get("/dashboard/attack-techniques", (_req, res) => {

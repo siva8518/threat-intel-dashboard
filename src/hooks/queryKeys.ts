@@ -23,9 +23,6 @@ export const queryKeys = {
   news: ["news"] as const,
   health: ["health"] as const,
   iocSearch: (type: string, value: string) => ["ioc-search", type, value] as const,
-  threatActorList: ["threat-actor-profiles"] as const,
-  threatActorSearch: (query: string) => ["threat-actor-profiles", "search", query] as const,
-  threatActorProfile: (attackId: string) => ["threat-actor-profiles", attackId] as const,
   githubIntelList: (paramsKey: string) => ["github-intel", paramsKey] as const,
   githubIntelStats: ["github-intel", "stats"] as const,
   githubRepoDetail: (fullName: string) => ["github-intel", fullName] as const,
@@ -34,4 +31,5 @@ export const queryKeys = {
   chatHealth: ["chat-health"] as const,
   malwareIntelligence: ["malware-intelligence"] as const,
   threatActorIntelligence: ["threat-actor-intelligence"] as const,
+  campaignIntelligence: ["campaign-intelligence"] as const,
 };

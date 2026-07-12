@@ -592,6 +592,36 @@ export interface ThreatActorIntelligenceEntity {
   articles: ThreatActorIntelligenceArticleRef[];
 }
 
+export type CampaignIntelligenceArticleRef = MalwareIntelligenceArticleRef;
+
+/**
+ * One canonical, deduped campaign/operation record -- built by automatically
+ * extracting named campaigns from news article text (server/campaignExtraction.js),
+ * no manually maintained list. `verified` means corroborated by at least two
+ * independent sources or matched against a MITRE ATT&CK campaign's own
+ * description text (ATT&CK's Campaigns list has no real display names to
+ * match against directly, so this isn't the same kind of "confirmed by an
+ * authoritative catalog" signal as malware/actors).
+ */
+export interface CampaignIntelligenceEntity {
+  id: string;
+  name: string;
+  aliases: string[];
+  description: string | null;
+  attackId: string | null;
+  attackUrl: string | null;
+  verified: boolean;
+  associatedActors: string[];
+  associatedMalware: string[];
+  targetedIndustries: string[];
+  targetedCountries: string[];
+  cveExploited: string[];
+  firstSeen: string;
+  lastSeen: string;
+  mentionCount: number;
+  articles: CampaignIntelligenceArticleRef[];
+}
+
 /** Local RAG chatbot -- see server/rag/. Runs entirely against a local Ollama install, no paid API. */
 export interface ChatHealth {
   ollamaAvailable: boolean;
@@ -611,7 +641,7 @@ export interface ChatMessage {
 /** One piece of platform intelligence the answer was actually grounded in -- see server/rag/ragChat.js. */
 export interface ChatSource {
   id: string;
-  type: "cve" | "kev" | "ransomware" | "actor" | "technique" | "malware" | "news";
+  type: "cve" | "kev" | "ransomware" | "actor" | "technique" | "malware" | "campaign" | "news";
   label: string;
   url: string | null;
   score: number;

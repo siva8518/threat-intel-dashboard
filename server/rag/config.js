@@ -37,6 +37,7 @@ export const MAX_CHUNKS_PER_SOURCE = {
   actors: 300, // MITRE ATT&CK's full Groups list is ~180 today; headroom, not a real cap
   malware: 60,
   techniques: 250,
+  campaigns: 60,
 };
 
 export const CHAT_HISTORY_TURNS = 6; // last N messages (both roles) sent as context, bounding prompt size for a small local model

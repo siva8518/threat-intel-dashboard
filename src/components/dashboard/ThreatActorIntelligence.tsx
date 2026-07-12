@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { UserSearch, ChevronDown, ChevronRight, ExternalLink, ShieldCheck } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { UserSearch, ChevronDown, ChevronRight, ExternalLink, ShieldCheck, Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,31 @@ function timeAgo(iso: string) {
   if (days < 1) return "today";
   if (days === 1) return "1 day ago";
   return `${days} days ago`;
+}
+
+interface TimelineEvent {
+  date: string;
+  label: string;
+  url?: string;
+  meta?: string;
+}
+
+/**
+ * Chronological timeline for one actor -- first-observed anchor plus every
+ * linked article, newest first. Restores the per-actor timeline the removed
+ * ThreatActorProfiles tab used to show (there it also pulled in live ATT&CK
+ * campaign/OTX pulse dates; this entity store doesn't carry those directly,
+ * so the timeline here is built entirely from data already on the entity).
+ */
+function buildTimeline(entity: ThreatActorIntelligenceEntity): TimelineEvent[] {
+  const events: TimelineEvent[] = entity.articles.map((a) => ({
+    date: a.publishedDate,
+    label: a.title,
+    url: a.link,
+    meta: a.source,
+  }));
+  events.push({ date: entity.firstSeen, label: "First observed" });
+  return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
 function EntityRow({ entity, expanded, onToggle }: { entity: ThreatActorIntelligenceEntity; expanded: boolean; onToggle: () => void }) {
@@ -123,27 +148,40 @@ function EntityRow({ entity, expanded, onToggle }: { entity: ThreatActorIntellig
             )}
           </div>
 
-          {entity.articles.length === 0 ? (
-            <p className="text-muted">No linked articles yet -- seeded from MITRE ATT&amp;CK / ransomware tracker data only.</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {entity.articles.map((a) => (
-                <li key={a.link} className="flex items-start justify-between gap-3">
-                  <a href={a.link} target="_blank" rel="noreferrer" className="flex min-w-0 items-start gap-1 text-foreground hover:text-primary hover:underline">
-                    <span className="truncate">{a.title}</span>
-                    <ExternalLink className="mt-0.5 h-3 w-3 shrink-0" />
-                  </a>
+          <p className="mb-1.5 flex items-center gap-1 font-semibold uppercase tracking-wide text-muted">
+            <Clock className="h-3 w-3" />
+            Timeline
+          </p>
+          <ol className="space-y-2.5 border-l border-white/10 pl-3">
+            {buildTimeline(entity).map((event, i) => (
+              <li key={`${event.date}-${i}`} className="relative">
+                <span className="absolute -left-[16px] top-1 h-1.5 w-1.5 rounded-full bg-primary" />
+                <div className="flex items-start justify-between gap-3">
+                  {event.url ? (
+                    <a href={event.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-start gap-1 text-foreground hover:text-primary hover:underline">
+                      <span className="truncate">{event.label}</span>
+                      <ExternalLink className="mt-0.5 h-3 w-3 shrink-0" />
+                    </a>
+                  ) : (
+                    <span className="font-medium text-foreground">{event.label}</span>
+                  )}
                   <span className="shrink-0 text-muted">
-                    {a.source} · {a.publishedDate?.slice(0, 10)}
+                    {event.meta ? `${event.meta} · ` : ""}
+                    {event.date?.slice(0, 10)}
                   </span>
-                </li>
-              ))}
-            </ul>
-          )}
+                </div>
+              </li>
+            ))}
+          </ol>
         </div>
       )}
     </div>
   );
+}
+
+interface ThreatActorIntelligenceProps {
+  /** Pre-fills the search box -- set from the platform search palette (see CommandPalette.tsx) when the user picks an actor result. */
+  initialQuery?: string | null;
 }
 
 /**
@@ -155,9 +193,14 @@ function EntityRow({ entity, expanded, onToggle }: { entity: ThreatActorIntellig
  * This is also exactly what the RAG chatbot's actor chunks are built from --
  * anything shown here is answerable by the AI Assistant tab.
  */
-export function ThreatActorIntelligence() {
+export function ThreatActorIntelligence({ initialQuery }: ThreatActorIntelligenceProps = {}) {
   const { data, isLoading, isError, error } = useThreatActorIntelligence();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialQuery ?? "");
+
+  useEffect(() => {
+    if (initialQuery) setSearch(initialQuery);
+  }, [initialQuery]);
+
   const [typeFilter, setTypeFilter] = useState<ThreatActorType | "All">("All");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 

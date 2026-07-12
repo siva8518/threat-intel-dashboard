@@ -22,6 +22,7 @@ const SOURCE_TYPE_LABEL: Record<ChatSource["type"], string> = {
   actor: "Actor",
   technique: "ATT&CK",
   malware: "Malware",
+  campaign: "Campaign",
   news: "News",
 };
 
