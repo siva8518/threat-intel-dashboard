@@ -32,6 +32,13 @@ export function parseRss(xml) {
     // Dublin Core's <dc:date> (ISO 8601) instead -- fall back to it so those
     // feeds don't all report a fabricated "just now" timestamp.
     pubDate: extractTag(itemXml, "pubDate") ?? extractTag(itemXml, "dc:date"),
+    // <description> is usually a 1-3 sentence excerpt/dek, not the full post
+    // body -- but a headline alone frequently omits the malware family name
+    // a vendor blog is actually about (e.g. "Cisco Talos uncovers new loader
+    // campaign" names nothing; the description does). This is what feeds the
+    // malware-name extractor real signal beyond the title (see
+    // server/malwareExtraction.js).
+    summary: extractTag(itemXml, "description") ?? extractTag(itemXml, "content:encoded"),
   }));
 }
 
@@ -67,6 +74,8 @@ export function parseAtom(xml) {
     // RSS's <pubDate> semantics than <updated> (last-edited time, which
     // every entry has but which bumps on any edit, not just new posts).
     pubDate: extractTag(entryXml, "published") ?? extractTag(entryXml, "updated"),
+    // Atom's excerpt is <summary>; some feeds only populate <content> instead.
+    summary: extractTag(entryXml, "summary") ?? extractTag(entryXml, "content"),
   }));
 }
 

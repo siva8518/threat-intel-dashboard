@@ -267,6 +267,21 @@ function parseDate(pubDate) {
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
+// Feed descriptions are frequently raw HTML (vendor blogs render their dek
+// through the same template as the post body) -- strip tags/entities down to
+// plain text before this ever reaches the malware-name extractor's prompt
+// (server/malwareExtraction.js) or gets cached for the frontend. Capped at
+// 600 chars: enough for a full dek/abstract, short enough to keep each
+// extraction prompt small.
+function cleanSummary(raw) {
+  if (!raw) return null;
+  const text = raw
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text ? text.slice(0, 600) : null;
+}
+
 function toNewsItems(xml, source) {
   return parseFeed(xml).map((item) => ({
     id: item.link,
@@ -274,6 +289,7 @@ function toNewsItems(xml, source) {
     link: item.link,
     source,
     publishedDate: parseDate(item.pubDate).toISOString(),
+    summary: cleanSummary(item.summary),
   }));
 }
 
