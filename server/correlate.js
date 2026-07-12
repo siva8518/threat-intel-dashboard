@@ -132,13 +132,23 @@ export function computeTrendingMalware(iocs, attackIndex, ruleIndex = []) {
     }));
 }
 
-/** Aggregates ATT&CK technique frequency across all IOCs, via the same curated map. */
-export function computeAttackTechniquesObserved(iocs, attackIndex) {
+/**
+ * Aggregates ATT&CK technique frequency across all IOCs (via the curated
+ * malware-to-technique map) plus, additionally, techniques automatically
+ * extracted from news article text (server/attackTechniqueExtraction.js +
+ * server/attackTechniqueIntelligence.js) -- the curated map alone only
+ * surfaces techniques for the ~20-30 families it was seeded with, which
+ * under-represents everything vendor coverage actually names.
+ */
+export function computeAttackTechniquesObserved(iocs, attackIndex, newsTechniqueCounts = new Map()) {
   const counts = new Map();
   for (const ioc of iocs) {
     for (const id of techniqueIdsForFamily(ioc.malwareFamily)) {
       counts.set(id, (counts.get(id) ?? 0) + 1);
     }
+  }
+  for (const [id, count] of newsTechniqueCounts) {
+    counts.set(id, (counts.get(id) ?? 0) + count);
   }
 
   return Array.from(counts.entries())
@@ -165,18 +175,22 @@ const TOP_TECHNIQUES_PER_TACTIC = 5;
 
 /**
  * ATT&CK Tactic Heat Map: same underlying technique-frequency data as
- * computeAttackTechniquesObserved above, but grouped and summed by tactic
- * (kill-chain stage) instead of truncated to the top 15 individual
+ * computeAttackTechniquesObserved above (IOC-derived counts plus techniques
+ * automatically extracted from news article text), but grouped and summed by
+ * tactic (kill-chain stage) instead of truncated to the top 15 individual
  * techniques -- a proper heat map needs every tactic represented, including
  * the "cold" ones with zero hits, not just whichever techniques happen to
  * rank highest overall.
  */
-export function computeAttackTacticHeatmap(iocs, attackIndex) {
+export function computeAttackTacticHeatmap(iocs, attackIndex, newsTechniqueCounts = new Map()) {
   const techniqueCounts = new Map(); // techniqueId -> count
   for (const ioc of iocs) {
     for (const id of techniqueIdsForFamily(ioc.malwareFamily)) {
       techniqueCounts.set(id, (techniqueCounts.get(id) ?? 0) + 1);
     }
+  }
+  for (const [id, count] of newsTechniqueCounts) {
+    techniqueCounts.set(id, (techniqueCounts.get(id) ?? 0) + count);
   }
 
   const byTactic = new Map(); // tactic -> [{id, name, url, count}]

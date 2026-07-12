@@ -27,6 +27,7 @@ import { McpServerPanel } from "@/components/dashboard/McpServerPanel";
 import { GithubIntel } from "@/components/dashboard/GithubIntel";
 import { Chatbot } from "@/components/dashboard/Chatbot";
 import { MalwareIntelligence } from "@/components/dashboard/MalwareIntelligence";
+import { ThreatActorIntelligence } from "@/components/dashboard/ThreatActorIntelligence";
 import { CveDetailDrawer } from "@/components/dashboard/CveDetailDrawer";
 import { MalwareDetailDrawer } from "@/components/dashboard/MalwareDetailDrawer";
 import { SelectionProvider } from "@/context/SelectionContext";
@@ -42,6 +43,7 @@ const TABS = [
   { id: "threat-actors", label: "Ransomware Data", icon: Skull },
   { id: "github-intel", label: "GitHub Intel", icon: Github },
   { id: "malware-intelligence", label: "Malware Intelligence", icon: Bug },
+  { id: "actor-intelligence", label: "Threat Actor Intelligence", icon: UserSearch },
   { id: "news", label: "Security News", icon: Newspaper },
   { id: "ai-assistant", label: "AI Assistant", icon: Bot },
   { id: "sources", label: "Sources", icon: Wifi },
@@ -145,6 +147,7 @@ export function DashboardPage() {
       )}
       {activeTab === "github-intel" && <GithubIntel />}
       {activeTab === "malware-intelligence" && <MalwareIntelligence />}
+      {activeTab === "actor-intelligence" && <ThreatActorIntelligence />}
       {activeTab === "news" && <SecurityNews initialSourceFilter={newsSourceFilter} />}
       {activeTab === "ai-assistant" && <Chatbot />}
       {activeTab === "sources" && (

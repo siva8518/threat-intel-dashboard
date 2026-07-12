@@ -558,6 +558,40 @@ export interface MalwareIntelligenceEntity {
   articles: MalwareIntelligenceArticleRef[];
 }
 
+export type ThreatActorType = "APT" | "Cybercrime" | "Ransomware" | "Hacktivist" | "Initial Access Broker" | "Insider" | "Unknown";
+
+export type ThreatActorIntelligenceArticleRef = MalwareIntelligenceArticleRef;
+
+/**
+ * One canonical, deduped threat-actor record -- built by automatically
+ * extracting names from news article text (server/threatActorExtraction.js),
+ * no manually maintained roster, seeded with every MITRE ATT&CK Groups entry.
+ * `verified` means confirmed against ATT&CK's Groups list or a ransomware
+ * tracker; unverified records are reported by news coverage alone.
+ */
+export interface ThreatActorIntelligenceEntity {
+  id: string;
+  name: string;
+  aliases: string[];
+  type: ThreatActorType;
+  description: string | null;
+  attackId: string | null;
+  attackUrl: string | null;
+  country: string | null;
+  motivations: string[];
+  activeSince: string | null;
+  verified: boolean;
+  malwareUsed: string[];
+  targetedIndustries: string[];
+  targetedCountries: string[];
+  cveExploited: string[];
+  techniqueIds: string[];
+  firstSeen: string;
+  lastSeen: string;
+  mentionCount: number;
+  articles: ThreatActorIntelligenceArticleRef[];
+}
+
 /** Local RAG chatbot -- see server/rag/. Runs entirely against a local Ollama install, no paid API. */
 export interface ChatHealth {
   ollamaAvailable: boolean;

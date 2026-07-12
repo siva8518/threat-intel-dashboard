@@ -41,9 +41,9 @@ server/
   scheduler.js     runs every connector once at boot, then on its own intervalMs forever
   connectors/      one module per scheduled/bulk source (see table below); index.js registers them all
   lookups/         on-demand-only single-indicator lookups (VirusTotal, GreyNoise, Shodan,
-                  Hybrid Analysis, LeakIX, crt.sh, RIPEstat, Team Cymru, Hudson Rock, CIRCL) --
-                  never scheduled/cached in bulk, called live by IOC Search (CIRCL is called from
-                  the single-CVE route instead, as an NVD fallback)
+                  Hybrid Analysis, LeakIX, crt.sh, RIPEstat, Team Cymru, Hudson Rock, SANS ISC,
+                  CIRCL) -- never scheduled/cached in bulk, called live by IOC Search (CIRCL is
+                  called from the single-CVE route instead, as an NVD fallback)
   data/
     malware-attack-map.json   curated malware-family -> ATT&CK technique-id seed list (see caveats below)
   correlate.js     CVE+KEV+EPSS join, cross-source IOC dedup, malware->ATT&CK mapping,
@@ -75,7 +75,7 @@ server/
 | Exploit intelligence | [Exploit-DB](https://gitlab.com/exploit-database/exploitdb) CSV mirror (CVE<->PoC correlation) + [VulnCheck KEV](https://vulncheck.com/kev) (larger, exploit-linked exploited-CVE catalog vs CISA's own) | Exploit-DB keyless; VulnCheck key optional | Bulk |
 | Detection rule coverage | [YARA-Rules](https://github.com/Yara-Rules/rules) + [SigmaHQ](https://github.com/SigmaHQ/sigma) -- filename-based family/actor index, cross-referenced against Trending Malware (see Known limitations) | No | Bulk (periodic tree sync) |
 | Single-CVE lookup fallback | [CIRCL CVE Search](https://cve.circl.lu/) -- used only when NVD doesn't have a record | No | Live, fallback only |
-| IOC Search (on-demand) | OTX, AbuseIPDB, Pulsedive, VirusTotal, GreyNoise, Shodan, Hybrid Analysis, [LeakIX](https://leakix.net/), [crt.sh](https://crt.sh/) (domain/cert transparency), [RIPEstat](https://stat.ripe.net/) (IP/ASN), [Team Cymru](https://www.team-cymru.com/) (IP/hash, DNS-based), [Hudson Rock Cavalier](https://www.hudsonrock.com/) (domain/infostealer exposure) | All keys optional; crt.sh/RIPEstat/Team Cymru/Hudson Rock are fully keyless | **Lookup-only** -- these free tiers don't offer a bulk feed (or, for Hybrid Analysis, its old bulk feed no longer exists), so they only run when you search a specific indicator. Each is throttled server-side (`server/lib/lookupLimiter.js`) to its own free-tier rate limit and cached for 10 minutes per indicator. |
+| IOC Search (on-demand) | OTX, AbuseIPDB, Pulsedive, VirusTotal, GreyNoise, Shodan, Hybrid Analysis, [LeakIX](https://leakix.net/), [crt.sh](https://crt.sh/) (domain/cert transparency), [RIPEstat](https://stat.ripe.net/) (IP/ASN), [Team Cymru](https://www.team-cymru.com/) (IP/hash, DNS-based), [Hudson Rock Cavalier](https://www.hudsonrock.com/) (domain/infostealer exposure), [SANS ISC/DShield](https://isc.sans.edu/api/) (IP reputation) | All keys optional; crt.sh/RIPEstat/Team Cymru/Hudson Rock/SANS ISC are fully keyless | **Lookup-only** -- these free tiers don't offer a bulk feed (or, for Hybrid Analysis, its old bulk feed no longer exists), so they only run when you search a specific indicator. Each is throttled server-side (`server/lib/lookupLimiter.js`) to its own free-tier rate limit and cached for 10 minutes per indicator. |
 | GitHub Intel | [GitHub Search + REST API](https://docs.github.com/en/rest) -- repo discovery, README/rule-file content, correlated against every source above | `GITHUB_TOKEN` strongly recommended (works without one) | Bulk, two-tier cadence (see below) |
 
 If a source is unreachable or its key isn't configured, its panel/contribution shows a clean
@@ -595,6 +595,14 @@ read server-side only and never reach the browser bundle -- none are `VITE_`-pre
   Hash Registry are both DNS TXT record zones (confirmed live via direct `nslookup`), queried with
   Node's `dns.resolveTxt`. A non-existent-domain DNS response means "not in the registry", not an
   error, and is treated as such rather than surfaced as a failure.
+- **SANS ISC/DShield (`server/lookups/isc.js`) has no API-key mechanism for its query API at all** --
+  confirmed live against the real endpoint and ISC's own docs ("Currently, we do not require
+  authentication"). A registered account's API key on isc.sans.edu is for *submitting* honeypot/
+  firewall logs, a different feature this dashboard doesn't use -- so this lookup is fully keyless,
+  just sends a descriptive `User-Agent` per ISC's request. Also confirmed live that its `count`/
+  `attacks` fields (recent honeypot-reported activity) are null for most IPs, including ones ISC's
+  own "top attackers" list ranks highly -- `threatfeeds` (cross-referenced third-party blocklists)
+  is the more reliably populated signal and drives the verdict.
 - **3 national CERT RSS feeds evaluated, only 1 added**: JPCERT/CC's English feed is confirmed live
   (RSS 1.0/RDF using `<dc:date>` instead of `<pubDate>` -- `server/lib/rss.js` now falls back to it).
   ACSC (Australia)'s RSS endpoints connection-refused outright from this environment, the same

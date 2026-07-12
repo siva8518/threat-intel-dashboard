@@ -64,11 +64,11 @@ function matchNames(title, names) {
   return Array.from(hits);
 }
 
-function matchCveIds(title) {
+export function matchCveIds(title) {
   return Array.from(new Set((title.match(CVE_PATTERN) ?? []).map((id) => id.toUpperCase())));
 }
 
-function matchIndustries(title) {
+export function matchIndustries(title) {
   const lowerTitle = norm(title);
   const hits = [];
   for (const [bucket, keywords] of Object.entries(industryMap)) {
@@ -78,7 +78,7 @@ function matchIndustries(title) {
   return hits;
 }
 
-function matchCountries(title) {
+export function matchCountries(title) {
   const hits = [];
   for (const name of Object.values(countryNames)) {
     if (typeof name !== "string") continue;

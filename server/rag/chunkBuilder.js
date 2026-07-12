@@ -8,6 +8,7 @@ import * as cache from "../cache.js";
 import { ransomwareCampaigns as getRansomwareCampaigns } from "../ransomwareCampaigns.js";
 import { correlateCves } from "../correlate.js";
 import { getAllEntities as getMalwareEntities } from "../malwareIntelligence.js";
+import { getAllEntities as getActorEntities } from "../threatActorIntelligence.js";
 import { MAX_CHUNKS_PER_SOURCE as CAP } from "./config.js";
 
 function cveChunks() {
@@ -49,18 +50,48 @@ function ransomwareChunks() {
   }));
 }
 
+// Sourced from server/threatActorIntelligence.js -- the canonical, deduped
+// "one record per actor" store built by automatically extracting names from
+// news article text (server/threatActorExtraction.js) and enriching/merging
+// against MITRE ATT&CK's Groups list, ransomware tracker data, and
+// server/malwareIntelligence.js's own entities (for malware<->actor
+// co-mentions). reconcile() seeds one entity per ATT&CK group up front, so
+// this is a strict superset of the old plain-ATT&CK actor chunks it replaces
+// -- nothing regresses, and a brand-new group named in a vendor blog before
+// it ever reaches ATT&CK still gets a real, citable chunk the same way
+// malwareChunks() fixed this for malware families.
 function actorChunks() {
-  const groups = (cache.getEntry("attack").data?.groups ?? []).slice(0, CAP.actors);
-  return groups.map((g) => ({
-    id: `actor:${g.attackId}`,
-    text:
-      `Threat actor ${g.name}${g.aliases?.length ? ` (aliases: ${g.aliases.join(", ")})` : ""}. ` +
-      `${g.description ?? ""} ${g.country ? `Believed origin: ${g.country}.` : ""} ` +
-      `${g.motivations?.length ? `Motivation: ${g.motivations.join(", ")}.` : ""} ` +
-      `${g.activeSince ? `Active since ${g.activeSince}.` : ""} ` +
-      `${g.targetIndustries?.length ? `Targets: ${g.targetIndustries.join(", ")}.` : ""}`,
-    metadata: { type: "actor", label: g.name, url: g.url ?? null, date: null },
-  }));
+  const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
+  const techniqueById = new Map(attackIndex.map((t) => [t.id, t]));
+  const entities = getActorEntities().slice(0, CAP.actors);
+
+  return entities.map((a) => {
+    const techniqueNames = a.techniqueIds
+      .map((id) => techniqueById.get(id))
+      .filter(Boolean)
+      .slice(0, 10)
+      .map((t) => `${t.name} (${t.id})`)
+      .join(", ");
+    const recentArticles = a.articles.slice(0, 5).map((n) => `"${n.title}" (${n.source}, ${n.publishedDate?.slice(0, 10)})`).join("; ");
+
+    return {
+      id: `actor:${a.id}`,
+      text:
+        `Threat actor "${a.name}"${a.aliases.length ? ` (aliases: ${a.aliases.join(", ")})` : ""}, type: ${a.type}` +
+        `${a.verified ? " -- confirmed" : " -- reported in news coverage, not yet confirmed via MITRE ATT&CK or a ransomware tracker"}. ` +
+        `${a.description ? `${a.description} ` : ""}` +
+        `${a.country ? `Believed origin: ${a.country}. ` : ""}` +
+        `${a.motivations.length ? `Motivation: ${a.motivations.join(", ")}. ` : ""}` +
+        `${a.activeSince ? `Active since ${a.activeSince}. ` : ""}` +
+        `${a.malwareUsed.length ? `Uses malware/tools: ${a.malwareUsed.join(", ")}. ` : ""}` +
+        `${a.targetedIndustries.length ? `Targets industries: ${a.targetedIndustries.join(", ")}. ` : ""}` +
+        `${a.targetedCountries.length ? `Targets countries: ${a.targetedCountries.join(", ")}. ` : ""}` +
+        `${a.cveExploited.length ? `Exploits: ${a.cveExploited.join(", ")}. ` : ""}` +
+        `${techniqueNames ? `Uses techniques: ${techniqueNames}. ` : ""}` +
+        `${recentArticles ? `Recent coverage: ${recentArticles}.` : ""}`,
+      metadata: { type: "actor", label: a.name, url: a.attackUrl, date: a.lastSeen },
+    };
+  });
 }
 
 function techniqueChunks() {

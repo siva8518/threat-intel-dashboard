@@ -24,6 +24,7 @@ import type {
   RansomwareCampaign,
   SourceHealth,
   ThreatActor,
+  ThreatActorIntelligenceEntity,
   ThreatActorProfile,
   ThreatActorSummary,
   ThreatTimelineEvent,
@@ -94,6 +95,10 @@ export async function fetchTrendingMalware(): Promise<TrendingMalwareEntry[]> {
 
 export async function fetchMalwareIntelligence(): Promise<{ entities: MalwareIntelligenceEntity[] }> {
   return fetchJson("/api/dashboard/malware-intelligence", { source: "Dashboard API" });
+}
+
+export async function fetchThreatActorIntelligence(): Promise<{ entities: ThreatActorIntelligenceEntity[] }> {
+  return fetchJson("/api/dashboard/threat-actor-intelligence", { source: "Dashboard API" });
 }
 
 export async function fetchAttackTechniques(): Promise<AttackTechnique[]> {

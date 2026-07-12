@@ -18,6 +18,7 @@ import { checkIndicator as checkCrtsh } from "../lookups/crtsh.js";
 import { checkIndicator as checkRipestat } from "../lookups/ripestat.js";
 import { checkIndicator as checkTeamCymru } from "../lookups/teamCymru.js";
 import { checkIndicator as checkHudsonRock } from "../lookups/hudsonRock.js";
+import { checkIndicator as checkIsc } from "../lookups/isc.js";
 import { lookupCve as lookupCveCircl } from "../lookups/circl.js";
 import { matchWarninglists } from "../connectors/mispWarninglists.js";
 import { throttleAndCache } from "../lib/lookupLimiter.js";
@@ -35,6 +36,8 @@ import { recordAndGetSourceHistory, computeReliability } from "../sourceReliabil
 import { recordAndGetPriorSnapshot } from "../malwareTrendHistory.js";
 import { recordAndGetScoreHistory } from "../threatScoreHistory.js";
 import { getAllEntities as getMalwareIntelligenceEntities } from "../malwareIntelligence.js";
+import { getAllEntities as getThreatActorIntelligenceEntities } from "../threatActorIntelligence.js";
+import { getNewsTechniqueCounts } from "../attackTechniqueIntelligence.js";
 
 export const router = Router();
 
@@ -286,15 +289,27 @@ router.get("/dashboard/malware-intelligence", (_req, res) => {
   res.json({ entities: getMalwareIntelligenceEntities() });
 });
 
+// --- Threat Actor Intelligence (canonical, deduped entity store, see server/threatActorIntelligence.js) ---
+// One record per actor/group, built from names automatically extracted from
+// news article text (server/threatActorExtraction.js + threatActorExtractionJob.js),
+// seeded with every MITRE ATT&CK Groups entry, and enriched against
+// ransomware tracker data + malware-intelligence co-mentions -- distinct from
+// /dashboard/threat-actors above (a lightweight ransomware+OTX merge with no
+// memory) and /dashboard/threat-actor-profiles/:id (a live, on-demand,
+// ATT&CK-only correlation with no persisted news-derived actors at all).
+router.get("/dashboard/threat-actor-intelligence", (_req, res) => {
+  res.json({ entities: getThreatActorIntelligenceEntities() });
+});
+
 router.get("/dashboard/attack-techniques", (_req, res) => {
   const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
-  res.json(computeAttackTechniquesObserved(threatFeedIocs(), attackIndex));
+  res.json(computeAttackTechniquesObserved(threatFeedIocs(), attackIndex, getNewsTechniqueCounts()));
 });
 
 // --- ATT&CK Tactic Heat Map (see server/correlate.js#computeAttackTacticHeatmap) ---
 router.get("/dashboard/attack-tactic-heatmap", (_req, res) => {
   const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
-  res.json(computeAttackTacticHeatmap(threatFeedIocs(), attackIndex));
+  res.json(computeAttackTacticHeatmap(threatFeedIocs(), attackIndex, getNewsTechniqueCounts()));
 });
 
 // --- Ransomware campaigns + threat actor activity ------------------------
@@ -584,6 +599,7 @@ const IOC_LOOKUPS = {
     throttleAndCache("LeakIX", 5_000, checkLeakix),
     throttleAndCache("RIPEstat", 1_000, checkRipestat),
     throttleAndCache("Team Cymru", 1_000, checkTeamCymru),
+    throttleAndCache("SANS ISC", 2_000, checkIsc),
     checkMispWarninglists,
   ],
   domain: [

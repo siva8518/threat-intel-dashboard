@@ -53,7 +53,10 @@ export function AttackTacticHeatmap() {
         <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
           <Flame className="h-4 w-4 text-primary" />
           MITRE ATT&amp;CK Tactic Heat Map{" "}
-          <span className="text-muted" title="Derived from a curated static malware-to-technique map, not a live feed">
+          <span
+            className="text-muted"
+            title="Derived from a curated malware-to-technique map plus techniques automatically extracted from news article text -- not a live telemetry feed"
+          >
             (best-effort, see tooltip)
           </span>
         </CardTitle>

@@ -13,7 +13,10 @@ export function AttackTechniques() {
       <CardHeader>
         <CardTitle className="text-base font-semibold text-foreground">
           MITRE ATT&amp;CK Techniques Observed{" "}
-          <span className="text-muted" title="Derived from a curated static malware-to-technique map, not a live feed">
+          <span
+            className="text-muted"
+            title="Derived from a curated malware-to-technique map plus techniques automatically extracted from news article text -- not a live telemetry feed"
+          >
             (best-effort, see tooltip)
           </span>
         </CardTitle>

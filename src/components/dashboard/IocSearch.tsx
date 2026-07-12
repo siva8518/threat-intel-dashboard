@@ -33,7 +33,8 @@ export function IocSearch() {
         <CardTitle className="text-base font-semibold text-foreground">
           IOC Search{" "}
           <span className="text-muted">
-            (correlates OTX, AbuseIPDB, Pulsedive, VirusTotal, GreyNoise, Shodan, Hybrid Analysis, LeakIX, crt.sh, RIPEstat, Team Cymru &amp; Hudson Rock live)
+            (correlates OTX, AbuseIPDB, Pulsedive, VirusTotal, GreyNoise, Shodan, Hybrid Analysis, LeakIX, crt.sh, RIPEstat, Team Cymru, Hudson Rock &amp; SANS ISC
+            live)
           </span>
         </CardTitle>
       </CardHeader>
