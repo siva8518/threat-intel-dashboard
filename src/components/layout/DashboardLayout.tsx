@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Topbar } from "./Topbar";
 import { TopTabs, type TabItem } from "./TopTabs";
 import { CommandPalette } from "./CommandPalette";
+import { FlashReportBanner } from "../dashboard/FlashReportBanner";
 
 interface DashboardLayoutProps {
   tabs: readonly TabItem[];
@@ -31,6 +32,7 @@ export function DashboardLayout({ tabs, activeTab, onTabChange, onSelectActor, c
     <div className="flex min-h-screen flex-col">
       <Topbar onOpenPalette={() => setPaletteOpen(true)} />
       <TopTabs tabs={tabs} activeTab={activeTab} onChange={onTabChange} />
+      <FlashReportBanner onOpenWatchlist={() => onTabChange("watchlist")} />
       <main className="flex-1 p-4 md:p-6">
         {/*
           Deliberately no AnimatePresence here -- with mode="wait" it never

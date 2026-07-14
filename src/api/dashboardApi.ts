@@ -4,6 +4,8 @@ import type {
   AttackTechnique,
   CampaignIntelligenceEntity,
   DarkWebIntelligenceEntity,
+  WatchlistKeyword,
+  FlashReport,
   CorrelationCard,
   CveProfile,
   CveProgramActivity,
@@ -108,6 +110,35 @@ export async function fetchCampaignIntelligence(): Promise<{ entities: CampaignI
 
 export async function fetchDarkWebIntelligence(): Promise<{ entities: DarkWebIntelligenceEntity[] }> {
   return fetchJson("/api/dashboard/darkweb-intelligence", { source: "Dashboard API" });
+}
+
+export async function fetchWatchlist(): Promise<{ keywords: WatchlistKeyword[] }> {
+  return fetchJson("/api/dashboard/watchlist", { source: "Dashboard API" });
+}
+
+export async function addWatchlistKeyword(label: string): Promise<{ keyword: WatchlistKeyword }> {
+  return fetchJson("/api/dashboard/watchlist", {
+    source: "Dashboard API",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function removeWatchlistKeyword(id: string): Promise<{ ok: boolean }> {
+  return fetchJson(`/api/dashboard/watchlist/${encodeURIComponent(id)}`, { source: "Dashboard API", method: "DELETE" });
+}
+
+export async function fetchFlashReports(): Promise<{ reports: FlashReport[]; unreadCount: number }> {
+  return fetchJson("/api/dashboard/flash-reports", { source: "Dashboard API" });
+}
+
+export async function markFlashReportRead(id: string): Promise<{ ok: boolean }> {
+  return fetchJson(`/api/dashboard/flash-reports/${encodeURIComponent(id)}/read`, { source: "Dashboard API", method: "POST" });
+}
+
+export async function markAllFlashReportsRead(): Promise<{ ok: boolean }> {
+  return fetchJson("/api/dashboard/flash-reports/read-all", { source: "Dashboard API", method: "POST" });
 }
 
 export async function fetchAttackTechniques(): Promise<AttackTechnique[]> {

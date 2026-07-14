@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, Bug, Crosshair, Ghost, Github, LayoutDashboard, Network, Newspaper, Search, ShieldAlert, Skull, UserSearch, Wifi } from "lucide-react";
+import { Bot, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, Search, ShieldAlert, Skull, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
 import { WorldThreatMap } from "@/components/dashboard/WorldThreatMap";
@@ -29,6 +29,7 @@ import { MalwareIntelligence } from "@/components/dashboard/MalwareIntelligence"
 import { ThreatActorIntelligence } from "@/components/dashboard/ThreatActorIntelligence";
 import { CampaignIntelligence } from "@/components/dashboard/CampaignIntelligence";
 import { DarkWebIntelligence } from "@/components/dashboard/DarkWebIntelligence";
+import { Watchlist } from "@/components/dashboard/Watchlist";
 import { CveDetailDrawer } from "@/components/dashboard/CveDetailDrawer";
 import { MalwareDetailDrawer } from "@/components/dashboard/MalwareDetailDrawer";
 import { SelectionProvider } from "@/context/SelectionContext";
@@ -47,6 +48,7 @@ const TABS = [
   { id: "campaign-intelligence", label: "Campaign Intelligence", icon: Crosshair },
   { id: "darkweb-intelligence", label: "Dark Web Intelligence", icon: Ghost },
   { id: "news", label: "Security News", icon: Newspaper },
+  { id: "watchlist", label: "Watchlist", icon: Eye },
   { id: "ai-assistant", label: "AI Assistant", icon: Bot },
   { id: "sources", label: "Sources", icon: Wifi },
 ] as const;
@@ -152,6 +154,7 @@ export function DashboardPage() {
       {activeTab === "campaign-intelligence" && <CampaignIntelligence />}
       {activeTab === "darkweb-intelligence" && <DarkWebIntelligence />}
       {activeTab === "news" && <SecurityNews initialSourceFilter={newsSourceFilter} />}
+      {activeTab === "watchlist" && <Watchlist />}
       {activeTab === "ai-assistant" && <Chatbot />}
       {activeTab === "sources" && (
         <>

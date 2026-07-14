@@ -670,6 +670,36 @@ export interface DarkWebIntelligenceEntity {
   articles: DarkWebIntelligenceArticleRef[];
 }
 
+/**
+ * One user-curated name being continuously monitored across every
+ * intelligence source this platform tracks -- see server/watchlist.js. A
+ * name written as "Full Name (ABBR)" is split into `primary` + `aliases`
+ * automatically so either form matches.
+ */
+export interface WatchlistKeyword {
+  id: string;
+  label: string;
+  primary: string;
+  aliases: string[];
+  addedAt: string;
+}
+
+export type FlashReportSourceType = "news" | "malware" | "actor" | "campaign" | "darkweb" | "ransomware";
+
+/** One watchlist match -- a tracked name found somewhere in the platform's data. See server/watchlistScanner.js. */
+export interface FlashReport {
+  id: string;
+  keywordId: string;
+  keywordLabel: string;
+  sourceType: FlashReportSourceType;
+  sourceLabel: string;
+  title: string;
+  url: string | null;
+  snippet: string | null;
+  foundAt: string;
+  read: boolean;
+}
+
 /** Local RAG chatbot -- see server/rag/. Runs entirely against a local Ollama install, no paid API. */
 export interface ChatHealth {
   ollamaAvailable: boolean;

@@ -40,6 +40,7 @@ import { getAllEntities as getThreatActorIntelligenceEntities } from "../threatA
 import { getAllEntities as getCampaignIntelligenceEntities } from "../campaignIntelligence.js";
 import { getNewsTechniqueCounts } from "../attackTechniqueIntelligence.js";
 import { getAllEntities as getDarkWebIntelligenceEntities } from "../darkWebIntelligence.js";
+import { getKeywords, addKeyword, removeKeyword, getFlashReports, getUnreadCount, markRead, markAllRead } from "../watchlist.js";
 
 export const router = Router();
 
@@ -322,6 +323,40 @@ router.get("/dashboard/campaign-intelligence", (_req, res) => {
 // server/connectors/newsFeeds.js.
 router.get("/dashboard/darkweb-intelligence", (_req, res) => {
   res.json({ entities: getDarkWebIntelligenceEntities() });
+});
+
+// --- Watchlist (user-curated client/org names, continuously monitored --
+// see server/watchlist.js + server/watchlistScanner.js) ---
+router.get("/dashboard/watchlist", (_req, res) => {
+  res.json({ keywords: getKeywords() });
+});
+
+router.post("/dashboard/watchlist", (req, res) => {
+  const label = (req.body?.label ?? "").trim();
+  if (!label) return res.status(400).json({ error: "label is required" });
+  res.json({ keyword: addKeyword(label) });
+});
+
+router.delete("/dashboard/watchlist/:id", (req, res) => {
+  const removed = removeKeyword(req.params.id);
+  if (!removed) return res.status(404).json({ error: "not found" });
+  res.json({ ok: true });
+});
+
+// --- Flash Reports (watchlist match feed) ---
+router.get("/dashboard/flash-reports", (_req, res) => {
+  res.json({ reports: getFlashReports(), unreadCount: getUnreadCount() });
+});
+
+router.post("/dashboard/flash-reports/:id/read", (req, res) => {
+  const ok = markRead(req.params.id);
+  if (!ok) return res.status(404).json({ error: "not found" });
+  res.json({ ok: true });
+});
+
+router.post("/dashboard/flash-reports/read-all", (_req, res) => {
+  markAllRead();
+  res.json({ ok: true });
 });
 
 router.get("/dashboard/attack-techniques", (_req, res) => {

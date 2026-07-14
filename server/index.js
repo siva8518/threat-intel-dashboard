@@ -21,6 +21,7 @@ import { router as dashboardRouter } from "./routes/dashboard.js";
 import { router as chatRouter } from "./routes/chat.js";
 import { startRagIndexer } from "./rag/indexer.js";
 import { startCombinedExtractionJob } from "./combinedExtractionJob.js";
+import { startWatchlistScannerJob } from "./watchlistScanner.js";
 import { log } from "./lib/log.js";
 
 const app = express();
@@ -48,6 +49,7 @@ app.get("*", (_req, res) => {
 startScheduler(connectors);
 startRagIndexer();
 startCombinedExtractionJob();
+startWatchlistScannerJob();
 
 app.listen(PORT, () => {
   log.info("server", `Threat Intel Dashboard backend listening on port ${PORT}`);
