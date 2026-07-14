@@ -1,45 +1,16 @@
-import { Clock, ClipboardList } from "lucide-react";
+import { ClipboardList } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ErrorState } from "./ErrorState";
+import { ErrorState, EmptyState } from "./ErrorState";
 import { BreakingNewsStrip, useBreakingNews } from "./BreakingNewsStrip";
-import { useDailySummary } from "@/hooks/useDailySummary";
-import { useSelection } from "@/context/SelectionContext";
-import type { DailySummaryBullet } from "@/types/threat-intel";
 
-function formatReadingTime(seconds: number) {
-  if (seconds < 60) return `${seconds} seconds`;
-  const minutes = Math.round(seconds / 60);
-  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-}
-
-export type DailySummaryTargetTab = "cves" | "threat-actors" | "malware-intelligence";
-
-interface DailySummaryProps {
-  onNavigateTab: (tab: DailySummaryTargetTab) => void;
-  onNavigateNewsSource: (source: string) => void;
-}
-
-/** Short rule-based rollup of today's activity (see server/dailySummary.js) fronted by a Breaking News strip (see BreakingNewsStrip.tsx) -- clubbed into one card so Overview shows both "what's urgent right now" and "what happened today" in a single glance, instead of burying breaking news on the Security News tab. */
-export function DailySummary({ onNavigateTab, onNavigateNewsSource }: DailySummaryProps) {
-  const { data, isLoading, isError, error } = useDailySummary();
-  const breaking = useBreakingNews();
-  const { selectMalware } = useSelection();
-
-  function handleClick(bullet: DailySummaryBullet) {
-    if (!bullet.action) return;
-    switch (bullet.action.type) {
-      case "tab":
-        onNavigateTab(bullet.action.tab);
-        break;
-      case "malware":
-        selectMalware({ family: bullet.action.family, count: 0, sources: [], techniques: [], detectionRules: [] });
-        break;
-      case "news-source":
-        onNavigateNewsSource(bullet.action.source);
-        break;
-    }
-  }
+/**
+ * Top News strip (see BreakingNewsStrip.tsx) for the Overview tab -- the
+ * "Today's Summary" bullet rollup that used to live below it was removed;
+ * this card is now just that strip in its own titled card.
+ */
+export function DailySummary() {
+  const { items, isLoading, isError, error } = useBreakingNews();
 
   return (
     <Card>
@@ -50,38 +21,18 @@ export function DailySummary({ onNavigateTab, onNavigateNewsSource }: DailySumma
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <BreakingNewsStrip items={breaking} />
         {isLoading ? (
           <div className="space-y-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} className="h-4 w-full" />
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-8 w-full" />
             ))}
           </div>
-        ) : isError || !data ? (
-          <ErrorState message={error?.message ?? "The Daily Summary is unavailable right now."} />
+        ) : isError ? (
+          <ErrorState message={error?.message ?? "Top news is unavailable right now."} />
+        ) : items.length === 0 ? (
+          <EmptyState message="No critical/high severity headlines in the last 6 hours." />
         ) : (
-          <div>
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Today's Summary</p>
-            <ul className="space-y-1">
-              {data.bullets.map((bullet, i) => (
-                <li key={i}>
-                  <button
-                    type="button"
-                    onClick={() => handleClick(bullet)}
-                    disabled={!bullet.action}
-                    className="flex w-full items-start gap-2 rounded-lg px-1.5 py-1 text-left text-sm text-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-white/[0.05]"
-                  >
-                    <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-primary" />
-                    <span>{bullet.text}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-3 flex items-center gap-1.5 border-t border-white/[0.06] pt-2 text-xs text-muted">
-              <Clock className="h-3.5 w-3.5" />
-              Estimated reading time: {formatReadingTime(data.readingTimeSeconds)}
-            </div>
-          </div>
+          <BreakingNewsStrip items={items} />
         )}
       </CardContent>
     </Card>

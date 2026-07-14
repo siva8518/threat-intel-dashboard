@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,7 @@ import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
+import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { useThreatFeed } from "@/hooks/useThreatFeed";
 import type { IocType } from "@/types/threat-intel";
 
@@ -17,10 +18,20 @@ const TYPE_LABEL: Record<IocType, string> = {
   unknown: "Unknown",
 };
 
-export function ThreatFeedTable() {
+interface ThreatFeedTableProps {
+  /** Seeds the date filter on arrival -- set when navigating here from a "New Malware Samples"/"New IOCs" click so the table opens scoped to what was just counted, not the entire feed. Clearing the calendar (see DateRangeFilter.tsx) reveals everything. */
+  initialDateRange?: DateRange;
+}
+
+export function ThreatFeedTable({ initialDateRange }: ThreatFeedTableProps = {}) {
   const { iocs, isLoading, isError, error } = useThreatFeed();
   const [sourceFilter, setSourceFilter] = useState("ALL");
   const [familyFilter, setFamilyFilter] = useState("");
+  const [dateRange, setDateRange] = useState<DateRange>(initialDateRange ?? EMPTY_DATE_RANGE);
+
+  useEffect(() => {
+    if (initialDateRange) setDateRange(initialDateRange);
+  }, [initialDateRange]);
 
   const availableSources = useMemo(() => Array.from(new Set(iocs.flatMap((i) => i.sources))).sort(), [iocs]);
 
@@ -28,9 +39,10 @@ export function ThreatFeedTable() {
     return iocs.filter((ioc) => {
       if (sourceFilter !== "ALL" && !ioc.sources.includes(sourceFilter)) return false;
       if (familyFilter && !ioc.malwareFamily.toLowerCase().includes(familyFilter.toLowerCase())) return false;
+      if (!isWithinDateRange(ioc.firstSeen, dateRange)) return false;
       return true;
     });
-  }, [iocs, sourceFilter, familyFilter]);
+  }, [iocs, sourceFilter, familyFilter, dateRange]);
 
   return (
     <Card>
@@ -56,6 +68,7 @@ export function ThreatFeedTable() {
               </option>
             ))}
           </Select>
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
         </div>
       </CardHeader>
       <CardContent>
@@ -68,7 +81,7 @@ export function ThreatFeedTable() {
         ) : isError ? (
           <ErrorState message={error?.message ?? "Threat feed is currently unreachable."} />
         ) : filtered.length === 0 ? (
-          <EmptyState message="No indicators matched the current filters." />
+          <EmptyState message="No indicators matched the current filters. Try widening or clearing the date range." />
         ) : (
           <Table>
             <TableHead>

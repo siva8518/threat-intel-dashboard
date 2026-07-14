@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ExternalLink, Globe2, ShieldAlert, Skull, TrendingUp, Bug } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -194,24 +194,12 @@ function ArticleRow({ item }: { item: NewsItem }) {
   );
 }
 
-interface SecurityNewsProps {
-  /** Deep-link target set by clicking a source in the AI Daily Brief ("{source} published N articles today"). */
-  initialSourceFilter?: string | null;
-}
-
-export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
+export function SecurityNews() {
   const { items, isLoading, isError, error } = useSecurityNews();
-  const [sourceFilter, setSourceFilter] = useState(initialSourceFilter ?? "ALL");
+  const [sourceFilter, setSourceFilter] = useState("ALL");
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [severityFilter, setSeverityFilter] = useState<NewsSeverity | "all">("all");
   const [dateRange, setDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
-
-  // Re-syncs whenever a fresh navigation sets a new source (e.g. clicking a
-  // different AI Daily Brief bullet on a later visit) rather than only on
-  // first mount.
-  useEffect(() => {
-    if (initialSourceFilter) setSourceFilter(initialSourceFilter);
-  }, [initialSourceFilter]);
 
   const availableSources = useMemo(() => Array.from(new Set(items.map((i) => i.source))).sort(), [items]);
 

@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "./ErrorState";
-import { TopSecurityEventsToday, type TodayEventsTargetTab } from "./TopSecurityEventsToday";
+import { TopSecurityEventsToday, type TodayEventKey } from "./TopSecurityEventsToday";
 import { useExecutiveSummary } from "@/hooks/useExecutiveSummary";
 import { useSelection } from "@/context/SelectionContext";
 import { fetchCveById } from "@/api/dashboardApi";
@@ -119,13 +119,15 @@ function FactCard({ icon, label, onClick, loading, title, children }: FactCardPr
 
 interface ExecutiveThreatSummaryProps {
   onNavigateToActors: () => void;
+  onNavigateToCampaigns: () => void;
   onNavigateToCountry: (countryCode: string) => void;
   onNavigateToIndustry: (industry: string) => void;
-  onNavigateTodayEvent: (tab: TodayEventsTargetTab) => void;
+  onNavigateTodayEvent: (key: TodayEventKey) => void;
 }
 
 export function ExecutiveThreatSummary({
   onNavigateToActors,
+  onNavigateToCampaigns,
   onNavigateToCountry,
   onNavigateToIndustry,
   onNavigateTodayEvent,
@@ -235,13 +237,13 @@ export function ExecutiveThreatSummary({
               <FactCard
                 icon={<Flame className="h-3.5 w-3.5" />}
                 label="Total Active Campaigns"
-                onClick={onNavigateToActors}
-                title="Ransomware victim disclosures (ransomware.live, RansomWatch & RansomLook) + named MITRE ATT&CK threat-actor campaigns + OTX adversary-tagged pulses -- click to view ransomware activity"
+                onClick={onNavigateToCampaigns}
+                title="Ransomware victim disclosures (ransomware.live, RansomWatch & RansomLook) + named MITRE ATT&CK threat-actor campaigns + OTX adversary-tagged pulses + named campaigns identified from security-news-vendor coverage -- click to view Campaign Intelligence"
               >
                 <AnimatedCount value={data.totalActiveCampaigns} />
                 <div className="mt-0.5 text-xs font-normal text-muted">
-                  {data.campaignsBreakdown.ransomware} ransomware · {data.campaignsBreakdown.attackCampaigns} ATT&amp;CK campaigns ·{" "}
-                  {data.campaignsBreakdown.otxPulses} OTX pulses
+                  {data.campaignsBreakdown.ransomware} ransomware · {data.campaignsBreakdown.attackCampaigns} ATT&amp;CK ·{" "}
+                  {data.campaignsBreakdown.otxPulses} OTX · {data.campaignsBreakdown.newsVendors} news-vendor
                 </div>
               </FactCard>
 

@@ -11,7 +11,6 @@ import type {
   CveProgramActivity,
   CveRecord,
   CveSeverityDistribution,
-  DailySummary,
   ExecutiveSummary,
   ExploitIntelligence,
   GeoTargeting,
@@ -188,10 +187,6 @@ export async function fetchCorrelationEngine(): Promise<{ cards: CorrelationCard
 
 export async function fetchTodaySecurityEvents(): Promise<TodaySecurityEvents> {
   return fetchJson("/api/dashboard/today-events", { source: "Dashboard API" });
-}
-
-export async function fetchDailySummary(): Promise<DailySummary> {
-  return fetchJson("/api/dashboard/daily-summary", { source: "Dashboard API" });
 }
 
 export async function fetchThreatTimeline(days: number): Promise<{ events: ThreatTimelineEvent[]; days: number }> {

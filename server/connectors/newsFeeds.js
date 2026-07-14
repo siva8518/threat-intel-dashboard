@@ -372,11 +372,9 @@ const FEEDS = [
  * "major vendor threat-research coverage" grouping in the comment block at
  * the top of this file), as opposed to journalism/aggregator outlets
  * (BleepingComputer, The Hacker News, Krebs, SANS ISC's daily podcast, etc.)
- * or government/CERT advisories (CISA, UK NCSC). Exported so
- * server/dailySummary.js can prefer a real vendor report over a
- * higher-frequency but lower-signal source when picking "today's" news
- * highlight, and mirrored (kept in sync manually -- this app has no shared
- * client/server code layer) by `MAJOR_VENDOR_SOURCES` in
+ * or government/CERT advisories (CISA, UK NCSC). Mirrored (kept in sync
+ * manually -- this app has no shared client/server code layer) by
+ * `MAJOR_VENDOR_SOURCES` in
  * src/components/dashboard/SecurityNews.tsx for the "Major Vendors
  * (grouped)" filter option there.
  */

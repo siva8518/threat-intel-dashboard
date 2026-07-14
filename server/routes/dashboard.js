@@ -30,7 +30,6 @@ import { buildExecutiveSummary } from "../executiveSummary.js";
 import { buildCorrelationClusters } from "../correlationEngine.js";
 import { getTaggedNewsItems, getNewsCveCounts } from "../newsCorrelation.js";
 import { buildTodaySecurityEvents } from "../todaySecurityEvents.js";
-import { buildDailySummary } from "../dailySummary.js";
 import { buildThreatTimeline } from "../threatTimeline.js";
 import { recordAndGetSourceHistory, computeReliability } from "../sourceReliabilityHistory.js";
 import { recordAndGetPriorSnapshot } from "../malwareTrendHistory.js";
@@ -84,6 +83,7 @@ router.get("/dashboard/executive-summary", (_req, res) => {
     mergedActors: mergeThreatActors(campaigns, otxSignals, getThreatActorIntelligenceEntities()),
     attackCampaignsCount: attackData?.campaigns?.length ?? 0,
     otxActorSignalsCount: otxSignals.length,
+    campaignIntelCount: getCampaignIntelligenceEntities().length,
   });
 
   const scoreHistory = recordAndGetScoreHistory(summary.score, summary.totalActiveCampaigns);
@@ -261,11 +261,9 @@ router.get("/dashboard/malware-trending", (_req, res) => {
   res.json(computeTrendingMalware(threatFeedIocs(), attackIndex, cache.getEntry("detection-rules").data?.index));
 });
 
-// Per-family day-over-day trend, generalizing the single top-family
-// comparison server/dailySummary.js already does (see
-// server/malwareTrendHistory.js) to every family, so "which malware
-// families are increasing" is answerable with a real prior-day baseline
-// instead of a raw current-count snapshot.
+// Per-family day-over-day trend (see server/malwareTrendHistory.js), so
+// "which malware families are increasing" is answerable with a real
+// prior-day baseline instead of a raw current-count snapshot.
 router.get("/dashboard/malware-trending/deltas", (_req, res) => {
   const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
   const trending = computeTrendingMalware(threatFeedIocs(), attackIndex, cache.getEntry("detection-rules").data?.index);
@@ -440,30 +438,6 @@ router.get("/dashboard/today-events", (_req, res) => {
     githubRepos: getAllGithubRepos(),
   });
   res.json(events);
-});
-
-// --- Daily Summary (short rule-based rollup, see server/dailySummary.js) ---
-router.get("/dashboard/daily-summary", (_req, res) => {
-  const attackData = cache.getEntry("attack").data;
-  const kevEntries = cache.getEntry("cisa-kev").data?.entries;
-  const otxActorSignals = cache.getEntry("otx").data?.actorSignals;
-  const ransomwareCampaigns = getRansomwareCampaigns();
-  const iocs = threatFeedIocs();
-  const githubRepos = getAllGithubRepos();
-  const newsItems = getTaggedNewsItems({
-    newsItems: cache.getEntry("news").data?.items,
-    attackData,
-    ransomwareCampaigns,
-    threatFeedIocs: iocs,
-    kevEntries,
-    epssScores: cache.getEntry("epss").data,
-  });
-
-  const todayEvents = buildTodaySecurityEvents({ kevEntries, otxActorSignals, ransomwareCampaigns, threatFeedIocs: iocs, githubRepos, newsItems });
-  const trendingMalware = computeTrendingMalware(iocs, attackData?.techniques ?? [], cache.getEntry("detection-rules").data?.index);
-
-  const summary = buildDailySummary({ todayEvents, ransomwareCampaigns, threatFeedIocs: iocs, newsItems, trendingMalware });
-  res.json(summary);
 });
 
 // Note: the standalone "Top Threat Actors Today" / "Top CVEs Exploited This

@@ -1,11 +1,14 @@
 import { RansomwareCampaigns } from "./RansomwareCampaigns";
 import { TrendingMalware } from "./TrendingMalware";
+import type { DateRange } from "./DateRangeFilter";
 
 interface ThreatActorsHubProps {
   countryFilter?: string | null;
   onClearCountryFilter?: () => void;
   industryFilter?: string | null;
   onClearIndustryFilter?: () => void;
+  /** Deep-link target set by clicking "New Ransomware Victims" on the Overview tab -- see DashboardPage.tsx#goToTodayEvent. */
+  initialDateRange?: DateRange;
 }
 
 /**
@@ -15,7 +18,7 @@ interface ThreatActorsHubProps {
  * no separate tools source exists). Replaces what used to be two separate
  * tabs ("Ransomware & Actors" and "Trending Malware").
  */
-export function ThreatActorsHub({ countryFilter, onClearCountryFilter, industryFilter, onClearIndustryFilter }: ThreatActorsHubProps) {
+export function ThreatActorsHub({ countryFilter, onClearCountryFilter, industryFilter, onClearIndustryFilter, initialDateRange }: ThreatActorsHubProps) {
   return (
     <div className="space-y-6">
       <RansomwareCampaigns
@@ -23,6 +26,7 @@ export function ThreatActorsHub({ countryFilter, onClearCountryFilter, industryF
         onClearCountryFilter={onClearCountryFilter}
         industryFilter={industryFilter}
         onClearIndustryFilter={onClearIndustryFilter}
+        initialDateRange={initialDateRange}
       />
       <TrendingMalware />
     </div>

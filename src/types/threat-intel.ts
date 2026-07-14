@@ -393,6 +393,8 @@ export interface CampaignsBreakdown {
   ransomware: number;
   attackCampaigns: number;
   otxPulses: number;
+  /** Named campaigns identified purely from security-news-vendor coverage -- see server/campaignIntelligence.js. */
+  newsVendors: number;
 }
 
 /** One rolling daily snapshot of the score -- see server/threatScoreHistory.js. */
@@ -465,22 +467,6 @@ export interface TodaySecurityEvents {
   newMalwareSamples: number;
   githubExploits: number;
   newIocs: number;
-  generatedAt: string;
-}
-
-export type DailySummaryAction =
-  | { type: "tab"; tab: "cves" | "threat-actors" | "malware-intelligence" }
-  | { type: "malware"; family: string }
-  | { type: "news-source"; source: string };
-
-export interface DailySummaryBullet {
-  text: string;
-  action: DailySummaryAction | null;
-}
-
-export interface DailySummary {
-  bullets: DailySummaryBullet[];
-  readingTimeSeconds: number;
   generatedAt: string;
 }
 

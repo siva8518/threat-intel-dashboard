@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
+import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { useRansomwareCampaigns, useThreatActors } from "@/hooks/useRansomware";
 
 interface RansomwareCampaignsProps {
@@ -15,18 +16,26 @@ interface RansomwareCampaignsProps {
   /** Industry bucket (e.g. "LSHC") to filter to, set by clicking an industry fact in the Executive Threat Summary. */
   industryFilter?: string | null;
   onClearIndustryFilter?: () => void;
+  /** Deep-link target set by clicking "New Ransomware Victims" on the Overview tab -- see DashboardPage.tsx#goToTodayEvent. */
+  initialDateRange?: DateRange;
 }
 
-export function RansomwareCampaigns({ countryFilter, onClearCountryFilter, industryFilter, onClearIndustryFilter }: RansomwareCampaignsProps) {
+export function RansomwareCampaigns({ countryFilter, onClearCountryFilter, industryFilter, onClearIndustryFilter, initialDateRange }: RansomwareCampaignsProps) {
   const { campaigns, isLoading, isError } = useRansomwareCampaigns();
   const actors = useThreatActors();
+  const [dateRange, setDateRange] = useState<DateRange>(initialDateRange ?? EMPTY_DATE_RANGE);
+
+  useEffect(() => {
+    if (initialDateRange) setDateRange(initialDateRange);
+  }, [initialDateRange]);
 
   const filtered = useMemo(() => {
     let result = campaigns;
     if (countryFilter) result = result.filter((c) => c.country === countryFilter);
     if (industryFilter) result = result.filter((c) => c.industry === industryFilter);
+    result = result.filter((c) => isWithinDateRange(c.discoveredDate, dateRange));
     return result;
-  }, [campaigns, countryFilter, industryFilter]);
+  }, [campaigns, countryFilter, industryFilter, dateRange]);
 
   return (
     <Card>
@@ -37,6 +46,7 @@ export function RansomwareCampaigns({ countryFilter, onClearCountryFilter, indus
             (ransomware.live + OTX)
           </span>
         </CardTitle>
+        <DateRangeFilter value={dateRange} onChange={setDateRange} />
         {countryFilter && (
           <Button variant="outline" size="sm" onClick={onClearCountryFilter}>
             Filtered by country: {countryFilter}

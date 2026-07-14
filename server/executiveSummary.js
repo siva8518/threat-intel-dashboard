@@ -114,6 +114,7 @@ export function buildExecutiveSummary(sources) {
     mergedActors,
     attackCampaignsCount = 0,
     otxActorSignalsCount = 0,
+    campaignIntelCount = 0,
   } = sources;
 
   const kevAdded7d = countKevAddedSince(kevEntries, 7);
@@ -152,14 +153,17 @@ export function buildExecutiveSummary(sources) {
     countriesUnderAttack: geoTargeting.countries.slice(0, 5),
     // Broadened beyond ransomware.live/RansomWatch/RansomLook victim posts
     // to also count real named threat-actor campaigns: MITRE ATT&CK's own
-    // Campaigns objects (e.g. "APT28 Nearest Neighbor Campaign") and OTX
-    // pulses with adversary attribution -- so this isn't just "how many
-    // ransomware gangs posted a victim today."
-    totalActiveCampaigns: ransomwareCampaigns.length + attackCampaignsCount + otxActorSignalsCount,
+    // Campaigns objects (e.g. "APT28 Nearest Neighbor Campaign"), OTX pulses
+    // with adversary attribution, and campaigns named purely from security-
+    // news-vendor coverage (server/campaignIntelligence.js) -- a named
+    // operation reported by a vendor blog with no ransomware.live/ATT&CK/OTX
+    // record of its own was previously invisible to this total entirely.
+    totalActiveCampaigns: ransomwareCampaigns.length + attackCampaignsCount + otxActorSignalsCount + campaignIntelCount,
     campaignsBreakdown: {
       ransomware: ransomwareCampaigns.length,
       attackCampaigns: attackCampaignsCount,
       otxPulses: otxActorSignalsCount,
+      newsVendors: campaignIntelCount,
     },
   };
 }

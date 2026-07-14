@@ -190,9 +190,7 @@ export function tagNewsItems(newsItems, sources) {
 
 /**
  * Builds the actor/malware name lists from already-cached data and tags
- * `newsItems` in one call -- shared by /dashboard/news and
- * /dashboard/daily-summary (the latter's "top news source today" line reuses
- * the exact same tagging, not a separate re-derivation of it).
+ * `newsItems` in one call -- used by /dashboard/news.
  */
 export function getTaggedNewsItems({ newsItems, attackData, ransomwareCampaigns, threatFeedIocs, kevEntries, epssScores }) {
   const actorNames = new Set();

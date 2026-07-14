@@ -23,18 +23,23 @@ function useCountUp(value: number) {
   return display;
 }
 
-export type TodayEventsTargetTab = "correlation-engine" | "threat-actors" | "malware-intelligence" | "github-intel";
+export type TodayEventKey = keyof Omit<TodaySecurityEvents, "generatedAt" | "criticalKev">;
 
 // "Critical KEV" and "Major Vendor Advisories" were dropped from this grid --
 // the KEV count and a real vendor/source line now live once, in prose, in
 // the AI Daily Brief below (see server/aiDailyBrief.js) instead of being
 // shown twice across the merged tile.
-const STATS: Array<{ key: keyof Omit<TodaySecurityEvents, "generatedAt" | "criticalKev">; label: string; icon: typeof ShieldAlert; color: string; tab: TodayEventsTargetTab }> = [
-  { key: "activeExploitCampaigns", label: "Active Exploit Campaigns", icon: Flame, color: "text-high", tab: "correlation-engine" },
-  { key: "newRansomwareVictims", label: "New Ransomware Victims", icon: Skull, color: "text-critical", tab: "threat-actors" },
-  { key: "newMalwareSamples", label: "New Malware Samples", icon: Bug, color: "text-medium", tab: "malware-intelligence" },
-  { key: "githubExploits", label: "GitHub Exploits", icon: Github, color: "text-medium", tab: "github-intel" },
-  { key: "newIocs", label: "New IOCs", icon: Link2, color: "text-accent-cyan", tab: "malware-intelligence" },
+//
+// onNavigate receives the stat's own key, not a tab id -- newMalwareSamples
+// and newIocs both land on Malware Intelligence but need different sections/
+// date defaults once there (see DashboardPage.tsx#goToTodayEvent), which a
+// bare tab id can't express.
+const STATS: Array<{ key: TodayEventKey; label: string; icon: typeof ShieldAlert; color: string }> = [
+  { key: "activeExploitCampaigns", label: "Active Exploit Campaigns", icon: Flame, color: "text-high" },
+  { key: "newRansomwareVictims", label: "New Ransomware Victims", icon: Skull, color: "text-critical" },
+  { key: "newMalwareSamples", label: "New Malware Samples", icon: Bug, color: "text-medium" },
+  { key: "githubExploits", label: "GitHub Exploits", icon: Github, color: "text-medium" },
+  { key: "newIocs", label: "New IOCs", icon: Link2, color: "text-accent-cyan" },
 ];
 
 function StatTile({
@@ -68,7 +73,7 @@ function StatTile({
 }
 
 interface TopSecurityEventsTodayProps {
-  onNavigate: (tab: TodayEventsTargetTab) => void;
+  onNavigate: (key: TodayEventKey) => void;
 }
 
 /** Same-calendar-day rollup of new activity across every source -- see server/todaySecurityEvents.js. Rendered without its own Card -- lives inside the merged Executive Threat Summary tile. */
@@ -95,7 +100,7 @@ export function TopSecurityEventsToday({ onNavigate }: TopSecurityEventsTodayPro
               icon={stat.icon}
               color={stat.color}
               value={data[stat.key]}
-              onClick={() => onNavigate(stat.tab)}
+              onClick={() => onNavigate(stat.key)}
             />
           ))}
         </div>

@@ -11,10 +11,18 @@ export const SEVERITY_STYLE: Record<NewsSeverity, { variant: "critical" | "high"
   low: { variant: "low", label: "Low" },
 };
 
-/** Critical/high severity headlines from the last 6 hours across all merged news sources -- shared by DailySummary.tsx (Overview) and SecurityNews.tsx, so both surfaces agree on exactly what counts as "breaking." */
+/**
+ * Critical/high severity headlines from the last 6 hours, merged across
+ * every configured news source (server/connectors/newsFeeds.js) -- no
+ * per-source narrowing happens between that merge and this filter, so this
+ * is genuinely a platform-wide "top news" view, not a subset. Shared by
+ * DailySummary.tsx (Overview) and SecurityNews.tsx, so both surfaces agree
+ * on exactly what counts as "top."
+ */
 export function useBreakingNews() {
-  const { items } = useSecurityNews();
-  return items.filter((i) => i.isBreaking && (i.severity === "critical" || i.severity === "high"));
+  const { items, isLoading, isError, error } = useSecurityNews();
+  const breaking = items.filter((i) => i.isBreaking && (i.severity === "critical" || i.severity === "high"));
+  return { items: breaking, isLoading, isError, error };
 }
 
 /** Same-shape strip used standalone at the top of Security News and, folded into DailySummary's card, on the Overview tab. */
@@ -32,7 +40,7 @@ export function BreakingNewsStrip({ items }: { items: NewsItem[] }) {
           <span className="relative inline-flex h-2 w-2 rounded-full bg-critical" />
         </span>
         <Flame className="h-3.5 w-3.5 text-critical" />
-        <span className="text-xs font-bold uppercase tracking-wider text-critical">Breaking · Last 6 Hours</span>
+        <span className="text-xs font-bold uppercase tracking-wider text-critical">Top News · Last 6 Hours</span>
       </div>
       <ul className="divide-y divide-critical/10 px-4">
         <AnimatePresence initial={false}>

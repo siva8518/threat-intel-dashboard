@@ -31,6 +31,8 @@ import { DarkWebIntelligence } from "@/components/dashboard/DarkWebIntelligence"
 import { Watchlist } from "@/components/dashboard/Watchlist";
 import { CveDetailDrawer } from "@/components/dashboard/CveDetailDrawer";
 import { MalwareDetailDrawer } from "@/components/dashboard/MalwareDetailDrawer";
+import type { TodayEventKey } from "@/components/dashboard/TopSecurityEventsToday";
+import { EMPTY_DATE_RANGE, type DateRange } from "@/components/dashboard/DateRangeFilter";
 import { SelectionProvider } from "@/context/SelectionContext";
 import type { Severity } from "@/types/threat-intel";
 
@@ -53,13 +55,20 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
+/** Today's calendar date, from-only range (open-ended going forward) -- matches exactly what server/todaySecurityEvents.js itself counts as "today," so a stat tile's click target shows precisely what the tile counted, not a wider or narrower set. */
+function todayOnwardRange(): DateRange {
+  return { from: new Date().toISOString().slice(0, 10), to: "" };
+}
+
 export function DashboardPage() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [countryFilter, setCountryFilter] = useState<string | null>(null);
   const [industryFilter, setIndustryFilter] = useState<string | null>(null);
-  const [newsSourceFilter, setNewsSourceFilter] = useState<string | null>(null);
   const [actorSearchQuery, setActorSearchQuery] = useState<string | null>(null);
   const [cveSeverityFilter, setCveSeverityFilter] = useState<Severity | null>(null);
+  const [malwareSection, setMalwareSection] = useState<"families" | "iocs">("families");
+  const [malwareDateRange, setMalwareDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
+  const [ransomwareDateRange, setRansomwareDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
 
   function goToActorSearch(name: string) {
     setActorSearchQuery(name);
@@ -81,9 +90,34 @@ export function DashboardPage() {
     setActiveTab("threat-actors");
   }
 
-  function goToNewsSource(source: string) {
-    setNewsSourceFilter(source);
-    setActiveTab("news");
+  /**
+   * Every "New X" stat on the Overview tab used to land on its destination
+   * tab showing everything ever tracked, not just what the tile counted --
+   * confirmed live, that read as broken ("it says 40 new samples but the
+   * list has hundreds"). Malware/ransomware stats now seed that tab's own
+   * calendar filter to today (matching server/todaySecurityEvents.js's own
+   * same-day count exactly); clearing the calendar there still reaches
+   * everything.
+   */
+  function goToTodayEvent(key: TodayEventKey) {
+    switch (key) {
+      case "activeExploitCampaigns":
+        setActiveTab("correlation-engine");
+        break;
+      case "githubExploits":
+        setActiveTab("github-intel");
+        break;
+      case "newRansomwareVictims":
+        setRansomwareDateRange(todayOnwardRange());
+        setActiveTab("threat-actors");
+        break;
+      case "newMalwareSamples":
+      case "newIocs":
+        setMalwareSection("iocs");
+        setMalwareDateRange(todayOnwardRange());
+        setActiveTab("malware-intelligence");
+        break;
+    }
   }
 
   return (
@@ -95,23 +129,22 @@ export function DashboardPage() {
             <div className="space-y-4">
               <ExecutiveThreatSummary
                 onNavigateToActors={() => setActiveTab("threat-actors")}
+                onNavigateToCampaigns={() => setActiveTab("campaign-intelligence")}
                 onNavigateToCountry={goToCountry}
                 onNavigateToIndustry={goToIndustry}
-                onNavigateTodayEvent={(tab) => setActiveTab(tab)}
+                onNavigateTodayEvent={goToTodayEvent}
               />
               <WorldThreatMap onSelectCountry={goToCountry} />
             </div>
             <div className="space-y-4">
-              <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
-                <DailySummary onNavigateTab={(tab) => setActiveTab(tab)} onNavigateNewsSource={goToNewsSource} />
-                <CveSeverityDistribution onSelectSeverity={goToCveSeverity} />
-              </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <TopMalware />
-                <ThreatScoreTrend />
-                <CampaignVolumeTrend />
-              </div>
+              <DailySummary />
+              <CveSeverityDistribution onSelectSeverity={goToCveSeverity} />
             </div>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <TopMalware />
+            <ThreatScoreTrend />
+            <CampaignVolumeTrend />
           </div>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <TopThreatActors onNavigateToActors={() => setActiveTab("threat-actors")} />
@@ -143,14 +176,15 @@ export function DashboardPage() {
           onClearCountryFilter={() => setCountryFilter(null)}
           industryFilter={industryFilter}
           onClearIndustryFilter={() => setIndustryFilter(null)}
+          initialDateRange={ransomwareDateRange}
         />
       )}
       {activeTab === "github-intel" && <GithubIntel />}
-      {activeTab === "malware-intelligence" && <MalwareIntelligence />}
+      {activeTab === "malware-intelligence" && <MalwareIntelligence initialSection={malwareSection} initialDateRange={malwareDateRange} />}
       {activeTab === "actor-intelligence" && <ThreatActorIntelligence initialQuery={actorSearchQuery} />}
       {activeTab === "campaign-intelligence" && <CampaignIntelligence />}
       {activeTab === "darkweb-intelligence" && <DarkWebIntelligence />}
-      {activeTab === "news" && <SecurityNews initialSourceFilter={newsSourceFilter} />}
+      {activeTab === "news" && <SecurityNews />}
       {activeTab === "watchlist" && <Watchlist />}
       {activeTab === "ai-assistant" && <Chatbot />}
       {activeTab === "sources" && (
