@@ -16,6 +16,7 @@ import * as cache from "./cache.js";
 import { threatFeedIocs } from "./threatFeed.js";
 import { splitFamilies, getCommonAttackToolNames } from "./correlationEngine.js";
 import { ransomwareCampaigns as getRansomwareCampaigns } from "./ransomwareCampaigns.js";
+import { getAllGithubRepos } from "./githubIntel/index.js";
 import { extractAllEntities } from "./combinedExtraction.js";
 import { validateCandidates as validateMalwareCandidates } from "./malwareExtraction.js";
 import { validateCandidates as validateActorCandidates } from "./threatActorExtraction.js";
@@ -95,9 +96,42 @@ function markProcessedEverywhere(link) {
   darkWebIntel.markArticleProcessed(link);
 }
 
+/**
+ * GitHub repos reshaped into the same {title, summary, link, source,
+ * publishedDate} article shape the rest of this pipeline (and every entity
+ * store's upsertMention) already expects -- so a repo's name/description
+ * flows through the identical 5-category extraction as a news headline,
+ * with no store-side changes needed. This is what lets Dark Web Intelligence
+ * (and the other three) pick up findings named in a repo's own description
+ * (e.g. a leak-tracker or IOC-feed repo that names a specific leak-site
+ * posting), not just from RSS coverage of the same event.
+ */
+function githubRepoArticles() {
+  return getAllGithubRepos().map((repo) => ({
+    title: repo.fullName,
+    summary: repo.description ?? null,
+    link: repo.url,
+    source: "GitHub Intel",
+    publishedDate: repo.discoveredAt,
+  }));
+}
+
+// Reserved slots per cycle for GitHub repos, taken off the top before news
+// fills the rest. News volume can exceed MAX_ARTICLES_PER_CYCLE on its own
+// (fresh RSS items arrive continuously), which would otherwise starve the
+// smaller, one-time 434-repo backlog indefinitely since it's always queued
+// behind whatever news is currently unprocessed.
+const GITHUB_SLOTS_PER_CYCLE = 10;
+
 async function runCycle() {
-  const items = cache.getEntry("news").data?.items ?? [];
-  const unprocessed = items.filter((item) => isUnprocessed(item.link)).slice(0, MAX_ARTICLES_PER_CYCLE);
+  const newsItems = cache.getEntry("news").data?.items ?? [];
+  const unprocessedRepos = githubRepoArticles()
+    .filter((item) => isUnprocessed(item.link))
+    .slice(0, GITHUB_SLOTS_PER_CYCLE);
+  const unprocessedNews = newsItems
+    .filter((item) => isUnprocessed(item.link))
+    .slice(0, MAX_ARTICLES_PER_CYCLE - unprocessedRepos.length);
+  const unprocessed = [...unprocessedRepos, ...unprocessedNews];
   if (unprocessed.length === 0) return;
 
   const attackData = cache.getEntry("attack").data;
@@ -198,7 +232,22 @@ async function safeCycle() {
   }
 }
 
+/**
+ * Self-rescheduling instead of setInterval: each local-model call is
+ * ~10-20s, and a 40-article cycle can take well over CYCLE_INTERVAL_MS on
+ * CPU-only inference -- confirmed live, a single cycle took ~13 minutes
+ * against a 2-minute interval. setInterval doesn't wait for the previous
+ * async callback, so it would have queued several more overlapping cycles
+ * before the first one finished, all re-selecting the same still-unprocessed
+ * backlog before any of them could mark it done. Scheduling the next run
+ * only after the current one settles guarantees exactly one cycle in flight
+ * at a time.
+ */
+async function loop() {
+  await safeCycle();
+  setTimeout(loop, CYCLE_INTERVAL_MS);
+}
+
 export function startCombinedExtractionJob() {
-  setTimeout(safeCycle, 20_000); // after the RAG indexer's own 10s delay, so news/attack caches are warm
-  setInterval(safeCycle, CYCLE_INTERVAL_MS);
+  setTimeout(loop, 20_000); // after the RAG indexer's own 10s delay, so news/attack caches are warm
 }

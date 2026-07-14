@@ -22,22 +22,64 @@ const MIN_NAME_LENGTH = 4; // skip matching names shorter than this -- too likel
 
 // Headline urgency language -- confirmed by scanning real headlines from this
 // app's own news feeds for how outlets actually phrase high-severity stories.
+// Widened after a live audit found real severe stories (a 73k-device
+// credential exposure, two "Critical Vulnerabilities"/"Critical ... Flaw"
+// SAP headlines, a CISA KEV-catalog addition, a pre-auth RCE, a perfect-10
+// CVSS Joomla bug, a GitHub Actions supply-chain compromise) all landing as
+// "low" purely because the original list only matched a handful of exact
+// singular phrasings -- see CRITICAL_VULN_PATTERN below for the plural/
+// word-order cases a flat list can't cover.
 const URGENT_KEYWORDS = [
   "zero-day",
   "zero day",
+  "0-day",
   "actively exploited",
+  "actively exploiting",
+  "actively hacking",
   "mass exploitation",
   "emergency patch",
   "critical vulnerability",
+  "critical vulnerabilities",
   "critical flaw",
+  "critical flaws",
+  "critical bug",
+  "critical bugs",
   "nation-state",
+  "state-sponsored",
   "ransomware attack",
   "data breach",
+  "data exposed",
+  "credentials exposed",
   "breach exposes",
   "under attack",
   "widespread attacks",
   "in the wild",
+  "major security event",
+  "remote code execution",
+  "arbitrary code execution",
+  "arbitrary command execution",
+  "authentication bypass",
+  "pre-authentication",
+  "pre-auth",
+  "unauthenticated remote",
+  "supply chain compromise",
+  "supply chain attack",
+  "kev catalog",
+  "known exploited vulnerabilities catalog",
+  "perfect 10",
+  "cvss 10",
+  "cvss score of 10",
+  "backdoor",
 ];
+
+// Catches "Critical Vulnerabilities in X" / "Critical ... Flaw" phrasing the
+// flat keyword list above misses purely from plural/word-order variation --
+// "critical" followed within a short span by a vulnerability-ish root.
+const CRITICAL_VULN_PATTERN = /critical\b[^.]{0,25}\b(vulnerabilit\w*|flaw\w*|bug\w*|exploit\w*)/i;
+
+// Standalone "RCE" acronym, word-boundary so it doesn't match inside
+// unrelated words that happen to contain the letters ("Commerce", "source").
+const RCE_ACRONYM_PATTERN = /\brce\b/i;
 
 function norm(s) {
   return (s ?? "").trim().toLowerCase();
@@ -132,7 +174,10 @@ export function tagNewsItems(newsItems, sources) {
     const malware = matchNames(item.title, malwareNames);
     const industries = matchIndustries(item.title);
     const countries = matchCountries(item.title);
-    const hasUrgentKeyword = URGENT_KEYWORDS.some((k) => item.title.toLowerCase().includes(k));
+    const hasUrgentKeyword =
+      URGENT_KEYWORDS.some((k) => item.title.toLowerCase().includes(k)) ||
+      CRITICAL_VULN_PATTERN.test(item.title) ||
+      RCE_ACRONYM_PATTERN.test(item.title);
 
     return {
       ...item,
