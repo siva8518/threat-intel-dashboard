@@ -1,5 +1,6 @@
 import { fetchText } from "../lib/http.js";
 import { parseFeed } from "../lib/rss.js";
+import { withRetry } from "../lib/retry.js";
 
 // A generic Node fetch (no User-Agent at all) gets a flat 403 from Sucuri's
 // WAF, confirmed live -- but confirmed live the opposite way too: sending
@@ -484,6 +485,18 @@ function toNewsItems(xml, source) {
 }
 
 
+// ~200 independently-run RSS servers have some baseline transient failure
+// rate (timeout, momentary 5xx, DNS blip) every cycle just by chance -- with
+// no per-feed retry and no memory across cycles, that noise alone flips a
+// meaningful chunk of the source count "offline" on every 15-min sync, which
+// self-heals by the next cycle but reads as a constantly-recurring problem.
+// Fixed two ways: each feed gets a couple of quick retries within the same
+// cycle (below), and `feedFailureStreak` remembers consecutive failures
+// across cycles so a feed only reports offline once it's *actually* been
+// down for a while, not after one blip.
+const feedFailureStreak = new Map();
+const OFFLINE_AFTER_CONSECUTIVE_FAILURES = 2;
+
 /**
  * All security-news RSS/Atom feeds share one connector (one sync cycle)
  * since they're the same shape and none need frequent refresh -- but each
@@ -497,7 +510,7 @@ export default {
   async fetch() {
     const results = await Promise.allSettled(
       FEEDS.map(async ({ source, url, headers }) => {
-        const xml = await fetchText(url, { source, headers });
+        const xml = await withRetry(() => fetchText(url, { source, headers }), { retries: 1, baseDelayMs: 500 });
         return toNewsItems(xml, source);
       }),
     );
@@ -509,8 +522,14 @@ export default {
       if (result.status === "fulfilled") {
         items.push(...result.value.slice(0, ITEMS_PER_SOURCE));
         sources[source] = { ok: true };
+        feedFailureStreak.set(source, 0);
       } else {
-        sources[source] = { ok: false, error: result.reason?.message ?? String(result.reason) };
+        const streak = (feedFailureStreak.get(source) ?? 0) + 1;
+        feedFailureStreak.set(source, streak);
+        sources[source] = {
+          ok: streak < OFFLINE_AFTER_CONSECUTIVE_FAILURES,
+          error: result.reason?.message ?? String(result.reason),
+        };
       }
     });
 

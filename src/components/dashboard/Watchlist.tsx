@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, ExternalLink, Plus, X } from "lucide-react";
+import { Eye, ExternalLink, ChevronRight, Plus, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ const SOURCE_TYPE_LABEL: Record<FlashReportSourceType, string> = {
   campaign: "Campaign Intelligence",
   darkweb: "Dark Web Intelligence",
   ransomware: "Ransomware Leak Site",
+  github: "GitHub Intel",
 };
 
 function timeAgo(iso: string) {
@@ -50,6 +51,10 @@ function KeywordManager() {
             ({keywords.length} name{keywords.length === 1 ? "" : "s"})
           </span>
         </CardTitle>
+        <p className="mt-1 text-xs text-muted">
+          Client and organization names under continuous monitoring -- any mention across news, malware/actor/campaign/dark-web intelligence, ransomware leak
+          sites, or GitHub Intel is reported here as a flash alert the moment it's found.
+        </p>
       </CardHeader>
       <CardContent>
         <form onSubmit={submit} className="mb-4 flex gap-2">
@@ -131,6 +136,10 @@ function FlashReportRow({ report, onOpen }: { report: FlashReport; onOpen: (r: F
  */
 export function Watchlist() {
   const { reports, unreadCount, isLoading, isError, markRead, markAllRead } = useFlashReports();
+  const [showEarlier, setShowEarlier] = useState(false);
+
+  const recentReports = reports.filter((r) => r.recent);
+  const earlierReports = reports.filter((r) => !r.recent);
 
   function openReport(report: FlashReport) {
     markRead(report.id);
@@ -166,11 +175,38 @@ export function Watchlist() {
           ) : reports.length === 0 ? (
             <EmptyState message="No matches yet -- as soon as a tracked name shows up anywhere this platform monitors, it'll appear here." />
           ) : (
-            <ul className="divide-y divide-white/[0.06]">
-              {reports.map((r) => (
-                <FlashReportRow key={r.id} report={r} onOpen={openReport} />
-              ))}
-            </ul>
+            <>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">New in the last 48h ({recentReports.length})</p>
+              {recentReports.length === 0 ? (
+                <p className="mb-4 text-xs text-muted">No fresh mentions in the last 48 hours.</p>
+              ) : (
+                <ul className="mb-4 divide-y divide-white/[0.06]">
+                  {recentReports.map((r) => (
+                    <FlashReportRow key={r.id} report={r} onOpen={openReport} />
+                  ))}
+                </ul>
+              )}
+
+              {earlierReports.length > 0 && (
+                <div className="border-t border-white/[0.06] pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowEarlier((v) => !v)}
+                    className="flex items-center gap-1 text-xs font-medium text-muted transition-colors hover:text-foreground"
+                  >
+                    <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", showEarlier && "rotate-90")} />
+                    {showEarlier ? "Hide" : "Show"} {earlierReports.length} earlier mention{earlierReports.length === 1 ? "" : "s"}
+                  </button>
+                  {showEarlier && (
+                    <ul className="mt-2 divide-y divide-white/[0.06] opacity-80">
+                      {earlierReports.map((r) => (
+                        <FlashReportRow key={r.id} report={r} onOpen={openReport} />
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

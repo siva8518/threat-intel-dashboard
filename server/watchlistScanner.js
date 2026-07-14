@@ -12,6 +12,7 @@ import { getAllEntities as getActorEntities } from "./threatActorIntelligence.js
 import { getAllEntities as getCampaignEntities } from "./campaignIntelligence.js";
 import { getAllEntities as getDarkWebEntities } from "./darkWebIntelligence.js";
 import { ransomwareCampaigns as getRansomwareCampaigns } from "./ransomwareCampaigns.js";
+import { getAllGithubRepos } from "./githubIntel/index.js";
 import { getKeywords, keywordMatches, recordMatchIfNew, saveAfterScan } from "./watchlist.js";
 import { log } from "./lib/log.js";
 
@@ -87,6 +88,27 @@ function scanEntityStore(keyword, entities, sourceType) {
   return found;
 }
 
+function scanGithub(keyword) {
+  let found = 0;
+  for (const repo of getAllGithubRepos()) {
+    if (!keywordMatches(keyword, [repo.fullName, repo.description ?? "", ...(repo.topics ?? [])])) continue;
+    if (
+      recordMatchIfNew(keyword, {
+        sourceType: "github",
+        sourceId: repo.fullName,
+        sourceLabel: repo.fullName,
+        title: repo.fullName,
+        url: repo.url,
+        snippet: repo.description ?? null,
+        foundAt: repo.discoveredAt,
+      })
+    ) {
+      found += 1;
+    }
+  }
+  return found;
+}
+
 function scanRansomware(keyword) {
   let found = 0;
   for (const c of getRansomwareCampaigns()) {
@@ -120,6 +142,7 @@ function runScan() {
     totalFound += scanEntityStore(keyword, getCampaignEntities(), "campaign");
     totalFound += scanEntityStore(keyword, getDarkWebEntities(), "darkweb");
     totalFound += scanRansomware(keyword);
+    totalFound += scanGithub(keyword);
   }
 
   if (totalFound > 0) {

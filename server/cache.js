@@ -15,6 +15,7 @@ export function getEntry(sourceId) {
       error: null,
       lastAttempt: null,
       isSyncing: false,
+      consecutiveFailures: 0,
     }
   );
 }
@@ -35,6 +36,7 @@ export function setSuccess(sourceId, data) {
     error: null,
     lastAttempt: Date.now(),
     isSyncing: false,
+    consecutiveFailures: 0,
   });
 }
 
@@ -47,5 +49,6 @@ export function setError(sourceId, error) {
     error: error.message ?? String(error),
     lastAttempt: Date.now(),
     isSyncing: false,
+    consecutiveFailures: (previous.consecutiveFailures ?? 0) + 1,
   });
 }

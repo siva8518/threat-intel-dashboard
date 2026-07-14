@@ -566,6 +566,13 @@ const LOOKUP_ONLY_SOURCES = [
   { key: "leakix", label: "LeakIX (IOC Search)", envVar: "LEAKIX_API_KEY" },
 ];
 
+// A single failed sync cycle (rate limit, momentary network blip, upstream
+// hiccup) shouldn't flip a source to "offline" -- the scheduler already
+// serves the last-known-good data (see cache.js#setError), so one bad cycle
+// isn't actually an outage. Only sustained failure across this many
+// consecutive cycles counts as genuinely offline.
+const OFFLINE_AFTER_CONSECUTIVE_FAILURES = 2;
+
 // --- Feed health / last-synchronized -------------------------------------
 function buildHealth() {
   const health = connectors
@@ -575,7 +582,7 @@ function buildHealth() {
       return {
         key: connector.id,
         label: connector.label,
-        online: !entry.error,
+        online: !entry.error || (entry.consecutiveFailures ?? 0) < OFFLINE_AFTER_CONSECUTIVE_FAILURES,
         lastSynchronized: entry.updatedAt,
         error: entry.error ?? undefined,
       };

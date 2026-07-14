@@ -11,6 +11,7 @@ const SOURCE_TYPE_LABEL: Record<FlashReportSourceType, string> = {
   campaign: "Campaign Intelligence",
   darkweb: "Dark Web Intelligence",
   ransomware: "Ransomware Leak Site",
+  github: "GitHub Intel",
 };
 
 interface FlashReportBannerProps {

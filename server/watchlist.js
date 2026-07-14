@@ -15,15 +15,39 @@ const STORE_DIR = path.join(__dirname, ".cache");
 const STORE_PATH = path.join(STORE_DIR, "watchlist.json");
 const MAX_FLASH_REPORTS = 500; // trimmed oldest-first once exceeded, same bounding pattern as every other store's article-list caps
 
+// A keyword added today can instantly match hundreds of already-synced
+// backlog articles/entities going back months -- without this window, every
+// one of those lands as an "unread" flash report at once, and the banner
+// never seems to clear because reading one just reveals the next backlog
+// item. Only mentions published within this window are treated as live
+// alerts (unread, surfaced in the banner); older matches are still recorded
+// -- visible in the Watchlist tab for reference -- but pre-marked read.
+const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
+
 let state = load();
 
 function load() {
   try {
     const parsed = JSON.parse(fs.readFileSync(STORE_PATH, "utf-8"));
-    return {
-      keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
-      flashReports: Array.isArray(parsed.flashReports) ? parsed.flashReports : [],
-    };
+    const flashReports = Array.isArray(parsed.flashReports) ? parsed.flashReports : [];
+
+    // One-time migration for reports recorded before the `recent` field
+    // existed: without this, everything already sitting in the store from
+    // before this fix stays unread forever, defeating the point of it.
+    let migrated = false;
+    for (const r of flashReports) {
+      if (typeof r.recent === "boolean") continue;
+      r.recent = Date.now() - new Date(r.foundAt).getTime() <= RECENT_WINDOW_MS;
+      if (!r.recent) r.read = true;
+      migrated = true;
+    }
+
+    const loaded = { keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [], flashReports };
+    if (migrated) {
+      fs.mkdirSync(STORE_DIR, { recursive: true });
+      fs.writeFileSync(STORE_PATH, JSON.stringify(loaded), "utf-8");
+    }
+    return loaded;
   } catch {
     return { keywords: [], flashReports: [] }; // missing file (first run) or corrupt JSON -- start fresh rather than crash
   }
@@ -120,6 +144,9 @@ export function recordMatchIfNew(keyword, { sourceType, sourceId, sourceLabel, t
   const dedupeKey = `${keyword.id}|${sourceType}|${sourceId}`;
   if (state.flashReports.some((r) => r.dedupeKey === dedupeKey)) return null;
 
+  const foundAtIso = foundAt ?? new Date().toISOString();
+  const recent = Date.now() - new Date(foundAtIso).getTime() <= RECENT_WINDOW_MS;
+
   const report = {
     id: dedupeKey,
     dedupeKey,
@@ -130,8 +157,9 @@ export function recordMatchIfNew(keyword, { sourceType, sourceId, sourceLabel, t
     title,
     url: url ?? null,
     snippet: snippet ?? null,
-    foundAt: foundAt ?? new Date().toISOString(),
-    read: false,
+    foundAt: foundAtIso,
+    recent,
+    read: !recent,
   };
   state.flashReports.unshift(report);
   state.flashReports = state.flashReports.slice(0, MAX_FLASH_REPORTS);

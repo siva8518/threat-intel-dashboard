@@ -684,7 +684,7 @@ export interface WatchlistKeyword {
   addedAt: string;
 }
 
-export type FlashReportSourceType = "news" | "malware" | "actor" | "campaign" | "darkweb" | "ransomware";
+export type FlashReportSourceType = "news" | "malware" | "actor" | "campaign" | "darkweb" | "ransomware" | "github";
 
 /** One watchlist match -- a tracked name found somewhere in the platform's data. See server/watchlistScanner.js. */
 export interface FlashReport {
@@ -698,6 +698,8 @@ export interface FlashReport {
   snippet: string | null;
   foundAt: string;
   read: boolean;
+  /** Whether the underlying mention was published within the last 48h at scan time -- see server/watchlist.js#RECENT_WINDOW_MS. Older backlog matches are recorded for reference but pre-marked read so they don't flood the unread banner. */
+  recent: boolean;
 }
 
 /** Local RAG chatbot -- see server/rag/. Runs entirely against a local Ollama install, no paid API. */
