@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { ApiError, fetchJson } from "../lib/http.js";
 import { AbuseChAuthError, abuseChHeaders } from "../lib/abuseCh.js";
 
@@ -37,8 +38,12 @@ export default {
 
     return data.urls.map((entry) => ({
       id: `urlhaus-${entry.id}`,
+      // `host` is the extracted host portion of the malicious URL -- can be
+      // a real domain OR a bare IP (e.g. "http://183.92.205.84/mirai.arm7"),
+      // confirmed live via a Mirai sample tagged "domain" for a plain IPv4
+      // address. isIP() disambiguates instead of assuming "any host = domain".
       indicator: entry.host || entry.url,
-      indicatorType: entry.host ? "domain" : "url",
+      indicatorType: entry.host ? (isIP(entry.host) ? "ip" : "domain") : "url",
       malwareFamily: entry.tags?.length ? entry.tags.join(", ") : "Unknown",
       threatType: entry.threat || "malware_download",
       firstSeen: toIsoDate(entry.date_added),
