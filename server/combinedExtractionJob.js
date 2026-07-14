@@ -30,7 +30,17 @@ import * as darkWebIntel from "./darkWebIntelligence.js";
 import { OllamaUnavailableError } from "./rag/ollamaClient.js";
 import { log } from "./lib/log.js";
 
-const MAX_ARTICLES_PER_CYCLE = 15;
+// Was 15 when this job (and its four now-merged predecessors) were designed
+// against a ~74-106-source news pool. The pool has since grown to ~196
+// sources / ~2900 pooled articles, and 15/cycle at a 2-min interval meant a
+// full backlog drain (needed once whenever a new entity type like dark-web
+// findings is added, since every store must agree an article is processed)
+// would take upwards of 10 hours -- confirmed live, a new store sat at 0
+// results for the first several cycles purely from queue depth, not a bug.
+// Raised to 40; each combined call is a local, sequential Ollama call, so
+// this is still bounded by wall-clock model throughput, not just article
+// count.
+const MAX_ARTICLES_PER_CYCLE = 40;
 const CYCLE_INTERVAL_MS = 2 * 60 * 1000;
 
 function buildIocFamilyCounts() {

@@ -18,8 +18,10 @@ export function useSourcesHealth() {
     retry: 1,
   });
 
+  const sources = [...(query.data?.sources ?? [])].sort((a, b) => a.label.localeCompare(b.label));
+
   return {
-    sources: query.data?.sources ?? [],
+    sources,
     onlineCount: query.data?.onlineCount ?? 0,
     totalCount: query.data?.totalCount ?? 0,
   };

@@ -228,13 +228,16 @@ export function ThreatActorIntelligence({ initialQuery }: ThreatActorIntelligenc
   return (
     <Card>
       <CardHeader className="flex-col items-start gap-3">
-        <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
-          <UserSearch className="h-4 w-4 text-primary" />
-          Threat Actor Intelligence{" "}
-          <span className="font-normal text-muted">
-            ({entities.length} actor{entities.length === 1 ? "" : "s"}, {verifiedCount} confirmed)
-          </span>
-        </CardTitle>
+        <div>
+          <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
+            <UserSearch className="h-4 w-4 text-primary" />
+            Threat Actor Intelligence{" "}
+            <span className="font-normal text-muted">
+              ({entities.length} actor{entities.length === 1 ? "" : "s"}, {verifiedCount} confirmed)
+            </span>
+          </CardTitle>
+          <p className="mt-1 text-xs text-muted">Threat actors and intrusion groups automatically identified from live news coverage, seeded from MITRE ATT&CK and enriched with ransomware and malware activity.</p>
+        </div>
         <div className="flex w-full flex-wrap items-center gap-2">
           <Input placeholder="Search by name or alias…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:w-64" />
           <div className="flex flex-wrap gap-1.5">

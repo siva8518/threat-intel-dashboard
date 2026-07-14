@@ -170,13 +170,18 @@ export function DarkWebIntelligence() {
   return (
     <Card>
       <CardHeader className="flex-col items-start gap-3">
-        <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
-          <Ghost className="h-4 w-4 text-primary" />
-          Dark Web Intelligence{" "}
-          <span className="font-normal text-muted">
-            ({entities.length} finding{entities.length === 1 ? "" : "s"}, {verifiedCount} corroborated)
-          </span>
-        </CardTitle>
+        <div>
+          <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
+            <Ghost className="h-4 w-4 text-primary" />
+            Dark Web Intelligence{" "}
+            <span className="font-normal text-muted">
+              ({entities.length} finding{entities.length === 1 ? "" : "s"}, {verifiedCount} corroborated)
+            </span>
+          </CardTitle>
+          <p className="mt-1 text-xs text-muted">
+            Data leaks, credential dumps, and underground-forum activity surfaced from OSINT vendor/researcher coverage of the dark web -- not direct dark-web scraping.
+          </p>
+        </div>
         <div className="flex w-full flex-wrap items-center gap-2">
           <Input placeholder="Search by finding, victim, or platform…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:w-64" />
           <div className="flex flex-wrap gap-1.5">

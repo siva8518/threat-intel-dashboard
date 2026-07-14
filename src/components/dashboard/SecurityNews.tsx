@@ -9,12 +9,44 @@ import { SEVERITY_STYLE } from "./BreakingNewsStrip";
 import { useSecurityNews } from "@/hooks/useSecurityNews";
 import { useSelection } from "@/context/SelectionContext";
 import { fetchCveById } from "@/api/dashboardApi";
-import type { NewsItem } from "@/types/threat-intel";
+import type { NewsItem, NewsSeverity } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
 const DISPLAY_LIMIT = 60;
 
 type GroupBy = "none" | "actors" | "malware" | "cveIds" | "industries" | "countries";
+
+const SEVERITY_FILTERS: Array<NewsSeverity | "all"> = ["all", "critical", "high", "medium", "low"];
+const SEVERITY_FILTER_LABEL: Record<NewsSeverity | "all", string> = {
+  all: "All Severities",
+  critical: "Critical",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
+type DateFilter = "today" | "yesterday" | "day-before" | "all";
+const DATE_FILTER_LABEL: Record<DateFilter, string> = {
+  today: "Today",
+  yesterday: "Yesterday",
+  "day-before": "Day Before Yesterday",
+  all: "All",
+};
+
+/** Calendar-day match in the browser's own local time zone, `daysAgo` days back from today (0 = today). */
+function isCalendarDaysAgo(iso: string, daysAgo: number) {
+  const d = new Date(iso);
+  const target = new Date();
+  target.setDate(target.getDate() - daysAgo);
+  return d.getFullYear() === target.getFullYear() && d.getMonth() === target.getMonth() && d.getDate() === target.getDate();
+}
+
+function matchesDateFilter(iso: string, filter: DateFilter) {
+  if (filter === "all") return true;
+  if (filter === "today") return isCalendarDaysAgo(iso, 0);
+  if (filter === "yesterday") return isCalendarDaysAgo(iso, 1);
+  return isCalendarDaysAgo(iso, 2);
+}
 
 const GROUP_OPTIONS: Array<{ value: GroupBy; label: string; icon: typeof Skull }> = [
   { value: "none", label: "Latest", icon: TrendingUp },
@@ -193,6 +225,8 @@ export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
   const { items, isLoading, isError, error } = useSecurityNews();
   const [sourceFilter, setSourceFilter] = useState(initialSourceFilter ?? "ALL");
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
+  const [severityFilter, setSeverityFilter] = useState<NewsSeverity | "all">("all");
+  const [dateFilter, setDateFilter] = useState<DateFilter>("all");
 
   // Re-syncs whenever a fresh navigation sets a new source (e.g. clicking a
   // different AI Daily Brief bullet on a later visit) rather than only on
@@ -204,10 +238,10 @@ export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
   const availableSources = useMemo(() => Array.from(new Set(items.map((i) => i.source))).sort(), [items]);
 
   const sourceFiltered = useMemo(() => {
-    if (sourceFilter === "ALL") return items;
-    if (sourceFilter === MAJOR_VENDORS_FILTER) return items.filter((i) => MAJOR_VENDOR_SOURCES.has(i.source));
-    return items.filter((i) => i.source === sourceFilter);
-  }, [items, sourceFilter]);
+    const bySource =
+      sourceFilter === "ALL" ? items : sourceFilter === MAJOR_VENDORS_FILTER ? items.filter((i) => MAJOR_VENDOR_SOURCES.has(i.source)) : items.filter((i) => i.source === sourceFilter);
+    return bySource.filter((i) => (severityFilter === "all" || i.severity === severityFilter) && matchesDateFilter(i.publishedDate, dateFilter));
+  }, [items, sourceFilter, severityFilter, dateFilter]);
 
   // "Latest" is a recency-capped flat feed regardless of tags. Grouped views
   // are the opposite: tags are rare (most headlines don't mention a specific
@@ -251,9 +285,30 @@ export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
                 </option>
               ))}
             </Select>
+            <Select value={dateFilter} onChange={(e) => setDateFilter(e.target.value as DateFilter)} className="w-full sm:w-auto">
+              {(Object.keys(DATE_FILTER_LABEL) as DateFilter[]).map((f) => (
+                <option key={f} value={f}>
+                  {DATE_FILTER_LABEL[f]}
+                </option>
+              ))}
+            </Select>
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {SEVERITY_FILTERS.map((s) => (
+              <button
+                key={s}
+                onClick={() => setSeverityFilter(s)}
+                className={cn(
+                  "rounded-lg px-2.5 py-1 text-xs font-medium transition-colors",
+                  severityFilter === s ? "bg-gradient-primary text-white shadow-glow-primary" : "border border-white/10 bg-white/[0.03] text-muted hover:text-foreground",
+                )}
+              >
+                {SEVERITY_FILTER_LABEL[s]}
+              </button>
+            ))}
+          </div>
           <div className="mb-4 flex flex-wrap gap-1.5">
             {GROUP_OPTIONS.map(({ value, label, icon: Icon }) => (
               <button
@@ -279,7 +334,7 @@ export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
           ) : isError ? (
             <ErrorState message={error?.message ?? "Security news sources are currently unreachable."} />
           ) : groups === null && filtered.length === 0 ? (
-            <EmptyState message="No headlines available." />
+            <EmptyState message={items.length === 0 ? "No headlines available." : "No headlines match this source/severity/date combination."} />
           ) : groups?.length === 0 ? (
             <EmptyState message="No current headlines are tagged with this dimension yet -- try again after the next refresh, or pick another grouping." />
           ) : groups === null ? (

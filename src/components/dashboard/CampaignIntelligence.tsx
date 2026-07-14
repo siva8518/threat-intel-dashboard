@@ -149,15 +149,20 @@ export function CampaignIntelligence() {
 
   return (
     <Card>
-      <CardHeader className="flex-col items-start gap-3 md:flex-row md:items-center">
-        <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
-          <Crosshair className="h-4 w-4 text-primary" />
-          Campaign Intelligence{" "}
-          <span className="font-normal text-muted">
-            ({entities.length} campaign{entities.length === 1 ? "" : "s"}, {verifiedCount} corroborated)
-          </span>
-        </CardTitle>
-        <Input placeholder="Search by name or alias…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full md:w-64" />
+      <CardHeader className="flex-col items-start gap-3">
+        <div className="flex w-full flex-col items-start gap-1 md:flex-row md:items-center md:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
+              <Crosshair className="h-4 w-4 text-primary" />
+              Campaign Intelligence{" "}
+              <span className="font-normal text-muted">
+                ({entities.length} campaign{entities.length === 1 ? "" : "s"}, {verifiedCount} corroborated)
+              </span>
+            </CardTitle>
+            <p className="mt-1 text-xs text-muted">Named attack campaigns and operations automatically identified from live news coverage, cross-referenced with the threat actors and malware behind them.</p>
+          </div>
+          <Input placeholder="Search by name or alias…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full md:w-64" />
+        </div>
       </CardHeader>
       <CardContent>
         {isLoading ? (
