@@ -212,27 +212,38 @@ export function computeAttackTacticHeatmap(iocs, attackIndex, newsTechniqueCount
 }
 
 /**
- * Combines ransomware.live campaign data (primary, bulk, keyless) with OTX
- * pulse "adversary" tags (secondary, community-sourced) into one threat-actor
- * list. Ransomware groups are the only reliably-attributed actors here --
- * OTX adversary names are informational, not verified.
+ * Combines ransomware.live campaign data (primary, bulk, keyless), OTX pulse
+ * "adversary" tags (secondary, community-sourced), and -- as a third,
+ * additive source -- actors automatically extracted from news article text
+ * (server/threatActorIntelligence.js, fed by every configured news source,
+ * including any just-added RSS feed) into one threat-actor list. Ransomware
+ * groups are the only reliably-attributed actors here; OTX adversary names
+ * and news-extracted names are both informational, not verified.
+ *
+ * Keyed case-insensitively so the same real-world group named slightly
+ * differently across sources (e.g. ransomware.live's "lockbit" vs a news
+ * mention capitalized "LockBit") merges into one row instead of two. The
+ * first source to create an entry wins the `type` label -- ransomware/OTX
+ * are checked before news, so an already-attributed group keeps its more
+ * specific classification even if news coverage also names it.
  */
-export function mergeThreatActors(ransomwareCampaigns, otxActorSignals) {
+export function mergeThreatActors(ransomwareCampaigns, otxActorSignals, newsActorEntities = []) {
   const byGroup = new Map();
 
-  for (const campaign of ransomwareCampaigns ?? []) {
-    const entry = byGroup.get(campaign.group) ?? { name: campaign.group, type: "ransomware", campaignCount: 0, lastActivity: campaign.discoveredDate };
-    entry.campaignCount += 1;
-    if (new Date(campaign.discoveredDate) > new Date(entry.lastActivity)) entry.lastActivity = campaign.discoveredDate;
-    byGroup.set(campaign.group, entry);
+  function upsert(name, type, date, extraCount) {
+    const key = name.toLowerCase();
+    const existing = byGroup.get(key);
+    if (existing) {
+      existing.campaignCount += extraCount;
+      if (new Date(date) > new Date(existing.lastActivity)) existing.lastActivity = date;
+    } else {
+      byGroup.set(key, { name, type, campaignCount: extraCount, lastActivity: date });
+    }
   }
 
-  for (const signal of otxActorSignals ?? []) {
-    const entry = byGroup.get(signal.name) ?? { name: signal.name, type: "otx-tagged", campaignCount: 0, lastActivity: signal.date };
-    entry.campaignCount += 1;
-    if (new Date(signal.date) > new Date(entry.lastActivity)) entry.lastActivity = signal.date;
-    byGroup.set(signal.name, entry);
-  }
+  for (const campaign of ransomwareCampaigns ?? []) upsert(campaign.group, "ransomware", campaign.discoveredDate, 1);
+  for (const signal of otxActorSignals ?? []) upsert(signal.name, "otx-tagged", signal.date, 1);
+  for (const entity of newsActorEntities) upsert(entity.name, entity.type, entity.lastSeen, entity.mentionCount);
 
   return Array.from(byGroup.values()).sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
 }

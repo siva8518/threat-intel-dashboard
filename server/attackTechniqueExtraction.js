@@ -1,50 +1,12 @@
-// Open-set MITRE ATT&CK technique-mention extraction from article headline +
-// summary -- same approach as server/malwareExtraction.js, but validation is
-// stronger here: MITRE ATT&CK's technique list (server/connectors/attack.js)
-// is a closed, authoritative catalog, so every extracted candidate is
-// cross-checked against it and anything that doesn't match a real technique
-// ID or name is dropped as a hallucination, not just noise-filtered.
-import { ollamaJson } from "./rag/ollamaClient.js";
-import { OLLAMA_CHAT_MODEL } from "./rag/config.js";
-
+// MITRE ATT&CK technique-mention validation for article headline + summary
+// extraction. Candidates now come from the combined per-article call in
+// server/combinedExtraction.js, but validation here is stronger than the
+// other three entity kinds: MITRE ATT&CK's technique list
+// (server/connectors/attack.js) is a closed, authoritative catalog, so every
+// extracted candidate is cross-checked against it and anything that doesn't
+// match a real technique ID or name is dropped as a hallucination, not just
+// noise-filtered.
 export const MAX_TECHNIQUES_PER_ARTICLE = 5;
-
-const SYSTEM_PROMPT =
-  "You are a threat intelligence analyst. You will be given one security news article's headline and, if available, its summary. " +
-  "Identify every MITRE ATT&CK technique explicitly mentioned in either, by its technique ID (e.g. \"T1055\", \"T1071.001\") or by an exact named technique or sub-technique " +
-  '(e.g. "Process Injection", "Spearphishing Attachment", "DLL Side-Loading", "Obfuscated Files or Information"). ' +
-  "Only extract a technique that is literally named or ID'd in the text -- do NOT infer one from a general behavior description (e.g. do not output \"Phishing\" just because an email-based attack is mentioned unless phishing or a specific sub-technique is actually named). " +
-  'Respond with ONLY a JSON array of strings, each either the ID or the exact name as written in the text. Return [] if none are named. No other text.';
-
-function parseJsonArray(text) {
-  const start = text.indexOf("[");
-  const end = text.lastIndexOf("]");
-  if (start === -1 || end === -1 || end < start) return [];
-  try {
-    const parsed = JSON.parse(text.slice(start, end + 1));
-    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
-  } catch {
-    return []; // model returned malformed JSON -- treat as "found nothing" rather than guessing
-  }
-}
-
-/**
- * Extracts candidate ATT&CK technique mentions from one article's headline +
- * summary via the local model. Returns raw candidates, not yet validated --
- * see resolveTechniques below for the cross-check against the real catalog.
- */
-export async function extractTechniqueMentions({ title, summary }) {
-  const userContent = summary ? `Headline: ${title}\nSummary: ${summary}` : `Headline: ${title}`;
-  const response = await ollamaJson("/api/chat", {
-    model: OLLAMA_CHAT_MODEL,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userContent },
-    ],
-    options: { temperature: 0 },
-  });
-  return parseJsonArray(response.message?.content ?? "");
-}
 
 const TECHNIQUE_ID_PATTERN = /^T\d{4}(\.\d{3})?$/i;
 

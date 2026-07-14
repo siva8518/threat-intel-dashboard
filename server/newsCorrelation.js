@@ -68,6 +68,23 @@ export function matchCveIds(title) {
   return Array.from(new Set((title.match(CVE_PATTERN) ?? []).map((id) => id.toUpperCase())));
 }
 
+/**
+ * Map<cveId, count> of how many news headlines (across every configured
+ * source, including any just-added RSS feed -- this is a live regex scan of
+ * whatever's currently cached, not a separately-maintained list) name each
+ * CVE. Merged into server/githubIntel/index.js#computeTopCves the same way
+ * server/attackTechniqueIntelligence.js#getNewsTechniqueCounts is merged into
+ * computeAttackTechniquesObserved, so "Top CVEs" reflects news attention too,
+ * not just GitHub PoC/repo activity.
+ */
+export function getNewsCveCounts(newsItems) {
+  const counts = new Map();
+  for (const item of newsItems ?? []) {
+    for (const cveId of matchCveIds(item.title)) counts.set(cveId, (counts.get(cveId) ?? 0) + 1);
+  }
+  return counts;
+}
+
 export function matchIndustries(title) {
   const lowerTitle = norm(title);
   const hits = [];

@@ -3,6 +3,7 @@ import type {
   AttackTacticHeatmapCell,
   AttackTechnique,
   CampaignIntelligenceEntity,
+  DarkWebIntelligenceEntity,
   CorrelationCard,
   CveProfile,
   CveProgramActivity,
@@ -103,6 +104,10 @@ export async function fetchThreatActorIntelligence(): Promise<{ entities: Threat
 
 export async function fetchCampaignIntelligence(): Promise<{ entities: CampaignIntelligenceEntity[] }> {
   return fetchJson("/api/dashboard/campaign-intelligence", { source: "Dashboard API" });
+}
+
+export async function fetchDarkWebIntelligence(): Promise<{ entities: DarkWebIntelligenceEntity[] }> {
+  return fetchJson("/api/dashboard/darkweb-intelligence", { source: "Dashboard API" });
 }
 
 export async function fetchAttackTechniques(): Promise<AttackTechnique[]> {

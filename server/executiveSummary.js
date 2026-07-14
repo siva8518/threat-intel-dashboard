@@ -56,6 +56,19 @@ function countKevAddedSince(kevEntries, days) {
  * this app can derive for free. Falls back to the single strongest signal
  * available if both together don't turn one up.
  */
+// `githubTopCves` entries now carry both `repoCount` (GitHub PoC/repo
+// mentions) and `newsMentionCount` (news-headline mentions across every
+// configured source -- see server/githubIntel/index.js#computeTopCves) and
+// are ranked by the two combined. A CVE can rank #1 on news attention alone
+// with zero PoC repos yet, so the reason text describes whichever signal(s)
+// are actually non-zero instead of assuming a repo count is always present.
+function describeCveSignal(c) {
+  const parts = [];
+  if (c.repoCount > 0) parts.push(`${c.repoCount} tracked GitHub PoC repo${c.repoCount === 1 ? "" : "s"}`);
+  if (c.newsMentionCount > 0) parts.push(`${c.newsMentionCount} news mention${c.newsMentionCount === 1 ? "" : "s"}`);
+  return parts.join(" and ") || "0 tracked GitHub PoC repos";
+}
+
 function computeMostExploitedCve(kevEntries, githubTopCves) {
   const kevIds = new Set((kevEntries ?? []).map((e) => e.cveId));
   const bothSignals = (githubTopCves ?? []).find((c) => kevIds.has(c.cveId));
@@ -65,7 +78,7 @@ function computeMostExploitedCve(kevEntries, githubTopCves) {
       cveId: bothSignals.cveId,
       knownExploited: true,
       repoCount: bothSignals.repoCount,
-      reason: `Confirmed actively exploited (CISA KEV) and referenced in ${bothSignals.repoCount} tracked GitHub PoC repo${bothSignals.repoCount === 1 ? "" : "s"}`,
+      reason: `Confirmed actively exploited (CISA KEV) and referenced in ${describeCveSignal(bothSignals)}`,
     };
   }
   if (githubTopCves?.[0]) {
@@ -74,7 +87,7 @@ function computeMostExploitedCve(kevEntries, githubTopCves) {
       cveId: top.cveId,
       knownExploited: kevIds.has(top.cveId),
       repoCount: top.repoCount,
-      reason: `Most-referenced CVE across tracked GitHub PoC repos (${top.repoCount} repo${top.repoCount === 1 ? "" : "s"})`,
+      reason: `Most-referenced CVE across ${describeCveSignal(top)}`,
     };
   }
   if (kevEntries?.[0]) {

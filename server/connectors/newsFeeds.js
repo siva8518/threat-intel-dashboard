@@ -108,6 +108,33 @@ const BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKi
 // CERT-Bund feed is confirmed live and current (250 entries) but was left
 // out since every title is German-language, which would read as broken/
 // mistranslated noise in an otherwise all-English feed list.
+// Widened again from 74 to 136 sources (driven by a "get toward 200 total
+// dashboard sources" goal). Every URL below was fetched live and confirmed
+// to return real, current RSS/Atom/RDF with parseable items -- same
+// discipline as everything above. A large batch of plausible-looking
+// candidates was tried and confirmed dead/unreachable/off-topic in this
+// pass and deliberately NOT added: Sysdig, Invicti, Doyensec, SpecterOps,
+// Positive Technologies, CyberArk, Trustwave SpiderLabs, SecurityScorecard,
+// Patchstack, Shadowserver, Fortra, WatchGuard, Malwation, Group-IB, Sansec,
+// NetSPI, Binary Defense, eSentire, Arctic Wolf, Kroll, Kudelski Security,
+// SEC Consult, SANS Institute's main blog (distinct from SANS ISC already
+// tracked), Offensive Security, HackTheBox, Intigriti, Team Cymru's blog
+// (its IP/ASN lookup is already used directly as an IOC-search lookup),
+// Duo Security, LevelBlue, Socket, Cycode, Apiiro, StackHawk, Semgrep,
+// Truffle Security, SpyCloud, Silent Push, Hunt.io, ZeroFox, Deepfence,
+// Bitdefender's business-insights blog, Red Hat's security-scoped feed
+// (its general /blog feed worked and is used instead), JumpCloud, Cyjax,
+// Malcore (serves Vietnamese-language AMP HTML, not the expected feed),
+// Nucleus Security, and IBM Security Intelligence (its feed and FeedBurner
+// mirror both now redirect to a plain HTML page, no XML) -- all confirmed
+// dead/off-topic outright. Digital Shadows and InfoSec Institute both
+// connection-timed-out from this environment, the same signature as
+// Sophos/ACSC's own outright-refused connections noted above -- likely
+// blocked, not missing. Tripwire's State of Security blog returns real RSS
+// to a plain curl check but consistently 403s this app's own server-side
+// fetch even with the same browser User-Agent header added (the same
+// WAF-fingerprinting gap already documented for Sophos/ACSC) -- dropped
+// rather than left in as permanently "offline" in the health panel.
 const FEEDS = [
   { source: "CISA", url: "https://www.cisa.gov/cybersecurity-advisories/all.xml" },
   { source: "CISA ICS Advisories", url: "https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml" },
@@ -197,6 +224,146 @@ const FEEDS = [
   { source: "CSO Online", url: "https://www.csoonline.com/feed" },
   { source: "The CyberWire", url: "https://thecyberwire.com/feeds/rss.xml" },
   { source: "Help Net Security", url: "https://www.helpnetsecurity.com/feed/" },
+
+  // -- Additional major vendor / security-firm threat research --
+  { source: "Palo Alto Networks Blog", url: "https://blog.paloaltonetworks.com/feed/" },
+  { source: "Netskope", url: "https://www.netskope.com/blog/feed" },
+  { source: "Darktrace", url: "https://darktrace.com/blog/rss.xml" },
+  { source: "Vectra AI", url: "https://www.vectra.ai/blog/rss.xml" },
+  { source: "Corelight", url: "https://corelight.com/blog/rss.xml" },
+  { source: "Barracuda", url: "https://blog.barracuda.com/feed/" },
+  { source: "Cisco Security Blog", url: "https://blogs.cisco.com/security/feed" },
+
+  // -- AppSec / cloud / identity / attack-surface vendors --
+  { source: "Veracode", url: "https://www.veracode.com/blog/feed" },
+  { source: "Detectify", url: "https://blog.detectify.com/feed" },
+  { source: "Varonis", url: "https://www.varonis.com/blog/rss.xml" },
+  { source: "Imperva", url: "https://www.imperva.com/blog/feed/" },
+  { source: "F5 Labs", url: "https://www.f5.com/labs/rss-feeds/all.xml" },
+  { source: "Aqua Security", url: "https://blog.aquasec.com/rss.xml" },
+  { source: "Cequence Security", url: "https://www.cequence.ai/blog/feed/" },
+  { source: "Salt Security", url: "https://salt.security/blog/rss.xml" },
+  { source: "Wallarm", url: "https://lab.wallarm.com/feed/" },
+  { source: "WPScan", url: "https://wpscan.com/blog/feed/" },
+  { source: "Contrast Security", url: "https://www.contrastsecurity.com/security-influencers/rss.xml" },
+  { source: "Okta Security", url: "https://sec.okta.com/rss.xml" },
+  { source: "Bitsight", url: "https://www.bitsight.com/blog/rss.xml" },
+  { source: "UpGuard", url: "https://www.upguard.com/blog/rss.xml" },
+  { source: "NopSec", url: "https://nopsec.com/feed/" },
+  { source: "GuidePoint Security", url: "https://www.guidepointsecurity.com/blog/feed/" },
+  { source: "Immersive Labs", url: "https://www.immersivelabs.com/resources/blog/rss.xml" },
+  { source: "Menlo Security", url: "https://www.menlosecurity.com/blog/rss.xml" },
+  { source: "KnowBe4", url: "https://blog.knowbe4.com/rss.xml" },
+  { source: "CrowdSec", url: "https://crowdsec.net/blog/rss.xml" },
+  { source: "Netenrich", url: "https://netenrich.com/blog/rss.xml" },
+
+  // -- Offensive security / penetration-testing research --
+  { source: "PortSwigger Research", url: "https://portswigger.net/research/rss" },
+  { source: "Zero Day Initiative", url: "https://www.thezdi.com/blog?format=rss" },
+  { source: "MDSec", url: "https://www.mdsec.co.uk/feed/" },
+  { source: "Rhino Security Labs", url: "https://rhinosecuritylabs.com/feed/" },
+  { source: "Include Security", url: "https://blog.includesecurity.com/feed/" },
+  { source: "Horizon3.ai", url: "https://horizon3.ai/feed/" },
+  { source: "watchTowr Labs", url: "https://labs.watchtowr.com/rss/" },
+  { source: "Assetnote", url: "https://blog.assetnote.io/feed.xml" },
+  { source: "NVISO Labs", url: "https://blog.nviso.eu/feed/" },
+  { source: "Pentest Partners", url: "https://www.pentestpartners.com/security-blog/feed/" },
+  { source: "Nettitude", url: "https://labs.nettitude.com/feed/" },
+  { source: "Synack", url: "https://www.synack.com/blog/feed/" },
+  { source: "Didier Stevens", url: "https://blog.didierstevens.com/feed/" },
+  { source: "0patch Blog", url: "https://blog.0patch.com/feeds/posts/default" },
+  { source: "VirusBulletin", url: "https://www.virusbulletin.com/rss" },
+
+  // -- Threat intelligence platforms / malware sandboxes --
+  { source: "Any.run", url: "https://any.run/cybersecurity-blog/feed/" },
+  { source: "VMRay", url: "https://www.vmray.com/blog/feed/", headers: { "User-Agent": BROWSER_USER_AGENT } },
+  { source: "KELA", url: "https://www.kelacyber.com/blog/feed/" },
+  { source: "Intel 471", url: "https://intel471.com/blog/feed" },
+  { source: "Sublime Security", url: "https://sublime.security/blog/rss.xml" },
+
+  // -- Software supply chain / DevSecOps security --
+  { source: "Sonatype", url: "https://blog.sonatype.com/rss.xml" },
+  { source: "JFrog", url: "https://jfrog.com/blog/feed/" },
+  { source: "Chainguard", url: "https://www.chainguard.dev/unchained/rss.xml" },
+  { source: "Legit Security", url: "https://www.legitsecurity.com/blog/rss.xml" },
+  { source: "GitGuardian", url: "https://blog.gitguardian.com/rss/" },
+  { source: "Uptycs", url: "https://www.uptycs.com/blog/rss.xml" },
+
+  // -- Platform / OS vendor security blogs (mixed with non-security posts, same tradeoff already accepted for Microsoft Security above) --
+  { source: "Red Hat Blog", url: "https://www.redhat.com/en/rss/blog" },
+  { source: "Ubuntu Security Notices", url: "https://ubuntu.com/security/notices/rss.xml" },
+  { source: "Google Online Security Blog", url: "https://security.googleblog.com/feeds/posts/default" },
+  { source: "Google Project Zero", url: "https://googleprojectzero.blogspot.com/feeds/posts/default" },
+  { source: "Mozilla Security Blog", url: "https://blog.mozilla.org/security/feed/" },
+  { source: "GitHub Blog Security", url: "https://github.blog/tag/security/feed/" },
+
+  // -- Additional journalism / aggregators --
+  { source: "Wired Security", url: "https://www.wired.com/feed/category/security/latest/rss" },
+  { source: "TechRadar Pro Security", url: "https://www.techradar.com/feeds/tag/security" },
+
+  // -- Widened a third time from 136 to 164 sources (same "toward 200 total
+  // dashboard sources" goal), same live-fetch-and-confirm discipline as both
+  // prior passes. Deliberately NOT added this round, all confirmed dead/
+  // blocked/off-topic: Truesec, Sekoia, Cyfirma, HYAS, Resecurity,
+  // Cybersixgill, ThreatConnect, ThreatQuotient, Forescout, Morphisec,
+  // Cynet, Tanium, SailPoint, Axonius, Cado Security, Push Security,
+  // Automox, Jamf, Kolide, ISC2, CIS, ExtraHop, Netography, Webroot, McAfee,
+  // Comodo, Bitdefender's consumer blog, NSA (Akamai-fronted, 403s every
+  // UA), Trustwave (tried three different URL patterns across two passes),
+  // NCC Group Research (HTML shell at every path tried), Analyst1, Nisos,
+  // BinaryEdge, ImmuniWeb, Cymulate, SafeBreach, AttackIQ, Picus Security,
+  // Censys, BeyondTrust, Delinea, Forcepoint, Egress, Mimecast, Gigamon,
+  // iboss, CyberArk (three attempts, three different paths, all 404),
+  // Vade Secure, NETSCOUT, Corero, Fastly's security tag, Recorded Future's
+  // separate Insikt-branded feed (redundant with the main Recorded Future
+  // feed already tracked above anyway), and Socket (a duplicate of the
+  // already-rejected "Socket" from the prior pass under a different path).
+  // N-able also confirmed live via a plain curl check but, like Tripwire in
+  // the prior pass, consistently 403s this app's own server-side fetch even
+  // with the browser User-Agent header added -- a structural WAF block, not
+  // a missing feed -- so it's dropped rather than kept as permanently
+  // "offline" in the health panel.
+  // -- Threat intel platforms / CTI vendors --
+  { source: "SOCRadar", url: "https://socradar.io/feed/" },
+  { source: "Cyble", url: "https://cyble.com/blog/feed/" },
+  { source: "EclecticIQ", url: "https://blog.eclecticiq.com/rss.xml" },
+  { source: "Constella Intelligence", url: "https://constella.ai/blog/feed/" },
+  { source: "Silobreaker", url: "https://www.silobreaker.com/blog/feed/" },
+  { source: "Cyborg Security", url: "https://www.cyborgsecurity.com/blog/feed/" },
+  { source: "Reversing Labs", url: "https://www.reversinglabs.com/blog/rss.xml" },
+
+  // -- Attack-surface management / offensive security --
+  { source: "Outpost24", url: "https://outpost24.com/blog/feed/" },
+  { source: "Intruder", url: "https://www.intruder.io/blog/rss.xml" },
+  { source: "Pentera", url: "https://pentera.io/blog/feed/" },
+  { source: "Doyensec", url: "https://blog.doyensec.com/atom.xml" },
+  { source: "Permiso", url: "https://permiso.io/blog/rss.xml" },
+  { source: "Snort Blog", url: "https://blog.snort.org/feeds/posts/default" },
+
+  // -- Identity / endpoint / MSP security vendors --
+  { source: "Ping Identity", url: "https://www.pingidentity.com/en/company/blog.rss.xml" },
+  { source: "Ivanti", url: "https://www.ivanti.com/blog/feed" },
+  { source: "Field Effect", url: "https://fieldeffect.com/blog/rss.xml" },
+  { source: "Blumira", url: "https://www.blumira.com/blog/rss.xml" },
+
+  // -- Network / DDoS security --
+  { source: "Cato Networks", url: "https://www.catonetworks.com/blog/feed/" },
+  { source: "A10 Networks", url: "https://www.a10networks.com/blog/feed/" },
+
+  // -- Consumer-security / detection vendors --
+  { source: "Avira", url: "https://www.avira.com/en/blog/feed" },
+  { source: "Panda Security", url: "https://www.pandasecurity.com/en/mediacenter/feed/" },
+  { source: "Heimdal Security", url: "https://heimdalsecurity.com/blog/feed/", headers: { "User-Agent": BROWSER_USER_AGENT } },
+  { source: "OpenText Security", url: "https://blogs.opentext.com/tag/security/feed/" },
+
+  // -- Government / standards --
+  { source: "NIST Cybersecurity Insights", url: "https://www.nist.gov/blogs/cybersecurity-insights/rss.xml" },
+
+  // -- Additional journalism / aggregators --
+  { source: "The Last Watchdog", url: "https://www.lastwatchdog.com/feed/" },
+  { source: "eSecurity Planet", url: "https://www.esecurityplanet.com/feed/" },
+  { source: "Cybersecurity Dive", url: "https://www.cybersecuritydive.com/feeds/news/" },
+  { source: "Cyber Security News", url: "https://cybersecuritynews.com/feed/" },
 ];
 
 /**
@@ -237,6 +404,29 @@ export const MAJOR_VENDOR_SOURCES = new Set([
   "Orca Security",
   "Praetorian",
   "Datadog Security Labs",
+  "Palo Alto Networks Blog",
+  "Netskope",
+  "Darktrace",
+  "Vectra AI",
+  "Corelight",
+  "Barracuda",
+  "Cisco Security Blog",
+  "Varonis",
+  "Imperva",
+  "F5 Labs",
+  "Aqua Security",
+  "Okta Security",
+  "Any.run",
+  "VMRay",
+  "KELA",
+  "Intel 471",
+  "Synack",
+  "SOCRadar",
+  "Cyble",
+  "Reversing Labs",
+  "Pentera",
+  "Ivanti",
+  "Cato Networks",
 ]);
 
 // Widened from 15 -- the Threat Actor Profile feature matches this pool

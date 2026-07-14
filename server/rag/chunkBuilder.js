@@ -10,6 +10,7 @@ import { correlateCves } from "../correlate.js";
 import { getAllEntities as getMalwareEntities } from "../malwareIntelligence.js";
 import { getAllEntities as getActorEntities } from "../threatActorIntelligence.js";
 import { getAllEntities as getCampaignEntities } from "../campaignIntelligence.js";
+import { getAllEntities as getDarkWebEntities } from "../darkWebIntelligence.js";
 import { MAX_CHUNKS_PER_SOURCE as CAP } from "./config.js";
 
 function cveChunks() {
@@ -153,6 +154,33 @@ function campaignIntelligenceChunks() {
   });
 }
 
+// Sourced from server/darkWebIntelligence.js -- one record per dark-web
+// finding (data leak, credential dump, initial-access listing, marketplace
+// listing, forum chatter, extortion threat), automatically extracted from
+// OSINT vendor/researcher news coverage of underground forums/marketplaces
+// (server/darkWebExtraction.js), NOT from direct dark-web scraping.
+function darkWebIntelligenceChunks() {
+  const entities = getDarkWebEntities().slice(0, CAP.darkweb);
+  return entities.map((d) => {
+    const recentArticles = d.articles.slice(0, 5).map((a) => `"${a.title}" (${a.source}, ${a.publishedDate?.slice(0, 10)})`).join("; ");
+    return {
+      id: `darkweb:${d.id}`,
+      text:
+        `Dark-web finding "${d.name}" (${d.type})${d.aliases.length ? ` (aliases: ${d.aliases.join(", ")})` : ""}` +
+        `${d.verified ? " -- corroborated by multiple sources" : " -- reported by a single source so far, not yet corroborated"}. ` +
+        `${d.platform ? `Platform: ${d.platform}. ` : ""}` +
+        `${d.victimOrg ? `Victim organization: ${d.victimOrg}. ` : ""}` +
+        `${d.associatedActors.length ? `Associated actors: ${d.associatedActors.join(", ")}. ` : ""}` +
+        `${d.associatedMalware.length ? `Associated malware/tools: ${d.associatedMalware.join(", ")}. ` : ""}` +
+        `${d.targetedIndustries.length ? `Targets industries: ${d.targetedIndustries.join(", ")}. ` : ""}` +
+        `${d.targetedCountries.length ? `Targets countries: ${d.targetedCountries.join(", ")}. ` : ""}` +
+        `${d.cveExploited.length ? `Exploits: ${d.cveExploited.join(", ")}. ` : ""}` +
+        `${recentArticles ? `Recent coverage: ${recentArticles}.` : ""}`,
+      metadata: { type: "darkweb", label: d.name, url: d.articles[0]?.link ?? null, date: d.lastSeen },
+    };
+  });
+}
+
 function newsChunks() {
   const items = (cache.getEntry("news").data?.items ?? []).slice(0, CAP.news);
   return items.map((n) => ({
@@ -172,6 +200,7 @@ export function buildChunks() {
     ...techniqueChunks(),
     ...malwareChunks(),
     ...campaignIntelligenceChunks(),
+    ...darkWebIntelligenceChunks(),
     ...newsChunks(),
   ];
 }

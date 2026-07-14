@@ -28,7 +28,7 @@ import { buildCveProfile } from "../cveProfile.js";
 import { buildMalwareProfile } from "../malwareProfile.js";
 import { buildExecutiveSummary } from "../executiveSummary.js";
 import { buildCorrelationClusters } from "../correlationEngine.js";
-import { getTaggedNewsItems } from "../newsCorrelation.js";
+import { getTaggedNewsItems, getNewsCveCounts } from "../newsCorrelation.js";
 import { buildTodaySecurityEvents } from "../todaySecurityEvents.js";
 import { buildDailySummary } from "../dailySummary.js";
 import { buildThreatTimeline } from "../threatTimeline.js";
@@ -39,6 +39,7 @@ import { getAllEntities as getMalwareIntelligenceEntities } from "../malwareInte
 import { getAllEntities as getThreatActorIntelligenceEntities } from "../threatActorIntelligence.js";
 import { getAllEntities as getCampaignIntelligenceEntities } from "../campaignIntelligence.js";
 import { getNewsTechniqueCounts } from "../attackTechniqueIntelligence.js";
+import { getAllEntities as getDarkWebIntelligenceEntities } from "../darkWebIntelligence.js";
 
 export const router = Router();
 
@@ -76,10 +77,10 @@ router.get("/dashboard/executive-summary", (_req, res) => {
     threatFeedIocs: iocs,
     ransomwareCampaigns: campaigns,
     trendingMalware: computeTrendingMalware(iocs, attackData?.techniques ?? [], cache.getEntry("detection-rules").data?.index),
-    githubTopCves: computeTopCves(getAllGithubRepos(), 10),
+    githubTopCves: computeTopCves(getAllGithubRepos(), 10, getNewsCveCounts(cache.getEntry("news").data?.items)),
     industryHeatmap: computeActorIndustryHeatmap(campaigns, { country: null }),
     geoTargeting: computeGeoTargeting(campaigns),
-    mergedActors: mergeThreatActors(campaigns, otxSignals),
+    mergedActors: mergeThreatActors(campaigns, otxSignals, getThreatActorIntelligenceEntities()),
     attackCampaignsCount: attackData?.campaigns?.length ?? 0,
     otxActorSignalsCount: otxSignals.length,
   });
@@ -311,6 +312,18 @@ router.get("/dashboard/campaign-intelligence", (_req, res) => {
   res.json({ entities: getCampaignIntelligenceEntities() });
 });
 
+// --- Dark Web Intelligence (canonical, deduped entity store, see server/darkWebIntelligence.js) ---
+// One record per dark-web finding (data leak, credential dump, initial-
+// access listing, marketplace listing, forum chatter, extortion threat),
+// built from OSINT vendor/researcher coverage of underground forums/
+// marketplaces/Telegram channels (server/darkWebExtraction.js +
+// server/combinedExtractionJob.js) -- NOT direct dark-web-forum scraping,
+// every source here is a public news/vendor RSS feed already tracked in
+// server/connectors/newsFeeds.js.
+router.get("/dashboard/darkweb-intelligence", (_req, res) => {
+  res.json({ entities: getDarkWebIntelligenceEntities() });
+});
+
 router.get("/dashboard/attack-techniques", (_req, res) => {
   const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
   res.json(computeAttackTechniquesObserved(threatFeedIocs(), attackIndex, getNewsTechniqueCounts()));
@@ -337,7 +350,7 @@ router.get("/dashboard/ransomware", (_req, res) => {
 
 router.get("/dashboard/threat-actors", (_req, res) => {
   const otxSignals = cache.getEntry("otx").data?.actorSignals ?? [];
-  res.json(mergeThreatActors(getRansomwareCampaigns(), otxSignals).slice(0, 30));
+  res.json(mergeThreatActors(getRansomwareCampaigns(), otxSignals, getThreatActorIntelligenceEntities()).slice(0, 30));
 });
 
 // --- Threat Actor Profiles (primary source: MITRE ATT&CK Groups) --------
@@ -461,7 +474,7 @@ router.get("/dashboard/github-intel/stats", (_req, res) => {
     for (const c of repo.categories ?? []) categoryCounts[c.category] = (categoryCounts[c.category] ?? 0) + 1;
   }
 
-  const topCves = computeTopCves(repos, 10);
+  const topCves = computeTopCves(repos, 10, getNewsCveCounts(cache.getEntry("news").data?.items));
 
   res.json({
     totalRepos: repos.length,

@@ -116,7 +116,12 @@ export interface RansomwareCampaign {
 
 export interface ThreatActor {
   name: string;
-  type: "ransomware" | "otx-tagged";
+  // "ransomware"/"otx-tagged" are source-provenance tags (ransomware.live,
+  // OTX pulse adversary tags); the ThreatActorType values are real actor-type
+  // classifications for actors sourced purely from news-derived intelligence
+  // (server/threatActorIntelligence.js) that aren't already ransomware/OTX
+  // tracked -- see server/correlate.js#mergeThreatActors.
+  type: "ransomware" | "otx-tagged" | ThreatActorType;
   campaignCount: number;
   lastActivity: string;
 }
@@ -323,7 +328,7 @@ export interface GithubIntelStats {
   enrichedRepos: number;
   pendingEnrichment: number;
   categoryCounts: Record<string, number>;
-  topCves: Array<{ cveId: string; repoCount: number }>;
+  topCves: Array<{ cveId: string; repoCount: number; newsMentionCount: number }>;
 }
 
 export interface SourceReliability {
@@ -622,6 +627,40 @@ export interface CampaignIntelligenceEntity {
   articles: CampaignIntelligenceArticleRef[];
 }
 
+export type DarkWebFindingType = "Data Leak" | "Credential Dump" | "Initial Access Listing" | "Marketplace Listing" | "Forum Discussion" | "Extortion Threat" | "Other";
+
+export type DarkWebIntelligenceArticleRef = MalwareIntelligenceArticleRef;
+
+/**
+ * One canonical, deduped dark-web-finding record -- built by automatically
+ * extracting findings from OSINT vendor/researcher news coverage of
+ * underground forums/marketplaces/Telegram channels (server/darkWebExtraction.js),
+ * NOT from direct dark-web-forum scraping; every article behind a record
+ * here is a public news/vendor RSS feed already tracked in
+ * server/connectors/newsFeeds.js. `verified` means corroborated by at least
+ * two independently-published sources -- there's no authoritative catalog of
+ * dark-web activity to match against, so corroboration is the whole signal
+ * (the same policy as CampaignIntelligenceEntity).
+ */
+export interface DarkWebIntelligenceEntity {
+  id: string;
+  name: string;
+  aliases: string[];
+  type: DarkWebFindingType;
+  platform: string | null;
+  victimOrg: string | null;
+  verified: boolean;
+  associatedActors: string[];
+  associatedMalware: string[];
+  targetedIndustries: string[];
+  targetedCountries: string[];
+  cveExploited: string[];
+  firstSeen: string;
+  lastSeen: string;
+  mentionCount: number;
+  articles: DarkWebIntelligenceArticleRef[];
+}
+
 /** Local RAG chatbot -- see server/rag/. Runs entirely against a local Ollama install, no paid API. */
 export interface ChatHealth {
   ollamaAvailable: boolean;
@@ -641,7 +680,7 @@ export interface ChatMessage {
 /** One piece of platform intelligence the answer was actually grounded in -- see server/rag/ragChat.js. */
 export interface ChatSource {
   id: string;
-  type: "cve" | "kev" | "ransomware" | "actor" | "technique" | "malware" | "campaign" | "news";
+  type: "cve" | "kev" | "ransomware" | "actor" | "technique" | "malware" | "campaign" | "darkweb" | "news";
   label: string;
   url: string | null;
   score: number;

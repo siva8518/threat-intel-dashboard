@@ -12,10 +12,13 @@ const TOP_N = 8;
 
 /**
  * Ranked by how many tracked GitHub repos reference each CVE (PoC exploits,
- * write-ups, detection rules -- see server/githubIntel/index.js#computeTopCves),
- * not by "actor-attributed KEV entries added in exactly the last 7 days" --
- * that narrower cut is frequently empty; GitHub PoC activity accumulates
- * continuously and is almost never zero.
+ * write-ups, detection rules) plus how many news headlines across every
+ * configured source name it -- see server/githubIntel/index.js#computeTopCves,
+ * which merges both signals the same way server/correlate.js merges IOC- and
+ * news-derived ATT&CK technique counts. Not scoped to "actor-attributed KEV
+ * entries added in exactly the last 7 days" -- that narrower cut is
+ * frequently empty; this combined activity accumulates continuously and is
+ * almost never zero.
  */
 export function TopCves() {
   const { data, isLoading, isError } = useGithubIntelStats();
@@ -49,14 +52,19 @@ export function TopCves() {
         ) : isError ? (
           <ErrorState message="Top CVEs is unavailable right now." />
         ) : topCves.length === 0 ? (
-          <EmptyState message="No GitHub-tracked CVE activity yet." />
+          <EmptyState message="No GitHub-tracked or news-mentioned CVE activity yet." />
         ) : (
           <RankedBarChart
             hue="#f7913d"
             data={topCves.map((c) => ({
               name: c.cveId,
-              count: c.repoCount,
-              detail: `${c.repoCount} GitHub PoC/repo mention${c.repoCount === 1 ? "" : "s"}`,
+              count: c.repoCount + c.newsMentionCount,
+              detail: [
+                c.repoCount > 0 ? `${c.repoCount} GitHub PoC/repo mention${c.repoCount === 1 ? "" : "s"}` : null,
+                c.newsMentionCount > 0 ? `${c.newsMentionCount} news mention${c.newsMentionCount === 1 ? "" : "s"}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · "),
               onOpen: () => openCve(c.cveId),
             }))}
           />

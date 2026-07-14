@@ -29,18 +29,34 @@ export function getAllGithubRepos() {
 }
 
 /**
- * CVEs ranked by how many enriched repos reference them -- shared by the
- * GitHub Intel stats panel and the Executive Threat Summary's "most
- * exploited CVE" signal, so both read the exact same ranking.
+ * CVEs ranked by how many enriched repos reference them, plus -- additively,
+ * same pattern as server/correlate.js#computeAttackTechniquesObserved merging
+ * in news-derived technique counts -- how many news headlines (across every
+ * configured source) name each CVE (server/newsCorrelation.js#getNewsCveCounts).
+ * Shared by the GitHub Intel stats panel, the "Top CVEs" widget, and the
+ * Executive Threat Summary's "most exploited CVE" signal, so all three read
+ * the exact same ranking. `repoCount` stays GitHub-only so existing exploit-
+ * PoC semantics aren't diluted; `newsMentionCount` is reported separately so
+ * a CVE surfaced purely by news coverage (no PoC repo yet) is still visible
+ * and distinguishable from one confirmed to have public exploit code.
  */
-export function computeTopCves(repos, limit = 10) {
+export function computeTopCves(repos, limit = 10, newsCveCounts = new Map()) {
   const enriched = repos.filter((r) => r.lastEnrichedAt);
   const cveCounts = {};
   for (const repo of enriched) {
     for (const cveId of repo.extracted?.cveIds ?? []) cveCounts[cveId] = (cveCounts[cveId] ?? 0) + 1;
   }
-  return Object.entries(cveCounts)
-    .sort((a, b) => b[1] - a[1])
+
+  const combined = new Map();
+  for (const [cveId, repoCount] of Object.entries(cveCounts)) combined.set(cveId, { repoCount, newsMentionCount: 0 });
+  for (const [cveId, newsMentionCount] of newsCveCounts) {
+    const entry = combined.get(cveId) ?? { repoCount: 0, newsMentionCount: 0 };
+    entry.newsMentionCount = newsMentionCount;
+    combined.set(cveId, entry);
+  }
+
+  return Array.from(combined.entries())
+    .sort((a, b) => b[1].repoCount + b[1].newsMentionCount - (a[1].repoCount + a[1].newsMentionCount))
     .slice(0, limit)
-    .map(([cveId, repoCount]) => ({ cveId, repoCount }));
+    .map(([cveId, counts]) => ({ cveId, ...counts }));
 }
