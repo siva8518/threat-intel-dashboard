@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
+import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { useCampaignIntelligence } from "@/hooks/useCampaignIntelligence";
 import type { CampaignIntelligenceEntity } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
@@ -127,14 +128,18 @@ function EntityRow({ entity, expanded, onToggle }: { entity: CampaignIntelligenc
 export function CampaignIntelligence() {
   const { data, isLoading, isError, error } = useCampaignIntelligence();
   const [search, setSearch] = useState("");
+  const [dateRange, setDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const entities = data?.entities ?? [];
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return entities;
-    return entities.filter((e) => e.name.toLowerCase().includes(q) || e.aliases.some((a) => a.toLowerCase().includes(q)));
-  }, [entities, search]);
+    return entities.filter((e) => {
+      if (!isWithinDateRange(e.lastSeen, dateRange)) return false;
+      if (!q) return true;
+      return e.name.toLowerCase().includes(q) || e.aliases.some((a) => a.toLowerCase().includes(q));
+    });
+  }, [entities, search, dateRange]);
 
   function toggle(id: string) {
     setExpandedIds((prev) => {
@@ -161,7 +166,10 @@ export function CampaignIntelligence() {
             </CardTitle>
             <p className="mt-1 text-xs text-muted">Named attack campaigns and operations automatically identified from live news coverage, cross-referenced with the threat actors and malware behind them.</p>
           </div>
-          <Input placeholder="Search by name or alias…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full md:w-64" />
+          <div className="flex w-full flex-wrap items-center gap-2 md:w-auto">
+            <Input placeholder="Search by name or alias…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:w-64" />
+            <DateRangeFilter value={dateRange} onChange={setDateRange} />
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -178,7 +186,7 @@ export function CampaignIntelligence() {
             message={
               entities.length === 0
                 ? "No named campaigns identified yet -- extraction runs a few articles at a time in the background; check back shortly."
-                : "No campaigns match that search."
+                : "No campaigns match this search/date filter."
             }
           />
         ) : (

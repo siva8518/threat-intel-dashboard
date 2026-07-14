@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
+import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { useDarkWebIntelligence } from "@/hooks/useDarkWebIntelligence";
 import type { DarkWebIntelligenceEntity, DarkWebFindingType } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
@@ -144,6 +145,7 @@ export function DarkWebIntelligence() {
   const { data, isLoading, isError, error } = useDarkWebIntelligence();
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<DarkWebFindingType | "All">("All");
+  const [dateRange, setDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const entities = data?.entities ?? [];
@@ -151,10 +153,11 @@ export function DarkWebIntelligence() {
     const q = search.trim().toLowerCase();
     return entities.filter((e) => {
       if (typeFilter !== "All" && e.type !== typeFilter) return false;
+      if (!isWithinDateRange(e.lastSeen, dateRange)) return false;
       if (!q) return true;
       return e.name.toLowerCase().includes(q) || (e.victimOrg ?? "").toLowerCase().includes(q) || (e.platform ?? "").toLowerCase().includes(q);
     });
-  }, [entities, search, typeFilter]);
+  }, [entities, search, typeFilter, dateRange]);
 
   function toggle(id: string) {
     setExpandedIds((prev) => {
@@ -184,6 +187,7 @@ export function DarkWebIntelligence() {
         </div>
         <div className="flex w-full flex-wrap items-center gap-2">
           <Input placeholder="Search by finding, victim, or platform…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:w-64" />
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
           <div className="flex flex-wrap gap-1.5">
             {TYPE_FILTERS.map((t) => (
               <button
@@ -215,7 +219,7 @@ export function DarkWebIntelligence() {
             message={
               entities.length === 0
                 ? "No dark-web findings identified yet -- extraction runs a few articles at a time in the background; check back shortly."
-                : "No findings match this search/filter."
+                : "No findings match this search/date/filter combination."
             }
           />
         ) : (

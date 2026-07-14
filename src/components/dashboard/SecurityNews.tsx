@@ -6,6 +6,7 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { SEVERITY_STYLE } from "./BreakingNewsStrip";
+import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { useSecurityNews } from "@/hooks/useSecurityNews";
 import { useSelection } from "@/context/SelectionContext";
 import { fetchCveById } from "@/api/dashboardApi";
@@ -24,29 +25,6 @@ const SEVERITY_FILTER_LABEL: Record<NewsSeverity | "all", string> = {
   medium: "Medium",
   low: "Low",
 };
-
-type DateFilter = "today" | "yesterday" | "day-before" | "all";
-const DATE_FILTER_LABEL: Record<DateFilter, string> = {
-  today: "Today",
-  yesterday: "Yesterday",
-  "day-before": "Day Before Yesterday",
-  all: "All",
-};
-
-/** Calendar-day match in the browser's own local time zone, `daysAgo` days back from today (0 = today). */
-function isCalendarDaysAgo(iso: string, daysAgo: number) {
-  const d = new Date(iso);
-  const target = new Date();
-  target.setDate(target.getDate() - daysAgo);
-  return d.getFullYear() === target.getFullYear() && d.getMonth() === target.getMonth() && d.getDate() === target.getDate();
-}
-
-function matchesDateFilter(iso: string, filter: DateFilter) {
-  if (filter === "all") return true;
-  if (filter === "today") return isCalendarDaysAgo(iso, 0);
-  if (filter === "yesterday") return isCalendarDaysAgo(iso, 1);
-  return isCalendarDaysAgo(iso, 2);
-}
 
 const GROUP_OPTIONS: Array<{ value: GroupBy; label: string; icon: typeof Skull }> = [
   { value: "none", label: "Latest", icon: TrendingUp },
@@ -226,7 +204,7 @@ export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
   const [sourceFilter, setSourceFilter] = useState(initialSourceFilter ?? "ALL");
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [severityFilter, setSeverityFilter] = useState<NewsSeverity | "all">("all");
-  const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [dateRange, setDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
 
   // Re-syncs whenever a fresh navigation sets a new source (e.g. clicking a
   // different AI Daily Brief bullet on a later visit) rather than only on
@@ -240,8 +218,8 @@ export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
   const sourceFiltered = useMemo(() => {
     const bySource =
       sourceFilter === "ALL" ? items : sourceFilter === MAJOR_VENDORS_FILTER ? items.filter((i) => MAJOR_VENDOR_SOURCES.has(i.source)) : items.filter((i) => i.source === sourceFilter);
-    return bySource.filter((i) => (severityFilter === "all" || i.severity === severityFilter) && matchesDateFilter(i.publishedDate, dateFilter));
-  }, [items, sourceFilter, severityFilter, dateFilter]);
+    return bySource.filter((i) => (severityFilter === "all" || i.severity === severityFilter) && isWithinDateRange(i.publishedDate, dateRange));
+  }, [items, sourceFilter, severityFilter, dateRange]);
 
   // "Latest" is a recency-capped flat feed regardless of tags. Grouped views
   // are the opposite: tags are rare (most headlines don't mention a specific
@@ -285,13 +263,7 @@ export function SecurityNews({ initialSourceFilter }: SecurityNewsProps = {}) {
                 </option>
               ))}
             </Select>
-            <Select value={dateFilter} onChange={(e) => setDateFilter(e.target.value as DateFilter)} className="w-full sm:w-auto">
-              {(Object.keys(DATE_FILTER_LABEL) as DateFilter[]).map((f) => (
-                <option key={f} value={f}>
-                  {DATE_FILTER_LABEL[f]}
-                </option>
-              ))}
-            </Select>
+            <DateRangeFilter value={dateRange} onChange={setDateRange} />
           </div>
         </CardHeader>
         <CardContent>
