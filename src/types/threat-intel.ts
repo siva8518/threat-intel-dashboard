@@ -548,6 +548,14 @@ export interface MalwareIntelligenceArticleRef {
  * Software list or a live indicator feed; unverified records are reported by
  * news coverage alone and haven't been corroborated elsewhere yet.
  */
+/** A live indicator (see IocRecord) matching this malware family, capped and attached directly to the entity -- see server/combinedExtractionJob.js#buildIocFamilyData. */
+export interface MalwareIocRef {
+  indicator: string;
+  indicatorType: IocType;
+  sources: string[];
+  firstSeen: string;
+}
+
 export interface MalwareIntelligenceEntity {
   id: string;
   name: string;
@@ -557,6 +565,7 @@ export interface MalwareIntelligenceEntity {
   attackUrl: string | null;
   verified: boolean;
   iocSightings: number;
+  iocs: MalwareIocRef[];
   firstSeen: string;
   lastSeen: string;
   mentionCount: number;

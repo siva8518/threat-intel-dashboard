@@ -43,15 +43,26 @@ import { log } from "./lib/log.js";
 const MAX_ARTICLES_PER_CYCLE = 40;
 const CYCLE_INTERVAL_MS = 2 * 60 * 1000;
 
-function buildIocFamilyCounts() {
+// Malware families with no live indicator behind them at all still get a
+// count but no records to show -- that's real ("Magecart" tagged but
+// nothing currently in the deduped feed"), not a bug in this function.
+const MAX_IOC_RECORDS_PER_FAMILY = 8;
+
+function buildIocFamilyData() {
   const counts = new Map();
+  const records = new Map();
   for (const ioc of threatFeedIocs()) {
     for (const family of splitFamilies(ioc.malwareFamily)) {
       const key = malwareIntel.normalizeMalwareId(family);
       counts.set(key, (counts.get(key) ?? 0) + 1);
+      const list = records.get(key) ?? [];
+      if (list.length < MAX_IOC_RECORDS_PER_FAMILY) {
+        list.push({ indicator: ioc.indicator, indicatorType: ioc.indicatorType, sources: ioc.sources, firstSeen: ioc.firstSeen });
+        records.set(key, list);
+      }
     }
   }
-  return counts;
+  return { counts, records };
 }
 
 function buildExclusionSets(attackData) {
@@ -156,7 +167,8 @@ async function runCycle() {
   darkWebIntel.saveAfterMentions();
 
   if (attackData) {
-    malwareIntel.reconcile(attackData, buildIocFamilyCounts());
+    const { counts, records } = buildIocFamilyData();
+    malwareIntel.reconcile(attackData, counts, records);
     actorIntel.reconcile(attackData, getRansomwareCampaigns());
   }
   campaignIntel.reconcile(attackData);
