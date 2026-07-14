@@ -16,6 +16,20 @@ function normalizeIocType(rawType) {
   return "unknown";
 }
 
+// ThreatFox's "ip:port" ioc_type (C2 listeners) is normalized to plain "ip"
+// above, but `entry.ioc` itself is the literal string "1.2.3.4:8080" --
+// confirmed live this got fed whole into a VirusTotal IP lookup URL
+// (".../ip-address/1.2.3.4%3A8080"), an invalid page. Strip the port for
+// that specific type only; guarded to exactly two colon-separated parts so
+// an actual IPv6 address (multiple colons) is never touched.
+function normalizeIndicator(ioc, rawType) {
+  if (rawType === "ip:port") {
+    const parts = ioc.split(":");
+    if (parts.length === 2) return parts[0];
+  }
+  return ioc;
+}
+
 /** ThreatFox recent IOCs. Requires a free Auth-Key from https://auth.abuse.ch/. */
 export default {
   id: "threatfox",
@@ -42,7 +56,7 @@ export default {
 
     return data.data.map((entry) => ({
       id: `threatfox-${entry.id}`,
-      indicator: entry.ioc,
+      indicator: normalizeIndicator(entry.ioc, entry.ioc_type),
       indicatorType: normalizeIocType(entry.ioc_type),
       malwareFamily: entry.malware_printable || "Unknown",
       threatType: entry.threat_type,
