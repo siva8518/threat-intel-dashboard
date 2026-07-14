@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Threat Intelligence Platform — Executive Briefing</title>
+</head>
+<body>
+<style>
+  :root {
+    --bg: #f4f5f8;
+    --surface: #ffffff;
+    --surface-2: #eef0f5;
+    --border: #dde1ea;
+    --ink: #14171f;
+    --ink-soft: #4b5163;
+    --muted: #767c8f;
+    --accent: #3452e1;
+    --accent-soft: #eaefff;
+    --accent-ink: #24379e;
+    --cyan: #0e8f8f;
+    --cyan-soft: #e2f6f5;
+    --good: #1a8a5f;
+    --good-soft: #e3f6ec;
+    --warn: #b8590a;
+    --warn-soft: #fdf0e3;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: -apple-system, "Segoe UI", "Inter", ui-sans-serif, system-ui, sans-serif;
+    --display: "Georgia", "Iowan Old Style", "Palatino Linotype", serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1016;
+    --surface: #161923;
+    --surface-2: #1d212e;
+    --border: #2a2f3d;
+    --ink: #eef0f6;
+    --ink-soft: #b9bdd0;
+    --muted: #7d8298;
+    --accent: #7a94ff;
+    --accent-soft: #232c52;
+    --accent-ink: #c2cdff;
+    --cyan: #4fd6d6;
+    --cyan-soft: #163333;
+    --good: #4fce9c;
+    --good-soft: #14352a;
+    --warn: #f0a55f;
+    --warn-soft: #3a2a15;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1016;
+      --surface: #161923;
+      --surface-2: #1d212e;
+      --border: #2a2f3d;
+      --ink: #eef0f6;
+      --ink-soft: #b9bdd0;
+      --muted: #7d8298;
+      --accent: #7a94ff;
+      --accent-soft: #232c52;
+      --accent-ink: #c2cdff;
+      --cyan: #4fd6d6;
+      --cyan-soft: #163333;
+      --good: #4fce9c;
+      --good-soft: #14352a;
+      --warn: #f0a55f;
+      --warn-soft: #3a2a15;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+  }
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 48px 28px 80px;
+  }
+
+  .kicker {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  h1 {
+    font-family: var(--display);
+    font-size: 40px;
+    line-height: 1.12;
+    margin: 10px 0 8px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  .subhead {
+    color: var(--ink-soft);
+    font-size: 16.5px;
+    max-width: 62ch;
+    margin: 0 0 32px;
+  }
+
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 40px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 16px 14px;
+  }
+  .stat .n {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 26px;
+    font-weight: 600;
+    color: var(--ink);
+    display: block;
+  }
+  .stat .l {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  section { margin-bottom: 40px; }
+  h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    font-weight: 700;
+    margin: 0 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  h2::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+  }
+  .card + .card { margin-top: 12px; }
+  .card h3 {
+    font-size: 17px;
+    margin: 0 0 6px;
+    color: var(--ink);
+  }
+  .card p {
+    margin: 0 0 10px;
+    color: var(--ink-soft);
+    font-size: 14.5px;
+  }
+  .card ul {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+  }
+  .card li {
+    position: relative;
+    padding-left: 18px;
+    font-size: 14px;
+    color: var(--ink-soft);
+    margin-bottom: 7px;
+  }
+  .card li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .card li:last-child { margin-bottom: 0; }
+  .card li b { color: var(--ink); font-weight: 600; }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    margin-bottom: 10px;
+  }
+  .pill.cyan { background: var(--cyan-soft); color: var(--cyan); }
+  .pill.good { background: var(--good-soft); color: var(--good); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+
+  /* Architecture diagram */
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 26px 20px;
+    overflow-x: auto;
+  }
+  .diagram svg { display: block; min-width: 720px; width: 100%; height: auto; }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .callout {
+    border-radius: 12px;
+    padding: 16px 20px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .callout b { color: var(--ink); }
+
+  .qa {
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  .qa + .qa { margin-top: 14px; }
+  .qa .q {
+    font-weight: 600;
+    color: var(--ink);
+    font-size: 14.5px;
+    margin-bottom: 4px;
+  }
+  .qa .a {
+    color: var(--ink-soft);
+    font-size: 14px;
+  }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  @media (max-width: 640px) {
+    .stat-row { grid-template-columns: repeat(2, 1fr); }
+    .two-col { grid-template-columns: 1fr; }
+    h1 { font-size: 30px; }
+  }
+
+  /* Print / Save-as-PDF: nothing here can rely on scrolling -- a PDF page has
+     no scrollbar, so anything wider than the page (the diagram's min-width)
+     or split awkwardly by a page break simply disappears or looks cut off.
+     This forces everything to fit the page width and keeps each card/section
+     from being sliced in half across a page boundary. */
+  @media print {
+    :root { --bg: #ffffff; --surface: #ffffff; --surface-2: #f4f5f8; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+    @page { margin: 14mm; }
+    body { background: #fff; }
+    .page { max-width: 100%; padding: 0; }
+    .diagram { overflow: visible; }
+    .diagram svg { min-width: 0; width: 100%; }
+    /* CSS Grid doesn't paginate reliably in print -- a row that falls across
+       a page boundary gets clipped/dropped instead of flowing to the next
+       page, confirmed to be the actual cause of missing content. Falling
+       back to plain block flow here lets these stack and break normally. */
+    .stat-row, .two-col { display: block; }
+    .stat-row .stat, .two-col .card { margin-bottom: 10px; }
+    /* break-inside:avoid only on the innermost content blocks -- putting it
+       on `section` too (a container that can span several cards and easily
+       exceeds one page) fights the browser's own pagination and was the
+       other cause of content going missing rather than flowing to a new page. */
+    .stat, .card, .qa, .callout, .diagram {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    section { break-inside: auto; page-break-inside: auto; }
+    h2 { break-after: avoid; page-break-after: avoid; }
+    a { color: inherit !important; text-decoration: none; }
+  }
+</style>
+
+<div class="page">
+  <div class="kicker">Internal briefing · Threat Intelligence Platform</div>
+  <h1>What we built, in plain terms</h1>
+  <p class="subhead">
+    A self-hosted threat intelligence platform that aggregates 100+ public and vendor feeds, correlates them automatically,
+    and answers analyst questions through a locally-run AI assistant — built and run entirely on free, open infrastructure.
+  </p>
+
+  <div class="stat-row">
+    <div class="stat"><span class="n">106</span><span class="l">Live intel sources</span></div>
+    <div class="stat"><span class="n">4</span><span class="l">Auto-extraction pipelines</span></div>
+    <div class="stat"><span class="n">$0</span><span class="l">Recurring platform cost</span></div>
+    <div class="stat"><span class="n">100%</span><span class="l">Data stays on-premises</span></div>
+  </div>
+
+
+  <section>
+    <h2>Product Snapshot</h2>
+    <div class="card" style="padding:14px">
+      <img src="dashboard-overview.png" alt="Threat Intelligence Platform Overview tab, showing critical threat score, top malware, threat actors, CVEs, geographic distribution, and MITRE technique charts" style="width:100%;height:auto;display:block;border-radius:8px;border:1px solid var(--border)" />
+      <p style="margin:10px 2px 0;font-size:13px;color:var(--muted)">The Overview tab -- live threat score, top malware/actors/CVEs, geographic distribution, and MITRE ATT&amp;CK technique trends, all auto-refreshing every 15 minutes.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Architecture</h2>
+    <div class="diagram">
+      <svg viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Architecture: sources feed a backend aggregation service, which powers entity stores and a local AI layer, both served to the frontend dashboard.">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+        </defs>
+        <style>
+          .box { fill: var(--surface-2); stroke: var(--border); stroke-width: 1.2; rx: 10; }
+          .box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; rx: 10; }
+          .box-cyan { fill: var(--cyan-soft); stroke: var(--cyan); stroke-width: 1.2; rx: 10; }
+          .lbl { font-family: var(--sans); font-size: 12.5px; fill: var(--ink); font-weight: 600; }
+          .lbl-sub { font-family: var(--sans); font-size: 10.5px; fill: var(--muted); }
+          .edge { stroke: var(--muted); stroke-width: 1.4; fill: none; marker-end: url(#arrow); }
+        </style>
+
+        <rect x="14" y="18" width="180" height="224" class="box"/>
+        <text x="104" y="42" text-anchor="middle" class="lbl">106 Data Sources</text>
+        <text x="104" y="60" text-anchor="middle" class="lbl-sub">CISA · NVD · MITRE ATT&amp;CK</text>
+        <text x="104" y="75" text-anchor="middle" class="lbl-sub">MalwareBazaar · URLhaus</text>
+        <text x="104" y="90" text-anchor="middle" class="lbl-sub">OTX · AbuseIPDB · GreyNoise</text>
+        <text x="104" y="105" text-anchor="middle" class="lbl-sub">Ransomware trackers</text>
+        <text x="104" y="120" text-anchor="middle" class="lbl-sub">70+ vendor/news RSS feeds</text>
+        <text x="104" y="135" text-anchor="middle" class="lbl-sub">GitHub PoC repos</text>
+
+        <line x1="194" y1="130" x2="238" y2="130" class="edge"/>
+
+        <rect x="242" y="18" width="200" height="224" class="box-accent"/>
+        <text x="342" y="42" text-anchor="middle" class="lbl">Backend Aggregation</text>
+        <text x="342" y="58" text-anchor="middle" class="lbl-sub">&amp; Correlation Service</text>
+        <text x="342" y="80" text-anchor="middle" class="lbl-sub">Scheduled sync + retries</text>
+        <text x="342" y="95" text-anchor="middle" class="lbl-sub">Cross-source dedup</text>
+        <text x="342" y="110" text-anchor="middle" class="lbl-sub">CVE ↔ KEV ↔ EPSS join</text>
+        <text x="342" y="125" text-anchor="middle" class="lbl-sub">Malware ↔ ATT&amp;CK mapping</text>
+        <text x="342" y="140" text-anchor="middle" class="lbl-sub">Actor ↔ campaign linking</text>
+        <text x="342" y="155" text-anchor="middle" class="lbl-sub">Node.js / Express</text>
+
+        <line x1="446" y1="80" x2="486" y2="80" class="edge"/>
+        <line x1="446" y1="180" x2="486" y2="180" class="edge"/>
+
+        <rect x="490" y="18" width="200" height="100" class="box-cyan"/>
+        <text x="590" y="42" text-anchor="middle" class="lbl">Auto-Intelligence</text>
+        <text x="590" y="58" text-anchor="middle" class="lbl-sub">Malware · Actors</text>
+        <text x="590" y="73" text-anchor="middle" class="lbl-sub">Campaigns · ATT&amp;CK TTPs</text>
+        <text x="590" y="93" text-anchor="middle" class="lbl-sub">Local LLM extraction,</text>
+        <text x="590" y="106" text-anchor="middle" class="lbl-sub">zero manual curation</text>
+
+        <rect x="490" y="140" width="200" height="100" class="box-cyan"/>
+        <text x="590" y="164" text-anchor="middle" class="lbl">Local RAG Chatbot</text>
+        <text x="590" y="182" text-anchor="middle" class="lbl-sub">Vector search over all</text>
+        <text x="590" y="197" text-anchor="middle" class="lbl-sub">correlated intelligence</text>
+        <text x="590" y="215" text-anchor="middle" class="lbl-sub">Ollama, runs on-box</text>
+
+        <line x1="694" y1="80" x2="734" y2="130" class="edge"/>
+        <line x1="694" y1="180" x2="734" y2="130" class="edge"/>
+
+        <rect x="738" y="80" width="150" height="100" class="box"/>
+        <text x="813" y="118" text-anchor="middle" class="lbl">Dashboard</text>
+        <text x="813" y="136" text-anchor="middle" class="lbl-sub">React + TypeScript</text>
+        <text x="813" y="151" text-anchor="middle" class="lbl-sub">14 analyst-facing</text>
+        <text x="813" y="164" text-anchor="middle" class="lbl-sub">views + AI assistant</text>
+      </svg>
+    </div>
+  </section>
+
+  <section>
+    <h2>Servers &amp; Runtime — what it actually runs on</h2>
+    <div class="card">
+      <span class="pill">Runtime stack</span>
+      <h3>Four small, well-understood server processes — no exotic infrastructure</h3>
+      <p>Everything runs as ordinary open-source server software. There's no managed cloud service, no proprietary
+        platform, and no infrastructure a small internal team can't operate itself.</p>
+      <ul>
+        <li><b>Node.js / Express backend server</b> — the aggregation &amp; correlation service; owns all scheduled syncing, retries, caching, and cross-source correlation logic.</li>
+        <li><b>Ollama (local LLM server)</b> — serves both the chat model (llama3.1:8b, with qwen2.5:3b available as a faster option) and the embedding model (nomic-embed-text) over a local API, entirely offline-capable.</li>
+        <li><b>Vite dev/build server</b> — serves and bundles the React/TypeScript frontend.</li>
+        <li><b>No external database server</b> — state is kept in-process and persisted to local JSON snapshots; at this data volume (a few thousand records) a full database server would be unnecessary overhead.</li>
+      </ul>
+      <p style="margin-top:10px; margin-bottom:0"><b>Where it runs today:</b> all four processes on a single workstation. The Dockerfile already in the repo packages this same stack for an internal server whenever we're ready to move off one machine — same components, just relocated.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>The AI Layer — RAG Chatbot</h2>
+    <div class="card">
+      <span class="pill cyan">Retrieval-Augmented Generation</span>
+      <h3>Analysts ask questions in plain English; answers are grounded only in our own data</h3>
+      <p>
+        The assistant runs entirely on hardware we control, via <b>Ollama</b> — a free, open-source model runtime. Every
+        answer is retrieved from the platform's own live intelligence (CVEs, malware, actors, campaigns, ATT&amp;CK
+        techniques, news) before the model ever generates a response.
+      </p>
+      <ul>
+        <li><b>No paid API, no external call.</b> The model and the embedding index both run locally — nothing is sent to OpenAI, Anthropic, or any third party.</li>
+        <li><b>Grounded, not generative.</b> A similarity threshold means the assistant says "I don't know" rather than guessing when nothing relevant is on file.</li>
+        <li><b>Exact-match safeguards</b> for identifiers — a CVE number or ATT&amp;CK technique ID is looked up directly rather than left to approximate semantic search.</li>
+        <li><b>Answers questions like:</b> "What is Bumblebee?", "Which malware does FIN7 use?", "Which actors exploit CVE-2025-XXXX?", "Show ransomware groups attacking healthcare."</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Automated Intelligence — the real differentiator</h2>
+    <div class="two-col">
+      <div class="card">
+        <span class="pill">Malware Intelligence</span>
+        <h3>Every family, one record</h3>
+        <p>Identifies malware families mentioned in incoming articles automatically, merges duplicate mentions into a single profile, and cross-checks each one against MITRE ATT&amp;CK's official catalog.</p>
+      </div>
+      <div class="card">
+        <span class="pill">Threat Actor Intelligence</span>
+        <h3>Who, and what they use</h3>
+        <p>Detects actor/group names, classifies them (APT, Cybercrime, Ransomware, Hacktivist, Initial Access Broker, Insider), and builds a running profile — aliases, TTPs, targeted industries, associated malware.</p>
+      </div>
+      <div class="card">
+        <span class="pill">Campaign Intelligence</span>
+        <h3>Named operations, tracked</h3>
+        <p>Picks up named operations as vendors report them (e.g. a newly-disclosed supply-chain campaign) and links them back to the actors and malware already on file.</p>
+      </div>
+      <div class="card">
+        <span class="pill">ATT&amp;CK Technique Mapping</span>
+        <h3>TTPs, validated</h3>
+        <p>Extracts specific attacker techniques from coverage and checks every one against the real MITRE catalog, so nothing invented by the model ever reaches an analyst.</p>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:12px">
+      <b>Why it matters:</b> none of these four catalogs are manually maintained. They build and update themselves as new
+      articles arrive, every two minutes, around the clock — turning what used to be analyst-hours of manual tagging into
+      a background process.
+    </div>
+  </section>
+
+  <section>
+    <h2>Cost &amp; Hosting</h2>
+    <div class="card">
+      <span class="pill good">$0 recurring</span>
+      <h3>Built entirely on free and open infrastructure</h3>
+      <ul>
+        <li>All 106 data sources are free-tier or fully keyless public feeds — no data licensing costs.</li>
+        <li>The AI model and embedding engine (Ollama) run locally at no per-query cost — no OpenAI/Anthropic API billing.</li>
+        <li>No managed vector database — the index is small enough (a few thousand entries) to run in-process.</li>
+        <li><b>Current state:</b> running as a local deployment during active development. The application is
+          container-ready (Dockerfile included) for internal hosting whenever we're ready to move it off a single
+          workstation — that's a deployment step, not a rebuild.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Likely questions from the room</h2>
+    <div class="card">
+      <div class="qa">
+        <div class="q">"Is any of our data leaving the building?"</div>
+        <div class="a">No. The AI model, the vector index, and all correlation logic run locally. The only outbound traffic is the original fetches from public threat-intel feeds — the same feeds a security team would already consult manually.</div>
+      </div>
+      <div class="qa">
+        <div class="q">"What happens if the model gets something wrong?"</div>
+        <div class="a">Two layers of protection: the chatbot won't answer at all if nothing relevant is on file, and every automatically-extracted malware/actor/technique is cross-checked against an authoritative source (MITRE ATT&amp;CK) or corroborated across independent sources before it's marked "confirmed" rather than "reported."</div>
+      </div>
+      <div class="qa">
+        <div class="q">"How is this different from buying a commercial threat-intel product?"</div>
+        <div class="a">Commercial platforms charge per-seat or per-feed subscription fees, often for the same public sources we already ingest for free. The differentiator here is the automatic correlation and entity-extraction layer — most vendors don't auto-build actor/malware/campaign profiles from raw news the way this does.</div>
+      </div>
+      <div class="qa">
+        <div class="q">"What's the path to production?"</div>
+        <div class="a">Containerize (Dockerfile already exists) and deploy to internal infrastructure. No architectural changes needed — this is a hosting decision, not a re-engineering effort.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Prepared as internal talking points. Figures reflect the current build as of this session.
+  </footer>
+</div>
+
+</body>
+</html>
