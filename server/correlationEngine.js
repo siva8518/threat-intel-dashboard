@@ -97,14 +97,42 @@ const GENERIC_LABELS = new Set([
   "powershell empire",
   "meterpreter",
   "psexec",
+  // URLHaus's `tags` field is freeform and community-submitted (server/
+  // connectors/urlhaus.js joins it straight into `malwareFamily`) -- these
+  // are honeypot/protocol/infrastructure labels confirmed live showing up
+  // as fake "malware families" (a URLHaus submitter tagging a host as
+  // "cowrie"/"telnet" describes how the sighting was captured, not what
+  // malware it is) rather than an actual family name.
+  "cowrie",
+  "honeypot",
+  "ssh",
+  "telnet",
+  "ftp",
+  "rdp",
+  "smb",
+  "scanner",
+  "bruteforce",
+  "c2",
+  "proxy",
+  "botnet",
 ]);
+
+// Same URLHaus freeform-tag problem, but for values that can't be caught by
+// a fixed denylist -- a submitter tagging a host with its own hostname/IP-like
+// identifier (e.g. "137-184-6-122") or a detection-signature id (e.g.
+// "win-0x4679", confirmed live sitting in the same comma-joined tag list
+// right next to a real family name like "ClearFake") rather than any real
+// family name. A genuine malware family name is never purely digits and
+// separators, and never a short word glued to a hex code by a dash.
+const NUMERIC_LABEL_PATTERN = /^\d+([.-]\d+){2,}$/;
+const SIGNATURE_ID_PATTERN = /^\w{1,6}-0x[0-9a-f]+$/i;
 
 export function splitFamilies(malwareFamily) {
   if (!malwareFamily || malwareFamily === "Unknown" || malwareFamily === "N/A") return [];
   return malwareFamily
     .split(",")
     .map((f) => f.trim())
-    .filter((f) => f && !GENERIC_LABELS.has(f.toLowerCase()));
+    .filter((f) => f && !GENERIC_LABELS.has(f.toLowerCase()) && !NUMERIC_LABEL_PATTERN.test(f) && !SIGNATURE_ID_PATTERN.test(f));
 }
 
 /**

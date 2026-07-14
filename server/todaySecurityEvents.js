@@ -26,8 +26,13 @@ function countTodayRansomware(ransomwareCampaigns) {
   return (ransomwareCampaigns ?? []).filter((c) => isToday(c.discoveredDate)).length;
 }
 
+// `i.source` (singular) only reflects whichever connector's record for this
+// indicator was merged first during dedup (see correlate.js#dedupeIocs) --
+// checking it directly silently drops any hash MalwareBazaar also reported
+// but that URLhaus/ThreatFox happened to report first. `i.sources` (plural)
+// is the full deduped list of every source that actually reported it.
 function countTodayMalwareSamples(threatFeedIocs) {
-  return (threatFeedIocs ?? []).filter((i) => i.source === "MalwareBazaar" && isToday(i.firstSeen)).length;
+  return (threatFeedIocs ?? []).filter((i) => i.sources.includes("MalwareBazaar") && isToday(i.firstSeen)).length;
 }
 
 function countTodayGithubExploits(githubRepos) {

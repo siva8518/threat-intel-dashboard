@@ -469,7 +469,7 @@ export interface TodaySecurityEvents {
 }
 
 export type DailySummaryAction =
-  | { type: "tab"; tab: "cves" | "threat-actors" | "threat-feed" }
+  | { type: "tab"; tab: "cves" | "threat-actors" | "malware-intelligence" }
   | { type: "malware"; family: string }
   | { type: "news-source"; source: string };
 

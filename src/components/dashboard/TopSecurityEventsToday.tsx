@@ -23,7 +23,7 @@ function useCountUp(value: number) {
   return display;
 }
 
-export type TodayEventsTargetTab = "correlation-engine" | "threat-actors" | "threat-feed" | "github-intel";
+export type TodayEventsTargetTab = "correlation-engine" | "threat-actors" | "malware-intelligence" | "github-intel";
 
 // "Critical KEV" and "Major Vendor Advisories" were dropped from this grid --
 // the KEV count and a real vendor/source line now live once, in prose, in
@@ -32,9 +32,9 @@ export type TodayEventsTargetTab = "correlation-engine" | "threat-actors" | "thr
 const STATS: Array<{ key: keyof Omit<TodaySecurityEvents, "generatedAt" | "criticalKev">; label: string; icon: typeof ShieldAlert; color: string; tab: TodayEventsTargetTab }> = [
   { key: "activeExploitCampaigns", label: "Active Exploit Campaigns", icon: Flame, color: "text-high", tab: "correlation-engine" },
   { key: "newRansomwareVictims", label: "New Ransomware Victims", icon: Skull, color: "text-critical", tab: "threat-actors" },
-  { key: "newMalwareSamples", label: "New Malware Samples", icon: Bug, color: "text-medium", tab: "threat-feed" },
+  { key: "newMalwareSamples", label: "New Malware Samples", icon: Bug, color: "text-medium", tab: "malware-intelligence" },
   { key: "githubExploits", label: "GitHub Exploits", icon: Github, color: "text-medium", tab: "github-intel" },
-  { key: "newIocs", label: "New IOCs", icon: Link2, color: "text-accent-cyan", tab: "threat-feed" },
+  { key: "newIocs", label: "New IOCs", icon: Link2, color: "text-accent-cyan", tab: "malware-intelligence" },
 ];
 
 function StatTile({

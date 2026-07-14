@@ -102,7 +102,7 @@ export function buildDailySummary({ todayEvents, ransomwareCampaigns, threatFeed
   const threatFoxToday = countTodaySourceIocs(threatFeedIocs, "ThreatFox");
   bullets.push({
     text: `${threatFoxToday} new ThreatFox IOC${threatFoxToday === 1 ? "" : "s"} detected`,
-    action: { type: "tab", tab: "threat-feed" },
+    action: { type: "tab", tab: "malware-intelligence" },
   });
 
   const malwareBullet = buildMalwareTrendBullet(trendingMalware);

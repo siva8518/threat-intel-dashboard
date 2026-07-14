@@ -1,6 +1,7 @@
 import malwareAttackMap from "./data/malware-attack-map.json" with { type: "json" };
 import industryMap from "./data/industry-map.json" with { type: "json" };
 import countryCodes from "./data/country-codes.json" with { type: "json" };
+import { splitFamilies } from "./correlationEngine.js";
 
 const TRENDING_MALWARE_LIMIT = 15;
 const ATTACK_TECHNIQUES_LIMIT = 15;
@@ -110,9 +111,12 @@ export function detectionRulesFor(name, ruleIndex) {
 export function computeTrendingMalware(iocs, attackIndex, ruleIndex = []) {
   const counts = new Map();
   for (const ioc of iocs) {
-    if (!ioc.malwareFamily || ioc.malwareFamily === "Unknown" || ioc.malwareFamily === "N/A") continue;
-    // Split combined values like "exe, AgentTesla" (URLHaus tags) into individual families.
-    for (const family of ioc.malwareFamily.split(",").map((f) => f.trim()).filter(Boolean)) {
+    // splitFamilies both splits combined values like "exe, AgentTesla" (URLHaus
+    // tags) into individual families AND filters out non-family noise (format/
+    // architecture tags, honeypot/protocol labels, raw IP-like identifiers) --
+    // reused here instead of a separate inline split so this widget can't drift
+    // out of sync with what Malware Intelligence itself considers a real family.
+    for (const family of splitFamilies(ioc.malwareFamily)) {
       const entry = counts.get(family) ?? { family, count: 0, sources: new Set() };
       entry.count += 1;
       entry.sources.add(ioc.source);

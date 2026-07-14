@@ -13,7 +13,7 @@ function formatReadingTime(seconds: number) {
   return `${minutes} minute${minutes === 1 ? "" : "s"}`;
 }
 
-export type DailySummaryTargetTab = "cves" | "threat-actors" | "threat-feed";
+export type DailySummaryTargetTab = "cves" | "threat-actors" | "malware-intelligence";
 
 interface DailySummaryProps {
   onNavigateTab: (tab: DailySummaryTargetTab) => void;

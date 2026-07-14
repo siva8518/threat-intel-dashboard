@@ -38,7 +38,7 @@ export function ThreatFeedTable() {
         <CardTitle className="text-base font-semibold text-foreground">
           Threat Feed{" "}
           <span className="text-muted">
-            (deduped IOCs from ThreatFox, URLHaus, MalwareBazaar, Feodo Tracker, OpenPhish, OTX &amp; AbuseIPDB)
+            (deduped IOCs from ThreatFox, URLHaus, MalwareBazaar, Feodo Tracker, OpenPhish, OTX, AbuseIPDB &amp; GitHub Intel)
           </span>
         </CardTitle>
         <div className="flex w-full flex-wrap gap-2 md:w-auto">

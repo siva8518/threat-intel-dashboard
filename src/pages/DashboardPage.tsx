@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, Search, ShieldAlert, Skull, UserSearch, Wifi } from "lucide-react";
+import { Bot, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Skull, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
 import { WorldThreatMap } from "@/components/dashboard/WorldThreatMap";
@@ -15,7 +15,6 @@ import { CveStatsHeader } from "@/components/dashboard/CveStatsHeader";
 import { CveTable } from "@/components/dashboard/CveTable";
 import { CveProgramActivity } from "@/components/dashboard/CveProgramActivity";
 import { ExploitIntelligence } from "@/components/dashboard/ExploitIntelligence";
-import { IocsHub } from "@/components/dashboard/IocsHub";
 import { CorrelationEngine } from "@/components/dashboard/CorrelationEngine";
 import { AttackTechniques } from "@/components/dashboard/AttackTechniques";
 import { AttackTacticHeatmap } from "@/components/dashboard/AttackTacticHeatmap";
@@ -38,7 +37,6 @@ import type { Severity } from "@/types/threat-intel";
 const TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "cves", label: "Latest CVEs", icon: ShieldAlert },
-  { id: "threat-feed", label: "IOCs", icon: Search },
   { id: "correlation-engine", label: "Correlation Engine", icon: Network },
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },
   { id: "threat-actors", label: "Ransomware Data", icon: Skull },
@@ -132,7 +130,6 @@ export function DashboardPage() {
           </div>
         </>
       )}
-      {activeTab === "threat-feed" && <IocsHub />}
       {activeTab === "correlation-engine" && <CorrelationEngine />}
       {activeTab === "attack-techniques" && (
         <>
