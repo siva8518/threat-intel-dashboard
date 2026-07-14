@@ -9,7 +9,8 @@ import type { ThreatActor } from "@/types/threat-intel";
 const TOP_N = 8;
 
 interface TopThreatActorsProps {
-  onNavigateToActors: () => void;
+  /** Deep-links a clicked actor's name into Threat Actor Intelligence's own search, not a fixed tab -- each bar can represent a ransomware group, an OTX-tagged actor, or a news-tracked APT/cybercrime actor with no ransomware.live record at all, so a single fixed destination (previously always "Ransomware Data") showed nothing for most of them. */
+  onSelectActor: (name: string) => void;
 }
 
 /**
@@ -34,7 +35,7 @@ function typeLabel(type: ThreatActor["type"]): string {
  * made that version of this widget show "no activity" more often than real
  * data. This one is activity-to-date, so it's essentially never empty.
  */
-export function TopThreatActors({ onNavigateToActors }: TopThreatActorsProps) {
+export function TopThreatActors({ onSelectActor }: TopThreatActorsProps) {
   const { data, isLoading, isError } = useThreatActors();
   const actors = (data ?? []).slice().sort((a, b) => b.campaignCount - a.campaignCount).slice(0, TOP_N);
 
@@ -60,7 +61,7 @@ export function TopThreatActors({ onNavigateToActors }: TopThreatActorsProps) {
               name: a.name,
               count: a.campaignCount,
               detail: `${typeLabel(a.type)} · last active ${new Date(a.lastActivity).toLocaleDateString()}`,
-              onOpen: onNavigateToActors,
+              onOpen: () => onSelectActor(a.name),
             }))}
           />
         )}

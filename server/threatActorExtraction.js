@@ -22,6 +22,35 @@ const GENERIC_STOPWORDS = new Set([
   "unknown group",
 ]);
 
+// Confirmed live: the local model occasionally lifts a bare nationality
+// adjective out of phrasing like "Russian hackers" or "Chinese state-sponsored
+// group" and returns it alone as if it were the group's actual name, which
+// polluted Top Threat Actors with entries like "Russian" next to real group
+// names. Single-word demonyms only -- a real, multi-word designation that
+// happens to include a nationality (e.g. "North Korea's Lazarus Group") isn't
+// affected since the whole candidate string wouldn't equal just the demonym.
+const BARE_DEMONYMS = new Set([
+  "russian",
+  "chinese",
+  "iranian",
+  "north korean",
+  "korean",
+  "american",
+  "ukrainian",
+  "israeli",
+  "belarusian",
+  "syrian",
+  "pakistani",
+  "indian",
+  "vietnamese",
+  "turkish",
+  "brazilian",
+  "nigerian",
+  "european",
+  "western",
+  "eastern",
+]);
+
 /**
  * Filters raw LLM output before it's ever allowed to become a record.
  * `articleSource`, `knownMalwareNamesLower` and `knownToolNamesLower` are
@@ -38,6 +67,7 @@ export function validateCandidates(candidates, { articleSource, knownMalwareName
     const lower = name.toLowerCase();
     if (name.length < 3 || name.length > 60) continue;
     if (GENERIC_STOPWORDS.has(lower)) continue;
+    if (BARE_DEMONYMS.has(lower)) continue;
     if (lower === (articleSource ?? "").toLowerCase()) continue;
     if (knownMalwareNamesLower?.has(lower)) continue;
     if (knownToolNamesLower?.has(lower)) continue;

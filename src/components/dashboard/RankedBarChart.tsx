@@ -49,6 +49,15 @@ const CATEGORY_AXIS_STYLE = { fill: "#eef0fa", fontSize: 11, fontFamily: "JetBra
  * tip. `orientation="vertical"`: columns, 4px rounded at the top -- used
  * where the category names are short enough to sit under a column (e.g.
  * malware family names) rather than needing room to read beside a bar.
+ *
+ * `isAnimationActive={false}` on both `<Bar>`s -- confirmed live that
+ * recharts' default entry animation (react-smooth under the hood) was
+ * silently failing to ever mount a shape for these bars: axes, grid lines,
+ * and category labels all rendered correctly, but every
+ * `.recharts-bar-rectangle` group stayed permanently childless, so no bar
+ * (and no value label, since LabelList positions off the bar's own geometry)
+ * ever appeared. Disabling the animation renders the final bar geometry
+ * immediately instead of animating from a zero-size starting frame.
  */
 export function RankedBarChart({ data, hue, orientation = "horizontal" }: { data: ChartDatum[]; hue: string; orientation?: "horizontal" | "vertical" }) {
   const clickable = data.some((d) => d.onOpen);
@@ -71,7 +80,15 @@ export function RankedBarChart({ data, hue, orientation = "horizontal" }: { data
           />
           <YAxis type="number" allowDecimals={false} stroke="#8d93ac" tick={AXIS_STYLE} axisLine={false} tickLine={false} width={32} />
           <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
-          <Bar dataKey="count" fill={hue} radius={[4, 4, 0, 0]} maxBarSize={36} onClick={(entry: ChartDatum) => entry.onOpen?.()} className={clickable ? "cursor-pointer" : undefined}>
+          <Bar
+            dataKey="count"
+            fill={hue}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={36}
+            isAnimationActive={false}
+            onClick={(entry: ChartDatum) => entry.onOpen?.()}
+            className={clickable ? "cursor-pointer" : undefined}
+          >
             <LabelList dataKey="count" position="top" fill="#eef0fa" fontSize={11} />
           </Bar>
         </BarChart>
@@ -86,7 +103,15 @@ export function RankedBarChart({ data, hue, orientation = "horizontal" }: { data
         <XAxis type="number" allowDecimals={false} stroke="#8d93ac" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
         <YAxis type="category" dataKey="name" stroke="#8d93ac" tick={CATEGORY_AXIS_STYLE} axisLine={false} tickLine={false} width={yAxisWidth(data)} />
         <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
-        <Bar dataKey="count" fill={hue} radius={[0, 4, 4, 0]} maxBarSize={18} onClick={(entry: ChartDatum) => entry.onOpen?.()} className={clickable ? "cursor-pointer" : undefined}>
+        <Bar
+          dataKey="count"
+          fill={hue}
+          radius={[0, 4, 4, 0]}
+          maxBarSize={18}
+          isAnimationActive={false}
+          onClick={(entry: ChartDatum) => entry.onOpen?.()}
+          className={clickable ? "cursor-pointer" : undefined}
+        >
           <LabelList dataKey="count" position="right" fill="#eef0fa" fontSize={11} />
         </Bar>
       </BarChart>

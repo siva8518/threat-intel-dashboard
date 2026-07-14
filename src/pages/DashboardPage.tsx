@@ -147,7 +147,7 @@ export function DashboardPage() {
             <CampaignVolumeTrend />
           </div>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <TopThreatActors onNavigateToActors={() => setActiveTab("threat-actors")} />
+            <TopThreatActors onSelectActor={goToActorSearch} />
             <TopCves />
           </div>
           <TopMitreTechniques />
