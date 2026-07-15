@@ -20,6 +20,12 @@ const GENERIC_STOPWORDS = new Set([
   "unknown",
   "unknown actor",
   "unknown group",
+  // Confirmed live: the model sometimes echoes the candidate's own
+  // classification back as its *name* too (e.g. {"name": "Initial Access
+  // Broker", "type": "Initial Access Broker"}), which polluted Top Threat
+  // Actors with a role label sitting next to real group names. No real
+  // threat actor is named exactly one of these category words.
+  ...ACTOR_TYPES.map((t) => t.toLowerCase()),
 ]);
 
 // Confirmed live: the local model occasionally lifts a bare nationality
