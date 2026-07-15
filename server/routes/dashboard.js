@@ -426,16 +426,48 @@ router.get("/dashboard/threat-actor-profiles/:attackId", async (req, res) => {
 });
 
 // --- Security news (tagged for the newsroom view, see server/newsCorrelation.js) ---
+//
+// getTaggedNewsCached() memoizes the tag pass below -- confirmed live this
+// route took 8+ seconds and returned a 2MB+ payload on every single request,
+// because tagNewsItems does an O(items x actor/malware names) regex match
+// (thousands of news items x hundreds of names, a fresh RegExp per check) and
+// this route used to redo that from scratch on every request, including
+// every 15-min poll from every open tab. Right after server boot this
+// collided with the RAG indexer and first combined-extraction cycle also
+// competing for the same single-threaded event loop, which is what actually
+// made "Security News failed to load" reproduce specifically on a freshly
+// restarted server -- the request either timed out or the tab's fetch raced
+// a still-busy event loop. Recomputing only when the tagging inputs'
+// `updatedAt` actually changed (once per news sync, ~every 15 min, same as
+// every other connector-backed route in this file) cuts this from "every
+// request" to "once per sync," matching the rest of the app's pattern of
+// computing once in the background and having routes just read the result.
+let taggedNewsMemo = { key: null, items: [] };
+
+function getTaggedNewsCached() {
+  const newsEntry = cache.getEntry("news");
+  const attackEntry = cache.getEntry("attack");
+  const kevEntry = cache.getEntry("cisa-kev");
+  const epssEntry = cache.getEntry("epss");
+  const key = `${newsEntry.updatedAt}|${attackEntry.updatedAt}|${kevEntry.updatedAt}|${epssEntry.updatedAt}`;
+  if (taggedNewsMemo.key !== key) {
+    taggedNewsMemo = {
+      key,
+      items: getTaggedNewsItems({
+        newsItems: newsEntry.data?.items,
+        attackData: attackEntry.data,
+        ransomwareCampaigns: getRansomwareCampaigns(),
+        threatFeedIocs: threatFeedIocs(),
+        kevEntries: kevEntry.data?.entries,
+        epssScores: epssEntry.data,
+      }),
+    };
+  }
+  return taggedNewsMemo.items;
+}
+
 router.get("/dashboard/news", (_req, res) => {
-  const items = getTaggedNewsItems({
-    newsItems: cache.getEntry("news").data?.items,
-    attackData: cache.getEntry("attack").data,
-    ransomwareCampaigns: getRansomwareCampaigns(),
-    threatFeedIocs: threatFeedIocs(),
-    kevEntries: cache.getEntry("cisa-kev").data?.entries,
-    epssScores: cache.getEntry("epss").data,
-  });
-  res.json({ items });
+  res.json({ items: getTaggedNewsCached() });
 });
 
 // --- Top Security Events Today (same-calendar-day rollup, see server/todaySecurityEvents.js) ---
@@ -467,14 +499,7 @@ router.get("/dashboard/threat-timeline", (req, res) => {
   const ransomwareCampaigns = getRansomwareCampaigns();
   const iocs = threatFeedIocs();
   const githubRepos = getAllGithubRepos();
-  const newsItems = getTaggedNewsItems({
-    newsItems: cache.getEntry("news").data?.items,
-    attackData,
-    ransomwareCampaigns,
-    threatFeedIocs: iocs,
-    kevEntries,
-    epssScores: cache.getEntry("epss").data,
-  });
+  const newsItems = getTaggedNewsCached();
 
   const events = buildThreatTimeline(
     { kevEntries, vulncheckKevEntries, ransomwareCampaigns, threatFeedIocs: iocs, githubRepos, newsItems },
