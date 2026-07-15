@@ -1,5 +1,9 @@
 import { fetchJson } from "../lib/http.js";
 import { extractVendorProduct, extractVendorProductFromAffected } from "../lib/cpe.js";
+// Deliberate, narrow exception to "connectors don't read other connectors'
+// cache" (see server/connectors/mispWarninglists.js's own comment on that
+// convention) -- explained where it's used, in widenFeaturedCves() below.
+import * as cache from "../cache.js";
 
 const NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0";
 const LOOKBACK_DAYS = 30;
@@ -112,6 +116,69 @@ async function fetchTrend(pubStartDate, pubEndDate) {
   });
 }
 
+// A KEV entry's own catalog doesn't say when NVD published the underlying
+// CVE, so a lookup here is the only way to know if it falls inside the
+// window at all -- confirmed live that a straight `dateAdded`-only filter
+// missed CVEs CISA added to KEV well after NVD's original publish date.
+const MAX_KEV_GAP_FILL_LOOKUPS = 20;
+
+/**
+ * Widens `latestCves.records` beyond "the 100 most recently published CVEs"
+ * so Critical-severity and CISA KEV-flagged CVEs from the same 30-day window
+ * are never silently absent from the default Latest CVEs view just because
+ * newer, often still-unscored CVE churn pushed them past the top 100 --
+ * confirmed live that a CVSS-10, actively-exploited zero-day published ~20
+ * hours earlier had already been pushed past position #500 this way. Reads
+ * the already-synced CISA KEV cache directly -- a deliberate, narrow
+ * exception to this app's usual "connectors don't read each other's cache"
+ * separation (see mispWarninglists.js), justified because CISA KEV is the
+ * one dataset that can't be reconstructed from NVD's own severity/date
+ * filters (a KEV entry can be any CVSS severity, as long as it's confirmed
+ * actively exploited).
+ */
+async function widenFeaturedCves(recentPool, pubStartDate, pubEndDate) {
+  const byId = new Map(recentPool.map((r) => [r.id, r]));
+
+  try {
+    const critical = await queryCves({
+      pubStartDate,
+      pubEndDate,
+      cvssV3Severity: "CRITICAL",
+      resultsPerPage: 300, // comfortably covers 30 days of CRITICAL CVEs, same headroom as fetchTrend's own cap
+    });
+    for (const record of critical.records) byId.set(record.id, record);
+  } catch {
+    // Best-effort widening -- the base 100-newest pool still works if this fails.
+  }
+
+  const kevEntries = cache.getEntry("cisa-kev").data?.entries ?? [];
+  const recentKevIds = kevEntries
+    .filter((e) => new Date(e.dateAdded) >= pubStartDate)
+    .map((e) => e.cveId)
+    .filter((id) => !byId.has(id))
+    .slice(0, MAX_KEV_GAP_FILL_LOOKUPS);
+
+  for (const cveId of recentKevIds) {
+    try {
+      const result = await queryCves({ cveId, resultsPerPage: 1 });
+      if (result.records[0]) byId.set(result.records[0].id, result.records[0]);
+    } catch {
+      // One missing KEV lookup failing shouldn't block the rest.
+    }
+  }
+
+  const kevIds = new Set(kevEntries.map((e) => e.cveId));
+  return Array.from(byId.values()).sort((a, b) => {
+    const aKev = kevIds.has(a.id);
+    const bKev = kevIds.has(b.id);
+    if (aKev !== bKev) return aKev ? -1 : 1;
+    const aCritical = a.severity === "CRITICAL";
+    const bCritical = b.severity === "CRITICAL";
+    if (aCritical !== bCritical) return aCritical ? -1 : 1;
+    return new Date(b.publishedDate) - new Date(a.publishedDate);
+  });
+}
+
 /**
  * Scheduled sync: builds everything the dashboard needs by default (no
  * user-supplied filter) in one cycle -- the live-search branch in
@@ -138,6 +205,8 @@ export default {
       await countCves({ pubStartDate: yesterday, pubEndDate: now }),
       await fetchTrend(start, now),
     ];
+
+    latestCves.records = await widenFeaturedCves(latestCves.records, start, now);
 
     return { latestCves, criticalCount30d, highCount30d, mediumCount30d, lowCount30d, newCount24h, trend };
   },
