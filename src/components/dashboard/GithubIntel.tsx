@@ -11,6 +11,7 @@ import { useGithubIntelList, useGithubIntelStats, useGithubRepoDetail } from "@/
 import type { GithubRepoDetail, GithubRepoSummary } from "@/types/threat-intel";
 
 const CATEGORY_OPTIONS = [
+  "CVE",
   "Exploit PoC",
   "Malware",
   "IOC Feed",

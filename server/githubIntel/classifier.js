@@ -67,7 +67,13 @@ const CATEGORY_SIGNALS = {
  * @returns {Array<{ category: string, confidence: number }>} sorted descending by confidence
  */
 export function classifyRepository(repoMeta, contentText = "") {
-  const lowerName = (repoMeta.name ?? "").toLowerCase();
+  // `repoMeta.name` was never actually populated -- the store only ever
+  // saves `fullName` (e.g. "owner/repo-name"), so this fell back to "" on
+  // every call and every category's name-based keyword check silently never
+  // fired. `fullName` still contains the real repo name as a substring, so
+  // falling back to it directly (rather than fixing every caller) restores
+  // name matching with a one-line change.
+  const lowerName = (repoMeta.name ?? repoMeta.fullName ?? "").toLowerCase();
   const lowerDescription = (repoMeta.description ?? "").toLowerCase();
   const lowerTopics = (repoMeta.topics ?? []).map((t) => t.toLowerCase());
   const lowerContent = contentText.toLowerCase();

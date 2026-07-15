@@ -45,7 +45,12 @@ export async function runEnrichment() {
   for (const repo of batch) {
     try {
       const [owner, name] = repo.fullName.split("/");
-      const { combinedText } = await fetchRepoContent(owner, name, repo.defaultBranch);
+      const { combinedText: readmeAndFiles } = await fetchRepoContent(owner, name, repo.defaultBranch);
+      // Repo name/description prepended -- confirmed live that a repo whose
+      // only mention of its CVE ID is in the name itself (e.g.
+      // "rapid7-CVE-2026-15409") could otherwise have that CVE go
+      // unextracted if the README text never repeats it verbatim.
+      const combinedText = `${repo.fullName}\n${repo.description ?? ""}\n${readmeAndFiles}`;
 
       const extracted = extractEntities(combinedText, {
         techniques: attackData?.techniques ?? [],
@@ -54,6 +59,15 @@ export async function runEnrichment() {
       });
 
       const categories = classifyRepository(repo, combinedText);
+      // A repo naming a real CVE ID anywhere is unambiguously CVE-related --
+      // this rides on the same CVE_PATTERN regex already trusted everywhere
+      // else in this app (Top CVEs, KEV/EPSS correlation), so it's a
+      // precise, no-false-positive addition on top of the fuzzier
+      // keyword/topic categories above.
+      if (extracted.cveIds.length > 0) {
+        categories.push({ category: "CVE", confidence: 1 });
+        categories.sort((a, b) => b.confidence - a.confidence);
+      }
       const correlation = correlateIndicators(extracted, feedIocs);
       const cveEnrichment = await enrichCves(extracted.cveIds, { kevEntries, epssScores });
       const corroboratingRepoCount = countCorroboratingRepos(extracted.cveIds, listRepos(store), repo.fullName);

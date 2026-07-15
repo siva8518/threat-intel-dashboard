@@ -29,4 +29,15 @@ export const CATEGORIES = [
     label: "Malware",
     queries: ["topic:malware", "topic:malware-analysis"],
   },
+  {
+    // Repos named directly after a CVE ID (e.g. "rapid7-CVE-2026-15409") --
+    // confirmed live that "topic:exploit topic:cve" above missed these when
+    // the repo owner tagged nothing at all and just named the repo after the
+    // CVE, which is common for single-CVE vendor/researcher PoC drops.
+    // `in:name` is a real GitHub Search qualifier (confirmed against the live
+    // Search API), matched case-insensitively against the repo name only.
+    id: "cve-poc",
+    label: "CVE Proof of Concept",
+    queries: ["CVE in:name", "topic:cve"],
+  },
 ];
