@@ -2,6 +2,8 @@ export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
 
 /** CVEs published in the last 30 days, bucketed by CVSS v3 severity -- see server/connectors/nvd.js. */
 export interface CveSeverityDistribution {
+  /** False only until the NVD connector's first sync since server boot completes -- see server/routes/dashboard.js. Distinct from all-zero counts, which can be genuine. */
+  ready: boolean;
   critical: number;
   high: number;
   medium: number;

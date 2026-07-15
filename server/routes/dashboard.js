@@ -151,13 +151,23 @@ router.get("/dashboard/cve-trend", (_req, res) => {
 });
 
 // --- CVE Severity Distribution (last 30 days, see server/connectors/nvd.js) ---
+// `ready: false` (nvd cache entry never synced yet -- distinct from `updatedAt`
+// being set but the connector's *latest* sync having failed, which still
+// carries forward the last-known-good counts per cache.js#setError) tells the
+// frontend to show a syncing state instead of a misleading "no CVEs found"
+// empty state. Confirmed live: on a fresh server start, NVD's first sync can
+// take from several seconds up to its full retry/backoff window, and this
+// route used to silently default every count to 0 during that window --
+// indistinguishable from "genuinely zero CVEs published," which read as the
+// whole widget being broken every time the server was freshly started.
 router.get("/dashboard/cve-severity-distribution", (_req, res) => {
-  const nvd = cache.getEntry("nvd").data;
+  const entry = cache.getEntry("nvd");
   res.json({
-    critical: nvd?.criticalCount30d ?? 0,
-    high: nvd?.highCount30d ?? 0,
-    medium: nvd?.mediumCount30d ?? 0,
-    low: nvd?.lowCount30d ?? 0,
+    ready: entry.updatedAt !== null,
+    critical: entry.data?.criticalCount30d ?? 0,
+    high: entry.data?.highCount30d ?? 0,
+    medium: entry.data?.mediumCount30d ?? 0,
+    low: entry.data?.lowCount30d ?? 0,
   });
 });
 

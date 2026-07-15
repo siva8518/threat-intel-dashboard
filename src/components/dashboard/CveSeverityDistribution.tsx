@@ -42,7 +42,7 @@ export function CveSeverityDistribution({ onSelectSeverity }: CveSeverityDistrib
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {isLoading ? (
+        {isLoading || (data && !data.ready) ? (
           <Skeleton className="h-16 w-full" />
         ) : isError || !data ? (
           <ErrorState message="CVE Severity Distribution is unavailable right now." />
