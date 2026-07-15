@@ -40,6 +40,7 @@ import { getAllEntities as getCampaignIntelligenceEntities } from "../campaignIn
 import { getNewsTechniqueCounts } from "../attackTechniqueIntelligence.js";
 import { getAllEntities as getDarkWebIntelligenceEntities } from "../darkWebIntelligence.js";
 import { getKeywords, addKeyword, removeKeyword, getFlashReports, getUnreadCount, markRead, markAllRead } from "../watchlist.js";
+import { getAllReports as getAllAiThreatSummaries, getReportById as getAiThreatSummaryById } from "../aiThreatSummaryStore.js";
 
 export const router = Router();
 
@@ -331,6 +332,18 @@ router.get("/dashboard/campaign-intelligence", (_req, res) => {
 // server/connectors/newsFeeds.js.
 router.get("/dashboard/darkweb-intelligence", (_req, res) => {
   res.json({ entities: getDarkWebIntelligenceEntities() });
+});
+
+// --- AI Summarization (SOC-analyst-style structured reports on major
+// vendor/CISA advisories -- see server/aiThreatSummaryJob.js) ---
+router.get("/dashboard/ai-summaries", (_req, res) => {
+  res.json({ reports: getAllAiThreatSummaries() });
+});
+
+router.get("/dashboard/ai-summaries/:id", (req, res) => {
+  const report = getAiThreatSummaryById(decodeURIComponent(req.params.id));
+  if (!report) return res.status(404).json({ error: "not found" });
+  res.json(report);
 });
 
 // --- Watchlist (user-curated client/org names, continuously monitored --

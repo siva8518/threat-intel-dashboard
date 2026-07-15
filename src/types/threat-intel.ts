@@ -714,3 +714,62 @@ export interface ChatSource {
   url: string | null;
   score: number;
 }
+
+export interface AiThreatSummaryCve {
+  id: string;
+  severity: Severity | "UNKNOWN";
+  cvssScore: number | null;
+  knownExploited: boolean;
+  epssScore: number | null;
+  sourceUrl: string;
+}
+
+export interface AiThreatSummaryIoc {
+  type: "sha256" | "sha1" | "md5" | "ipv4" | "ipv6" | "domains" | "urls";
+  value: string;
+}
+
+export interface AiThreatSummaryMitreTechnique {
+  techniqueId: string | null;
+  techniqueName: string;
+  tactic: string;
+}
+
+export interface AiThreatSummaryReference {
+  label: string;
+  url: string;
+}
+
+/**
+ * One SOC-analyst-style structured report generated from a single major
+ * vendor/CISA advisory article -- see server/aiThreatSummary.js. Facts
+ * (severity, cves, iocs) are grounded in this app's own verified
+ * extraction/enrichment, not model recall; the rest is the local LLM's own
+ * synthesis, including its self-reported confidenceScore/aiRiskScore.
+ */
+export interface AiThreatSummaryReport {
+  id: string;
+  articleTitle: string;
+  articleLink: string;
+  articleSource: string;
+  publishedDate: string;
+  generatedAt: string;
+  severity: Severity;
+  cves: AiThreatSummaryCve[];
+  iocs: AiThreatSummaryIoc[];
+  references: AiThreatSummaryReference[];
+  executiveSummary: string;
+  businessImpact: string;
+  threatOverview: string;
+  affectedProducts: string[];
+  vendor: string | null;
+  threatActors: string[];
+  malwareFamily: string[];
+  mitreAttack: AiThreatSummaryMitreTechnique[];
+  detectionOpportunities: string[];
+  threatHuntingQueries: string[];
+  immediateRecommendations: string[];
+  patchInformation: string | null;
+  confidenceScore: number | null;
+  aiRiskScore: number | null;
+}

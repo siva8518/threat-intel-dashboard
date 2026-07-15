@@ -422,6 +422,32 @@ That's it — no `.env` changes needed unless you want different models (see `.e
 dashboard as usual (`npm run dev` / `npm start`); the AI Assistant tab detects Ollama automatically and
 shows exact setup instructions if it isn't running yet or a model hasn't been pulled.
 
+## AI Summarization
+
+The **AI Summarization** tab turns major vendor threat-research and CISA advisories (Cisco Talos,
+Unit 42, CrowdStrike, Microsoft Security, Google Threat Intelligence, Rapid7, CISA, etc. — see
+`MAJOR_VENDOR_SOURCES` in `server/connectors/newsFeeds.js`) into structured SOC intelligence reports —
+executive summary, business impact, MITRE ATT&CK mapping, detection opportunities, threat hunting
+query sketches, immediate recommendations, and the model's own confidence/risk scoring. It's
+deliberately not a news recap: every field is written for a detection engineer, threat hunter,
+incident responder, or security leader to act on.
+
+- `server/aiThreatSummary.js` builds the prompt and calls the same local Ollama chat model the AI
+  Assistant tab uses (`llama3.1:8b` by default) — same free, local, no-API-key setup as the RAG
+  chatbot above, no additional install needed.
+- Facts the platform can already verify — CVE IDs, KEV/EPSS status, severity, and raw IOCs
+  (hashes/IPs/domains/URLs) — are extracted with this app's own proven regex/lookup logic, never
+  trusted to the model's own recall. The model is only asked for the parts that genuinely require
+  synthesis: narrative analysis, detection/hunting guidance, and its own self-assessed confidence and
+  risk score.
+- `server/aiThreatSummaryJob.js` runs a small batch (3 articles) every ~10 minutes in the background,
+  scoped to vendor/CISA sources only — generating a full structured report is much heavier than this
+  app's other extraction jobs, so this fills in gradually rather than all at once. Reports persist to
+  `server/.cache/ai-threat-summaries.json` and are never regenerated once produced.
+- Generation speed depends entirely on your Ollama setup — CPU-only inference can take well over a
+  minute per report; a GPU (or a smaller/faster model set via `OLLAMA_CHAT_MODEL`) speeds this up
+  substantially.
+
 ## Environment variables
 
 See [.env.example](.env.example) for the full list with links to get each free key. All of them are

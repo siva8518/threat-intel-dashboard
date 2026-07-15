@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Skull, UserSearch, Wifi } from "lucide-react";
+import { Bot, BrainCircuit, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Skull, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
 import { WorldThreatMap } from "@/components/dashboard/WorldThreatMap";
@@ -28,6 +28,7 @@ import { MalwareIntelligence } from "@/components/dashboard/MalwareIntelligence"
 import { ThreatActorIntelligence } from "@/components/dashboard/ThreatActorIntelligence";
 import { CampaignIntelligence } from "@/components/dashboard/CampaignIntelligence";
 import { DarkWebIntelligence } from "@/components/dashboard/DarkWebIntelligence";
+import { AiSummarization } from "@/components/dashboard/AiSummarization";
 import { Watchlist } from "@/components/dashboard/Watchlist";
 import { CveDetailDrawer } from "@/components/dashboard/CveDetailDrawer";
 import { MalwareDetailDrawer } from "@/components/dashboard/MalwareDetailDrawer";
@@ -47,6 +48,7 @@ const TABS = [
   { id: "actor-intelligence", label: "Threat Actor Intelligence", icon: UserSearch },
   { id: "campaign-intelligence", label: "Campaign Intelligence", icon: Crosshair },
   { id: "darkweb-intelligence", label: "Dark Web Intelligence", icon: Ghost },
+  { id: "ai-summarization", label: "AI Summarization", icon: BrainCircuit },
   { id: "news", label: "Security News", icon: Newspaper },
   { id: "watchlist", label: "Watchlist", icon: Eye },
   { id: "ai-assistant", label: "AI Assistant", icon: Bot },
@@ -184,6 +186,7 @@ export function DashboardPage() {
       {activeTab === "actor-intelligence" && <ThreatActorIntelligence initialQuery={actorSearchQuery} />}
       {activeTab === "campaign-intelligence" && <CampaignIntelligence />}
       {activeTab === "darkweb-intelligence" && <DarkWebIntelligence />}
+      {activeTab === "ai-summarization" && <AiSummarization />}
       {activeTab === "news" && <SecurityNews />}
       {activeTab === "watchlist" && <Watchlist />}
       {activeTab === "ai-assistant" && <Chatbot />}
