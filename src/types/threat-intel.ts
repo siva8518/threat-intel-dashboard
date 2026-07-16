@@ -724,15 +724,20 @@ export interface AiThreatSummaryCve {
   sourceUrl: string;
 }
 
-export interface AiThreatSummaryIoc {
-  type: "sha256" | "sha1" | "md5" | "ipv4" | "ipv6" | "domains" | "urls";
-  value: string;
+/** Grounded (regex-extracted, never model-generated) IOCs -- see server/aiThreatSummary.js#extractIocs. Categories with no reliable extraction path from article prose (mutex, registry keys, scheduled tasks, services, user agents, certificates) are deliberately omitted rather than risking invented values. */
+export interface AiThreatSummaryIocs {
+  ipAddresses: string[];
+  domains: string[];
+  urls: string[];
+  hashes: string[];
+  emailAddresses: string[];
 }
 
 export interface AiThreatSummaryMitreTechnique {
+  technique: string;
   techniqueId: string | null;
-  techniqueName: string;
-  tactic: string;
+  reason: string;
+  killChainPhase: string;
 }
 
 export interface AiThreatSummaryReference {
@@ -740,12 +745,124 @@ export interface AiThreatSummaryReference {
   url: string;
 }
 
+export interface AiThreatSummaryBusinessImpact {
+  businessRisk: string;
+  operationalDisruption: string;
+  likelihoodOfExploitation: string;
+  industriesCommonlyTargeted: string[];
+  impactIfUnpatched: string;
+}
+
+export interface AiThreatSummaryThreatOverview {
+  attackChain: string;
+  initialAccess: string | null;
+  privilegeEscalation: string | null;
+  execution: string | null;
+  persistence: string | null;
+  defenseEvasion: string | null;
+  lateralMovement: string | null;
+  commandAndControl: string | null;
+  dataTheft: string | null;
+  ransomwareDeployment: string | null;
+}
+
+export interface AiThreatSummaryAffectedProducts {
+  products: string[];
+  versions: string[];
+  operatingSystems: string[];
+  cloudServices: string[];
+  applications: string[];
+}
+
+export interface AiThreatSummaryVendorSeverityAssessment {
+  vendorSeverity: string;
+  activeExploitation: string;
+  overallSocPriority: "Critical" | "High" | "Medium" | "Low";
+}
+
+export interface AiThreatSummaryActor {
+  group: string;
+  aliases: string[];
+  motivation: string | null;
+  targetSectors: string[];
+  geography: string | null;
+  knownCampaigns: string[];
+}
+
+export interface AiThreatSummaryMalware {
+  family: string;
+  capabilities: string[];
+  persistence: string | null;
+  payload: string | null;
+  deliveryMechanism: string | null;
+}
+
+export interface AiThreatSummaryHuntingOpportunities {
+  defenderXdrKql: string[];
+  sentinelKql: string[];
+  splunkSpl: string[];
+  elastic: string[];
+  sigma: string[];
+  yara: string[];
+  crowdstrikeFalcon: string[];
+  carbonBlack: string[];
+}
+
+export interface AiThreatSummaryDetectionEngineering {
+  newAnalytics: string[];
+  newCorrelationRules: string[];
+  newSigmaRules: string[];
+  newKqlDetections: string[];
+  edrBehavioralDetections: string[];
+  siemCorrelationLogic: string[];
+  mitreCoverageGaps: string[];
+  telemetryGaps: string[];
+  logSourceRequirements: string[];
+}
+
+export interface AiThreatSummaryIncidentResponse {
+  immediateTriageSteps: string[];
+  evidenceToCollect: string[];
+  containmentActions: string[];
+  forensicArtifacts: string[];
+  recoveryActions: string[];
+  validationSteps: string[];
+}
+
+export interface AiThreatSummaryRecommendations {
+  critical: string[];
+  high: string[];
+  medium: string[];
+  low: string[];
+}
+
+export interface AiThreatSummaryPatchInformation {
+  availability: string;
+  fixedVersions: string[];
+  temporaryMitigations: string[];
+  vendorGuidance: string | null;
+  knownWorkarounds: string[];
+}
+
+export interface AiThreatSummaryConfidence {
+  level: "High" | "Medium" | "Low";
+  reasoning: string;
+}
+
+export interface AiThreatSummaryRiskScoring {
+  score: number | null;
+  priority: "Critical" | "High" | "Medium" | "Low";
+  reasoning: string;
+}
+
 /**
- * One SOC-analyst-style structured report generated from a single major
- * vendor/CISA advisory article -- see server/aiThreatSummary.js. Facts
- * (severity, cves, iocs) are grounded in this app's own verified
- * extraction/enrichment, not model recall; the rest is the local LLM's own
- * synthesis, including its self-reported confidenceScore/aiRiskScore.
+ * One enterprise-grade SOC threat intelligence report generated from a
+ * single major vendor/CISA advisory article -- see server/aiThreatSummary.js.
+ * Facts (severity, cves, iocs) are grounded in this app's own verified
+ * extraction/enrichment, never model recall; every other field is the local
+ * LLM's own synthesis, including its self-reported confidence/risk scoring.
+ * Currently generated only for Critical/High/Medium severity articles --
+ * Low is deliberately deferred, not dropped.
  */
 export interface AiThreatSummaryReport {
   id: string;
@@ -756,20 +873,27 @@ export interface AiThreatSummaryReport {
   generatedAt: string;
   severity: Severity;
   cves: AiThreatSummaryCve[];
-  iocs: AiThreatSummaryIoc[];
+  iocs: AiThreatSummaryIocs;
   references: AiThreatSummaryReference[];
+  aiSummarizationBullets: string[];
   executiveSummary: string;
-  businessImpact: string;
-  threatOverview: string;
-  affectedProducts: string[];
-  vendor: string | null;
-  threatActors: string[];
-  malwareFamily: string[];
+  businessImpact: AiThreatSummaryBusinessImpact;
+  threatOverview: AiThreatSummaryThreatOverview;
+  affectedProducts: AiThreatSummaryAffectedProducts;
+  vendorSeverityAssessment: AiThreatSummaryVendorSeverityAssessment;
   mitreAttack: AiThreatSummaryMitreTechnique[];
+  threatActors: AiThreatSummaryActor[];
+  malware: AiThreatSummaryMalware[];
   detectionOpportunities: string[];
-  threatHuntingQueries: string[];
-  immediateRecommendations: string[];
-  patchInformation: string | null;
-  confidenceScore: number | null;
-  aiRiskScore: number | null;
+  threatHuntingOpportunities: AiThreatSummaryHuntingOpportunities;
+  detectionEngineeringOpportunities: AiThreatSummaryDetectionEngineering;
+  incidentResponseGuidance: AiThreatSummaryIncidentResponse;
+  immediateRecommendations: AiThreatSummaryRecommendations;
+  patchInformationNarrative: AiThreatSummaryPatchInformation;
+  confidenceAssessment: AiThreatSummaryConfidence;
+  aiRiskScoring: AiThreatSummaryRiskScoring;
+  socAnalystTakeaway: string;
+  detectionEngineerTakeaway: string;
+  threatHunterTakeaway: string;
+  executiveLeadershipTakeaway: string;
 }

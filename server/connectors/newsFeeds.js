@@ -171,6 +171,13 @@ const FEEDS = [
   { source: "FortiGuard Labs", url: "https://feeds.fortinet.com/fortinet/blog/threat-research" },
   { source: "AWS Security Bulletins", url: "https://aws.amazon.com/security/security-bulletins/rss/feed/" },
   { source: "Palo Alto Security Advisories", url: "https://security.paloaltonetworks.com/rss.xml" },
+  // SonicWall PSIRT (confirmed live -- the /rss-feeds landing page is a JS
+  // SPA shell with no static feed link; the actual XML is served from a
+  // separate API host, only discoverable by inspecting the rendered page's
+  // anchor hrefs). Same "vendor product/patch advisory" category as the two
+  // feeds above, not threat-research -- so also not added to
+  // MAJOR_VENDOR_SOURCES below, for the same reason those two aren't.
+  { source: "SonicWall PSIRT", url: "https://psirtapi.global.sonicwall.com/api/v1/feed/rss.xml" },
 
   // -- Government/CERT advisories --
   { source: "CERT-EU", url: "https://cert.europa.eu/publications/security-advisories-rss" },

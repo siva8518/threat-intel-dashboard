@@ -426,11 +426,16 @@ shows exact setup instructions if it isn't running yet or a model hasn't been pu
 
 The **AI Summarization** tab turns major vendor threat-research and CISA advisories (Cisco Talos,
 Unit 42, CrowdStrike, Microsoft Security, Google Threat Intelligence, Rapid7, CISA, etc. — see
-`MAJOR_VENDOR_SOURCES` in `server/connectors/newsFeeds.js`) into structured SOC intelligence reports —
-executive summary, business impact, MITRE ATT&CK mapping, detection opportunities, threat hunting
-query sketches, immediate recommendations, and the model's own confidence/risk scoring. It's
-deliberately not a news recap: every field is written for a detection engineer, threat hunter,
-incident responder, or security leader to act on.
+`MAJOR_VENDOR_SOURCES` in `server/connectors/newsFeeds.js`) into full enterprise-grade SOC threat
+intelligence reports, written for a Tier 1/2/3 analyst, incident responder, threat hunter, detection
+engineer, security architect, and leadership all at once. It's deliberately not a news recap: AI
+summarization bullets, executive summary, business impact, a full attack-chain threat overview,
+affected products, vendor severity assessment, MITRE ATT&CK mapping, threat actors, malware, IOCs,
+detection opportunities, threat hunting queries for eight named platforms (Microsoft Defender XDR,
+Microsoft Sentinel, Splunk, Elastic, Sigma, YARA, CrowdStrike Falcon, Carbon Black), detection
+engineering opportunities, incident response guidance, priority-bucketed immediate recommendations,
+patch information, confidence/risk scoring, and four role-specific takeaways (SOC analyst, detection
+engineer, threat hunter, executive leadership).
 
 - `server/aiThreatSummary.js` builds the prompt and calls the same local Ollama chat model the AI
   Assistant tab uses (`llama3.1:8b` by default) — same free, local, no-API-key setup as the RAG
@@ -438,15 +443,20 @@ incident responder, or security leader to act on.
 - Facts the platform can already verify — CVE IDs, KEV/EPSS status, severity, and raw IOCs
   (hashes/IPs/domains/URLs) — are extracted with this app's own proven regex/lookup logic, never
   trusted to the model's own recall. The model is only asked for the parts that genuinely require
-  synthesis: narrative analysis, detection/hunting guidance, and its own self-assessed confidence and
-  risk score.
-- `server/aiThreatSummaryJob.js` runs a small batch (3 articles) every ~10 minutes in the background,
-  scoped to vendor/CISA sources only — generating a full structured report is much heavier than this
-  app's other extraction jobs, so this fills in gradually rather than all at once. Reports persist to
+  synthesis: narrative analysis, attack-chain reconstruction, detection/hunting/IR guidance, and its
+  own self-assessed confidence and risk score. Exotic IOC types with no reliable extraction path
+  (mutexes, registry keys, scheduled tasks, certificates, etc.) are always reported empty rather than
+  asking the model to invent them.
+- Scoped to **Critical/High/Medium** severity articles only for now — Low-severity coverage is
+  deliberately deferred, not dropped; widening `ELIGIBLE_SEVERITIES` in `aiThreatSummaryJob.js` picks
+  up the backlog automatically since unmatched Low articles are never marked processed.
+- `server/aiThreatSummaryJob.js` processes one article every ~20 minutes in the background, scoped to
+  vendor/CISA sources only — this schema asks for roughly double the structured content of earlier
+  versions, so it fills in gradually rather than all at once. Reports persist to
   `server/.cache/ai-threat-summaries.json` and are never regenerated once produced.
-- Generation speed depends entirely on your Ollama setup — CPU-only inference can take well over a
-  minute per report; a GPU (or a smaller/faster model set via `OLLAMA_CHAT_MODEL`) speeds this up
-  substantially.
+- Generation speed depends entirely on your Ollama setup — CPU-only inference can take several minutes
+  per report given the schema's size; a GPU (or a smaller/faster model set via `OLLAMA_CHAT_MODEL`)
+  speeds this up substantially.
 
 ## Environment variables
 

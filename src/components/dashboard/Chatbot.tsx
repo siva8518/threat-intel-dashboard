@@ -93,7 +93,7 @@ export function Chatbot() {
       <CardHeader>
         <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
           <Bot className="h-4 w-4 text-primary" />
-          AI Assistant <span className="font-normal text-muted">(local &amp; free -- answers only from this platform's data)</span>
+          Chat Bot <span className="font-normal text-muted">(local &amp; free -- answers only from this platform's data)</span>
         </CardTitle>
       </CardHeader>
       <CardContent>

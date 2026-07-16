@@ -51,7 +51,7 @@ const TABS = [
   { id: "ai-summarization", label: "AI Summarization", icon: BrainCircuit },
   { id: "news", label: "Security News", icon: Newspaper },
   { id: "watchlist", label: "Watchlist", icon: Eye },
-  { id: "ai-assistant", label: "AI Assistant", icon: Bot },
+  { id: "ai-assistant", label: "Chat Bot", icon: Bot },
   { id: "sources", label: "Sources", icon: Wifi },
 ] as const;
 
