@@ -72,7 +72,15 @@ async function runCycle() {
   for (const item of tagged) {
     try {
       const cveEnrichment = await enrichCveIds(item.tags.cveIds, kevEntries, epssScores);
-      const report = await generateThreatSummary(item, { cveIds: item.tags.cveIds, severity: item.severity, cveEnrichment });
+      // tagNewsItems() (server/newsCorrelation.js) returns lowercase severity
+      // strings ("critical"/"high"/...) -- a convention specific to news
+      // tagging, distinct from this app's shared uppercase Severity type
+      // ("CRITICAL"/"HIGH"/...) that SeverityBadge and everything else here
+      // expects. Confirmed live: leaving it lowercase silently broke both the
+      // severity badge's color (fell back to the unstyled "default" variant)
+      // and the critical-count in the tab header (a strict "CRITICAL" ===
+      // check against a lowercase value never matched).
+      const report = await generateThreatSummary(item, { cveIds: item.tags.cveIds, severity: item.severity.toUpperCase(), cveEnrichment });
       if (report) {
         addReport(report);
       } else {
