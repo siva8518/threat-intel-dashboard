@@ -14,19 +14,21 @@
 import { ollamaJson } from "./rag/ollamaClient.js";
 import { OLLAMA_CHAT_MODEL } from "./rag/config.js";
 import { extractEntities } from "./githubIntel/extractor.js";
+import { detectionRulesFor } from "./correlate.js";
 
 const SYSTEM_PROMPT =
   "You are a Principal Cyber Threat Intelligence Analyst supporting an enterprise SOC, Detection Engineering, Incident Response, Threat Hunting, and Security Leadership. " +
   "Your objective is NOT to summarize the article -- it is to transform it into operational intelligence a security team can immediately act on. Never copy the article's own wording. Never use vendor marketing language. Never invent IOCs, CVE IDs, or facts not stated or reasonably inferable from the article -- if something isn't reported, say exactly \"Not Reported\" for that field rather than guessing. Clearly keep confirmed information separate from your own inference. " +
+  "This is a TECHNICAL EXTRACTION task, not an executive summary, for every field below except where a field is explicitly marked as business-language. Do not compress or abstract away technical specifics: if the article names a specific vulnerability class, attack technique, configuration setting, trigger, parameter, API, or mechanism, that exact name belongs in your output -- \"attackers abused GitHub Actions\" is not acceptable when the article says \"a pwn request vulnerability via a pull_request_target-triggered workflow, which runs in the context of the base repository with access to repository secrets.\" Preserve every exploitation technique, vulnerable component, attack prerequisite, configuration weakness, security implication, and defensive recommendation the researchers describe. " +
   "If the article discusses an actively exploited vulnerability, prioritize in this order when allocating detail: (1) Detection, (2) Hunting, (3) Patch guidance, (4) Business impact. " +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys (all string fields: use \"Not Reported\" if the article doesn't support an answer; all array fields: use [] if none apply -- never pad with generic filler):\n" +
-  '"aiSummarizationBullets": array of 5-10 short strings -- the operationally important facts only, no marketing language.\n' +
+  '"aiTechnicalSummary": {"threat": string[], "attackVector": string[], "rootCause": string[], "exploitationDetails": string[], "technicalFindings": string[], "securityImplications": string[], "detectionOpportunities": string[], "huntingOpportunities": string[], "immediateActions": string[]} -- the technical extraction described above, broken into these buckets: threat (what the vulnerability/attack actually is, named specifically); attackVector (the exact entry point/trigger/mechanism an attacker uses, e.g. the specific workflow trigger or API); rootCause (the underlying technical reason the flaw exists, e.g. a specific misconfiguration or design weakness and exactly what it grants); exploitationDetails (how exploitation actually proceeds, step by step, per the article); technicalFindings (other concrete technical facts from the research not covered above); securityImplications (concretely what an attacker gains and the blast radius); detectionOpportunities (a few of the most important concrete monitoring signals -- deeper platform-specific queries still belong in the detectionOpportunities/threatHuntingOpportunities fields further below, don\'t duplicate those here); huntingOpportunities (a few concrete hunting hypotheses/signals, same distinction); immediateActions (concrete, specific mitigations). Every bullet should read like it came from a technical researcher, not a press release -- name the specific thing, don\'t generalize it away.\n' +
   '"executiveSummary": 2-4 sentences in business language covering the attack/vulnerability, exploitation status, and urgency.\n' +
   '"businessImpact": {"businessRisk": string, "operationalDisruption": string, "likelihoodOfExploitation": string, "industriesCommonlyTargeted": string[], "impactIfUnpatched": string}.\n' +
   '"threatOverview": {"attackChain": string (1-2 sentence overview), "initialAccess": string|null, "privilegeEscalation": string|null, "execution": string|null, "persistence": string|null, "defenseEvasion": string|null, "lateralMovement": string|null, "commandAndControl": string|null, "dataTheft": string|null, "ransomwareDeployment": string|null} -- null (not "Not Reported") for any stage not described in the article; do not fabricate a kill chain the article doesn\'t support.\n' +
   '"affectedProducts": {"products": string[], "versions": string[], "operatingSystems": string[], "cloudServices": string[], "applications": string[]} -- exactly as named in the article.\n' +
   '"vendorSeverityAssessment": {"vendorSeverity": string, "activeExploitation": string, "overallSocPriority": "Critical"|"High"|"Medium"|"Low"} -- CVSS/EPSS/KEV status is supplied separately from verified data, don\'t restate it here; vendorSeverity is the vendor\'s own stated severity rating (e.g. "Critical" per SonicWall), not your own guess.\n' +
-  '"mitreAttack": array of {"technique": string, "techniqueId": "T1234" or null, "reason": string (why this technique applies, grounded in what the article describes), "killChainPhase": string}.\n' +
+  '"mitreAttack": array of {"technique": string, "techniqueId": string or null, "reason": string (why this technique applies, grounded in what the article describes), "killChainPhase": string} -- techniqueId MUST be copied exactly from the CANDIDATE MITRE ATT&CK TECHNIQUES list in the user message, or null if none genuinely apply. Never invent a technique ID that isn\'t in that list, even if it looks plausible.\n' +
   '"threatActors": array of {"group": string, "aliases": string[], "motivation": string|null, "targetSectors": string[], "geography": string|null, "knownCampaigns": string[]} -- only actors explicitly named in the article.\n' +
   '"malware": array of {"family": string, "capabilities": string[], "persistence": string|null, "payload": string|null, "deliveryMechanism": string|null} -- only malware explicitly named in the article.\n' +
   '"detectionOpportunities": array of concrete, specific things a defender should monitor (log sources, event IDs, telemetry, behavioral signatures) -- grounded in this specific attack, not a generic checklist.\n' +
@@ -40,6 +42,7 @@ const SYSTEM_PROMPT =
   '"socAnalystTakeaway": one paragraph answering "If I am an L1/L2 analyst coming on shift, what should I immediately look for?"\n' +
   '"detectionEngineerTakeaway": one paragraph -- what detections should be created or improved.\n' +
   '"threatHunterTakeaway": one paragraph -- what hypotheses should be investigated.\n' +
+  '"threatIntelTakeaway": one paragraph -- what a CTI/Threat Intelligence team should do with this: attribution and campaign tracking, correlating this activity/actor/malware against existing intelligence holdings, watching for related infrastructure or TTPs reappearing elsewhere, and who internally needs this disseminated.\n' +
   '"executiveLeadershipTakeaway": under 100 words, the business risk with zero technical jargon.\n' +
   "No other text, no markdown formatting, no code fences.";
 
@@ -53,6 +56,69 @@ function safeString(value, fallback = "Not Reported") {
 
 function safeNullableString(value) {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+// Matches an optional immediately-adjacent paren pair too, so a mention the
+// model already wrote as "Name (T1234)" doesn't get double-wrapped into
+// "Name (Name (T1234))" -- captured separately so the replacer can tell the
+// two shapes apart. Deliberately no \s* around the paren/ID -- an earlier
+// version had that and it silently ate legitimate word-separating
+// whitespace between unrelated matches (e.g. turned "T1204.002, T1204.001"
+// into "...002),Malicious..." by swallowing the space after the comma).
+const TECHNIQUE_MENTION_PATTERN = /(\()?\b(T\d{4}(?:\.\d{3})?)\b(\))?/gi;
+
+// Same grounding principle as safeMitreArray further down, extended to
+// free-text fields it never touches (aiTechnicalSummary's bullets, threatOverview's
+// kill-chain-stage strings) -- confirmed live the model sometimes leaks a
+// bare technique-ID token into these narrative fields instead of an actual
+// description (e.g. threatOverview.initialAccess coming back as literally
+// "T1689" rather than prose). Real IDs get annotated with their real name
+// for readability; anything that doesn't match the synced catalog is
+// stripped rather than left as an unverifiable claim embedded in prose.
+function groundTechniqueMentions(text, validTechniqueIds, idToTechniqueName) {
+  if (typeof text !== "string" || !text.trim()) return text;
+  const grounded = text.replace(TECHNIQUE_MENTION_PATTERN, (_match, openParen, idPart, closeParen) => {
+    const id = idPart.toUpperCase();
+    const wasParenthesized = Boolean(openParen && closeParen);
+    if (!validTechniqueIds.has(id)) return "";
+    if (wasParenthesized) return `(${id})`; // model already supplied its own name right before this -- don't re-annotate
+    const name = idToTechniqueName.get(id);
+    return name ? `${name} (${id})` : id;
+  });
+  return grounded
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .trim();
+}
+
+function safeNullableGroundedString(value, validTechniqueIds, idToTechniqueName) {
+  const str = safeNullableString(value);
+  if (!str) return null;
+  const grounded = groundTechniqueMentions(str, validTechniqueIds, idToTechniqueName);
+  return grounded || null;
+}
+
+function groundedBullets(values, validTechniqueIds, idToTechniqueName) {
+  return safeArray(values)
+    .map((v) => groundTechniqueMentions(v, validTechniqueIds, idToTechniqueName))
+    .filter((v) => v && v.trim());
+}
+
+function safeAiTechnicalSummary(v, validTechniqueIds, idToTechniqueName) {
+  v ??= {};
+  const ground = (values) => groundedBullets(values, validTechniqueIds, idToTechniqueName);
+  return {
+    threat: ground(v.threat),
+    attackVector: ground(v.attackVector),
+    rootCause: ground(v.rootCause),
+    exploitationDetails: ground(v.exploitationDetails),
+    technicalFindings: ground(v.technicalFindings),
+    securityImplications: ground(v.securityImplications),
+    detectionOpportunities: ground(v.detectionOpportunities),
+    huntingOpportunities: ground(v.huntingOpportunities),
+    immediateActions: ground(v.immediateActions),
+  };
 }
 
 const SOC_PRIORITIES = new Set(["Critical", "High", "Medium", "Low"]);
@@ -76,19 +142,20 @@ function safeBusinessImpact(v) {
   };
 }
 
-function safeThreatOverview(v) {
+function safeThreatOverview(v, validTechniqueIds, idToTechniqueName) {
   v ??= {};
+  const ground = (val) => safeNullableGroundedString(val, validTechniqueIds, idToTechniqueName);
   return {
     attackChain: safeString(v.attackChain),
-    initialAccess: safeNullableString(v.initialAccess),
-    privilegeEscalation: safeNullableString(v.privilegeEscalation),
-    execution: safeNullableString(v.execution),
-    persistence: safeNullableString(v.persistence),
-    defenseEvasion: safeNullableString(v.defenseEvasion),
-    lateralMovement: safeNullableString(v.lateralMovement),
-    commandAndControl: safeNullableString(v.commandAndControl),
-    dataTheft: safeNullableString(v.dataTheft),
-    ransomwareDeployment: safeNullableString(v.ransomwareDeployment),
+    initialAccess: ground(v.initialAccess),
+    privilegeEscalation: ground(v.privilegeEscalation),
+    execution: ground(v.execution),
+    persistence: ground(v.persistence),
+    defenseEvasion: ground(v.defenseEvasion),
+    lateralMovement: ground(v.lateralMovement),
+    commandAndControl: ground(v.commandAndControl),
+    dataTheft: ground(v.dataTheft),
+    ransomwareDeployment: ground(v.ransomwareDeployment),
   };
 }
 
@@ -112,16 +179,56 @@ function safeVendorSeverityAssessment(v) {
   };
 }
 
-function safeMitreArray(value) {
+const TECHNIQUE_ID_SHAPE = /^T\d{4}(\.\d{3})?$/i;
+
+// validTechniqueIds/techniqueNameToId/idToTechniqueName come from this app's
+// own synced MITRE ATT&CK catalog (server/connectors/attack.js) -- the model
+// is asked to only choose from a candidate subset in the prompt
+// (buildTechniqueCandidatesBlock below), but this validates whatever
+// actually comes back regardless of whether the model followed that
+// instruction, the same "verify, don't trust recall" pattern used for
+// CVEs/severity/IOCs elsewhere in this app. Confirmed live this catches two
+// distinct failure modes: (1) outright fabrication -- a report once
+// returned "T1042.003" for a supply-chain technique, which is factually
+// wrong (T1042 is "Change Default File Association"); (2) field-swapping --
+// a later report put a genuinely correct ID ("T1213.002", SharePoint data
+// collection) into the `technique` (name) field instead of `techniqueId`,
+// which the ID-only check above would have silently missed.
+function safeMitreArray(value, validTechniqueIds, techniqueNameToId, idToTechniqueName) {
   if (!Array.isArray(value)) return [];
   return value
     .filter((v) => v && typeof v === "object" && typeof v.technique === "string")
-    .map((v) => ({
-      technique: v.technique,
-      techniqueId: typeof v.techniqueId === "string" ? v.techniqueId : null,
-      reason: safeString(v.reason),
-      killChainPhase: safeString(v.killChainPhase),
-    }));
+    .map((v) => {
+      let techniqueName = v.technique.trim();
+      let rawId = typeof v.techniqueId === "string" ? v.techniqueId.trim().toUpperCase() : null;
+
+      // Detect the model having swapped the two fields: `technique` holds
+      // something shaped like "T1234" or "T1234.567" rather than a name.
+      // Only trust it if it's also a real ID -- shape alone isn't enough.
+      if (TECHNIQUE_ID_SHAPE.test(techniqueName)) {
+        const candidateId = techniqueName.toUpperCase();
+        if (validTechniqueIds.has(candidateId)) {
+          rawId = candidateId;
+          techniqueName = idToTechniqueName.get(candidateId) ?? techniqueName;
+        }
+      }
+
+      let techniqueId = rawId && validTechniqueIds.has(rawId) ? rawId : null;
+      if (!techniqueId) {
+        // Bonus recovery, not a requirement: if the model got the real
+        // technique name right but botched/omitted the ID, an exact
+        // (case-insensitive) name match against the real catalog is safe to
+        // backfill -- it's not a guess, it's looking up a name the model
+        // already committed to.
+        techniqueId = techniqueNameToId.get(techniqueName.toLowerCase()) ?? null;
+      }
+      return {
+        technique: techniqueName,
+        techniqueId,
+        reason: safeString(v.reason),
+        killChainPhase: safeString(v.killChainPhase),
+      };
+    });
 }
 
 function safeThreatActors(value) {
@@ -228,7 +335,7 @@ function safeAiRiskScoring(v) {
   };
 }
 
-function parseModelReport(text) {
+function parseModelReport(text, validTechniqueIds, techniqueNameToId, idToTechniqueName) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1 || end < start) return null;
@@ -236,13 +343,13 @@ function parseModelReport(text) {
     const parsed = JSON.parse(text.slice(start, end + 1));
     if (!parsed || typeof parsed !== "object") return null;
     return {
-      aiSummarizationBullets: safeArray(parsed.aiSummarizationBullets),
+      aiTechnicalSummary: safeAiTechnicalSummary(parsed.aiTechnicalSummary, validTechniqueIds, idToTechniqueName),
       executiveSummary: safeString(parsed.executiveSummary),
       businessImpact: safeBusinessImpact(parsed.businessImpact),
-      threatOverview: safeThreatOverview(parsed.threatOverview),
+      threatOverview: safeThreatOverview(parsed.threatOverview, validTechniqueIds, idToTechniqueName),
       affectedProducts: safeAffectedProducts(parsed.affectedProducts),
       vendorSeverityAssessment: safeVendorSeverityAssessment(parsed.vendorSeverityAssessment),
-      mitreAttack: safeMitreArray(parsed.mitreAttack),
+      mitreAttack: safeMitreArray(parsed.mitreAttack, validTechniqueIds, techniqueNameToId, idToTechniqueName),
       threatActors: safeThreatActors(parsed.threatActors),
       malware: safeMalware(parsed.malware),
       detectionOpportunities: safeArray(parsed.detectionOpportunities),
@@ -256,6 +363,7 @@ function parseModelReport(text) {
       socAnalystTakeaway: safeString(parsed.socAnalystTakeaway),
       detectionEngineerTakeaway: safeString(parsed.detectionEngineerTakeaway),
       threatHunterTakeaway: safeString(parsed.threatHunterTakeaway),
+      threatIntelTakeaway: safeString(parsed.threatIntelTakeaway),
       executiveLeadershipTakeaway: safeString(parsed.executiveLeadershipTakeaway),
     };
   } catch {
@@ -293,12 +401,85 @@ function extractIocs(text) {
   return categories;
 }
 
+const TECHNIQUE_CANDIDATE_LIMIT = 30;
+
+// Keyword-overlap scoring against this app's own synced MITRE ATT&CK catalog
+// (server/connectors/attack.js), same weighted-keyword-match philosophy as
+// server/githubIntel/classifier.js -- not a semantic match, just enough to
+// hand the model a short, plausible, real-ID candidate list instead of
+// letting it free-associate from ~600 techniques' worth of training memory.
+function selectCandidateTechniques(article, techniques) {
+  const words = new Set(`${article.title} ${article.summary ?? ""}`.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []);
+  if (words.size === 0) return [];
+  const scored = [];
+  for (const t of techniques) {
+    const nameWords = t.name.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
+    const score = nameWords.filter((w) => words.has(w)).length;
+    if (score > 0) scored.push({ t, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, TECHNIQUE_CANDIDATE_LIMIT).map((s) => s.t);
+}
+
+function buildTechniqueCandidatesBlock(candidates) {
+  if (candidates.length === 0) {
+    return "CANDIDATE MITRE ATT&CK TECHNIQUES: none pre-matched this article's keywords. Set techniqueId to null for every entry unless you are certain of a real, well-known technique ID -- never invent one.";
+  }
+  const lines = candidates.map((t) => `${t.id} -- ${t.name} (${t.tactic})`).join("\n");
+  return `CANDIDATE MITRE ATT&CK TECHNIQUES (techniqueId must be copied exactly from this list, or null if none genuinely apply):\n${lines}`;
+}
+
+// Grounds the Sigma/YARA hunting-query fields the same way the rest of this
+// module grounds CVEs/IOCs/MITRE IDs: cross-references the model's own named
+// malware families/threat actors (not the model's invented rule content)
+// against server/connectors/detectionRules.js's real, synced index of ~4000
+// SigmaHQ/Yara-Rules community rules, via the exact same substring-match
+// helper server/correlate.js already uses elsewhere in this app. Only Sigma
+// and YARA get this treatment -- Sentinel/Defender KQL, Splunk SPL, Elastic,
+// CrowdStrike, and Carbon Black have no equivalent free bulk rule catalog
+// synced anywhere in this app, so there's nothing real to ground those
+// against; they stay the model's own synthesis. Real hits are appended
+// (not swapped in), so a model-drafted query for the same platform isn't lost.
+const MAX_DETECTION_RULE_HITS_PER_PLATFORM = 8;
+
+function groundHuntingRules(modelReport, ruleIndex) {
+  if (!ruleIndex?.length) return modelReport;
+
+  const names = [...modelReport.malware.map((m) => m.family), ...modelReport.threatActors.map((a) => a.group)].filter((n) => n && n !== "Not Reported");
+
+  const seen = new Set();
+  const sigmaHits = [];
+  const yaraHits = [];
+  for (const name of names) {
+    for (const hit of detectionRulesFor(name, ruleIndex)) {
+      const key = `${hit.label}:${hit.path}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const line = `${hit.label} (public, existing rule): ${hit.path} -- ${hit.url}`;
+      if (hit.label === "SigmaHQ") sigmaHits.push(line);
+      else if (hit.label === "YARA-Rules") yaraHits.push(line);
+    }
+  }
+  if (sigmaHits.length === 0 && yaraHits.length === 0) return modelReport;
+
+  return {
+    ...modelReport,
+    threatHuntingOpportunities: {
+      ...modelReport.threatHuntingOpportunities,
+      sigma: [...modelReport.threatHuntingOpportunities.sigma, ...sigmaHits].slice(0, MAX_DETECTION_RULE_HITS_PER_PLATFORM),
+      yara: [...modelReport.threatHuntingOpportunities.yara, ...yaraHits].slice(0, MAX_DETECTION_RULE_HITS_PER_PLATFORM),
+    },
+  };
+}
+
 /**
  * @param {object} article - {title, summary, link, source, publishedDate}
  * @param {object} grounded - already-verified per-article facts from server/newsCorrelation.js#tagNewsItems
  * @param {string[]} grounded.cveIds
  * @param {string} grounded.severity - uppercase Severity ("CRITICAL"/"HIGH"/"MEDIUM"/"LOW")
  * @param {object} grounded.cveEnrichment - cveId -> {severity, cvssScore, knownExploited, epssScore, sourceUrl}
+ * @param {Array} grounded.attackTechniques - this app's synced MITRE ATT&CK technique catalog, {id, name, tactic}[]
+ * @param {Array} grounded.detectionRuleIndex - server/connectors/detectionRules.js's synced SigmaHQ/YARA-Rules filename-word index
  */
 export async function generateThreatSummary(article, grounded) {
   const sourceText = `${article.title}\n${article.summary ?? ""}`;
@@ -311,11 +492,18 @@ export async function generateThreatSummary(article, grounded) {
     })
     .join("; ");
 
+  const techniques = grounded.attackTechniques ?? [];
+  const candidateTechniques = selectCandidateTechniques(article, techniques);
+  const validTechniqueIds = new Set(techniques.map((t) => t.id));
+  const techniqueNameToId = new Map(techniques.map((t) => [t.name.toLowerCase(), t.id]));
+  const idToTechniqueName = new Map(techniques.map((t) => [t.id, t.name]));
+
   const userContent =
     `Source: ${article.source}\nHeadline: ${article.title}\n` +
     (article.summary ? `Summary: ${article.summary}\n` : "") +
     (cveContext ? `Verified CVE data for this article (use this, don't restate or contradict it): ${cveContext}\n` : "") +
-    `Overall severity already computed for this article: ${grounded.severity}\n`;
+    `Overall severity already computed for this article: ${grounded.severity}\n` +
+    `${buildTechniqueCandidatesBlock(candidateTechniques)}\n`;
 
   const response = await ollamaJson("/api/chat", {
     model: OLLAMA_CHAT_MODEL,
@@ -332,8 +520,10 @@ export async function generateThreatSummary(article, grounded) {
     options: { temperature: 0.2, num_ctx: 16384 },
   });
 
-  const modelReport = parseModelReport(response.message?.content ?? "");
+  const modelReport = parseModelReport(response.message?.content ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);
   if (!modelReport) return null;
+
+  const groundedReport = groundHuntingRules(modelReport, grounded.detectionRuleIndex);
 
   return {
     id: article.link,
@@ -349,6 +539,6 @@ export async function generateThreatSummary(article, grounded) {
       { label: article.source, url: article.link },
       ...grounded.cveIds.map((id) => ({ label: id, url: `https://nvd.nist.gov/vuln/detail/${id}` })),
     ],
-    ...modelReport,
+    ...groundedReport,
   };
 }

@@ -103,6 +103,12 @@ export function CveTable({ initialSeverity }: CveTableProps = {}) {
         </div>
       </CardHeader>
       <CardContent>
+        {cves.data?.fallbackSource && (
+          <div className="mb-3 rounded-lg border border-medium/30 bg-medium/10 px-3 py-2 text-xs text-medium">
+            NVD is currently unavailable -- showing a fallback list from {cves.data.fallbackSource}. Some CVEs may be
+            missing a precise CVSS score until NVD recovers.
+          </div>
+        )}
         {cves.isLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 6 }).map((_, i) => (

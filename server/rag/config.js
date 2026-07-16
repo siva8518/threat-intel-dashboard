@@ -9,6 +9,14 @@ export const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:
 export const OLLAMA_CHAT_MODEL = process.env.OLLAMA_CHAT_MODEL ?? "llama3.1:8b";
 export const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL ?? "nomic-embed-text";
 
+// A separate AI_SUMMARY_MODEL was tried here so server/aiThreatSummary.js
+// could use a smaller/faster model than the RAG chatbot/combinedExtraction.js
+// share. Reverted -- confirmed live on this machine's tight free-memory
+// headroom (~2GB), running two different models meant Ollama constantly
+// evicting/reloading between them, adding 7+ seconds of load time to a
+// literally one-word test call. Net effect was slower and less reliable
+// (intermittent "fetch failed" errors), not faster. Keep everything on one
+// shared model unless this machine gets meaningfully more free RAM.
 export const RAG_TOP_K = Number(process.env.RAG_TOP_K) || 6;
 
 // Cosine similarity is in [-1, 1]; nomic-embed-text's real-world scores for

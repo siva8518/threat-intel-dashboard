@@ -428,35 +428,48 @@ The **AI Summarization** tab turns major vendor threat-research and CISA advisor
 Unit 42, CrowdStrike, Microsoft Security, Google Threat Intelligence, Rapid7, CISA, etc. — see
 `MAJOR_VENDOR_SOURCES` in `server/connectors/newsFeeds.js`) into full enterprise-grade SOC threat
 intelligence reports, written for a Tier 1/2/3 analyst, incident responder, threat hunter, detection
-engineer, security architect, and leadership all at once. It's deliberately not a news recap: AI
-summarization bullets, executive summary, business impact, a full attack-chain threat overview,
-affected products, vendor severity assessment, MITRE ATT&CK mapping, threat actors, malware, IOCs,
-detection opportunities, threat hunting queries for eight named platforms (Microsoft Defender XDR,
-Microsoft Sentinel, Splunk, Elastic, Sigma, YARA, CrowdStrike Falcon, Carbon Black), detection
-engineering opportunities, incident response guidance, priority-bucketed immediate recommendations,
-patch information, confidence/risk scoring, and four role-specific takeaways (SOC analyst, detection
-engineer, threat hunter, executive leadership).
+engineer, threat intel analyst, security architect, and leadership all at once. It's deliberately not
+a news recap: an AI Technical Summary (Threat/Attack Vector/Root Cause/Exploitation Details/Technical
+Findings/Security Implications/Detection Opportunities/Hunting Opportunities/Immediate Actions),
+executive summary, business impact, a full attack-chain threat overview, affected products, vendor
+severity assessment, MITRE ATT&CK mapping, threat actors, malware, IOCs, detection opportunities,
+threat hunting queries for eight named platforms (Microsoft Defender XDR, Microsoft Sentinel, Splunk,
+Elastic, Sigma, YARA, CrowdStrike Falcon, Carbon Black), detection engineering opportunities, incident
+response guidance, priority-bucketed immediate recommendations, patch information, confidence/risk
+scoring, and five role-specific takeaways (SOC analyst, detection engineer, threat hunter, threat
+intel, executive leadership).
 
 - `server/aiThreatSummary.js` builds the prompt and calls the same local Ollama chat model the AI
   Assistant tab uses (`llama3.1:8b` by default) — same free, local, no-API-key setup as the RAG
-  chatbot above, no additional install needed.
-- Facts the platform can already verify — CVE IDs, KEV/EPSS status, severity, and raw IOCs
-  (hashes/IPs/domains/URLs) — are extracted with this app's own proven regex/lookup logic, never
-  trusted to the model's own recall. The model is only asked for the parts that genuinely require
-  synthesis: narrative analysis, attack-chain reconstruction, detection/hunting/IR guidance, and its
-  own self-assessed confidence and risk score. Exotic IOC types with no reliable extraction path
-  (mutexes, registry keys, scheduled tasks, certificates, etc.) are always reported empty rather than
-  asking the model to invent them.
+  chatbot above, no additional install needed. Both features deliberately share one model: an earlier
+  attempt to give AI Summarization its own smaller/faster model caused Ollama to thrash swapping
+  between two loaded models under constrained memory, net slower and less reliable than sharing one.
+- The AI Technical Summary is explicitly a technical-extraction task, not an executive summary --
+  the prompt instructs the model to preserve named vulnerability classes, exact configuration/trigger
+  names, and precise exploitation mechanisms verbatim rather than abstracting them into generic
+  statements (e.g. naming a specific attack pattern and the exact trigger/config involved, not just
+  "attackers abused X").
+- Facts the platform can already verify — CVE IDs, KEV/EPSS status, severity, raw IOCs
+  (hashes/IPs/domains/URLs), and MITRE ATT&CK technique IDs — are extracted or validated with this
+  app's own proven regex/lookup/catalog logic, never trusted to the model's own recall. Any
+  model-supplied ATT&CK technique ID is checked against this app's synced technique catalog and
+  stripped if it doesn't match a real entry (with a same-catalog name-match recovery step for cases
+  where the model swapped which field held the name vs. the ID). The model is only asked for the
+  parts that genuinely require synthesis. Exotic IOC types with no reliable extraction path (mutexes,
+  registry keys, scheduled tasks, certificates, etc.) are always reported empty rather than asking the
+  model to invent them.
 - Scoped to **Critical/High/Medium** severity articles only for now — Low-severity coverage is
   deliberately deferred, not dropped; widening `ELIGIBLE_SEVERITIES` in `aiThreatSummaryJob.js` picks
-  up the backlog automatically since unmatched Low articles are never marked processed.
-- `server/aiThreatSummaryJob.js` processes one article every ~20 minutes in the background, scoped to
-  vendor/CISA sources only — this schema asks for roughly double the structured content of earlier
-  versions, so it fills in gradually rather than all at once. Reports persist to
+  up the backlog automatically since unmatched Low articles are never marked processed. Within the
+  eligible pool, candidates are processed Critical-first, then High, then Medium, newest-first within
+  each tier -- so a high-priority article can't get stuck behind a large backlog of lower-priority ones.
+- `server/aiThreatSummaryJob.js` processes a small batch of articles every few minutes in the
+  background, scoped to vendor/CISA sources only. Reports persist to
   `server/.cache/ai-threat-summaries.json` and are never regenerated once produced.
 - Generation speed depends entirely on your Ollama setup — CPU-only inference can take several minutes
-  per report given the schema's size; a GPU (or a smaller/faster model set via `OLLAMA_CHAT_MODEL`)
-  speeds this up substantially.
+  per report given the schema's size; a GPU speeds this up substantially. A smaller/faster model is
+  tempting but risky on memory-constrained machines if it means Ollama has to keep swapping between it
+  and whatever model your other AI features already use.
 
 ## Environment variables
 
@@ -477,6 +490,14 @@ read server-side only and never reach the browser bundle -- none are `VITE_`-pre
   by retrying.
 - **Graceful degradation**: a failing source keeps its last-known-good cached data and reports the
   error via `/api/dashboard/health` -- it doesn't blank out or crash other sections.
+- **CVE list cold-start fallback**: the above covers an already-synced source going down mid-session,
+  but a server restart during an NVD outage has no cache to fall back on. For that specific case,
+  `/api/dashboard/cves`'s default view falls back to CVE Program's (cve.org) own recently-reserved CVE
+  ID list, enriched per-ID via CIRCL (see `server/lookups/cveFallback.js`) -- confirmed live this
+  produces real, if less complete, records (no numeric CVSS score, since CIRCL doesn't expose one) until
+  NVD's own sync succeeds, at which point the route switches back automatically. The response includes
+  a `fallbackSource` field when this path is active, surfaced in the UI as a banner rather than silently
+  passed off as normal NVD data.
 - **EPSS lag**: confirmed live -- EPSS's daily snapshot lags NVD's newest publications by roughly a
   day, so CVEs published in the last ~24h will show `epssScore: null` until the next day's snapshot;
   this is normal (verified the join itself works correctly against older CVEs, e.g. Log4Shell/

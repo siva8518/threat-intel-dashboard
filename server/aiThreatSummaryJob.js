@@ -19,16 +19,21 @@ import { queryCves } from "./connectors/nvd.js";
 import { OllamaUnavailableError } from "./rag/ollamaClient.js";
 import { log } from "./lib/log.js";
 
-// Tuned up from BATCH_SIZE=1/20min so reports fill in faster on request.
-// Still safe against the overlapping-cycle risk seen elsewhere in this app
-// (GitHub Intel enrichment backfill): loop() is self-rescheduling and always
-// awaits the full batch before the CYCLE_INTERVAL_MS gap starts, so a larger
-// batch just makes one cycle take longer -- it never causes two cycles to
-// run concurrently. Each report still lands in the store (addReport) as soon
-// as it individually finishes, not only once the whole batch completes, so
-// raising BATCH_SIZE shortens time-to-first-report within a cycle too.
-const BATCH_SIZE = 3;
-const CYCLE_INTERVAL_MS = 5 * 60 * 1000; // 5 min
+// Tuned up again to work through the ~400-article Critical/High/Medium
+// backlog faster (a separate attempt to also switch to a smaller/faster
+// model just for this job was reverted -- see server/rag/config.js -- it
+// caused Ollama to thrash swapping between two different loaded models on
+// this machine's tight free memory, net slower and less reliable than
+// before). Still safe against the overlapping-cycle risk seen elsewhere in
+// this app (GitHub Intel enrichment backfill): loop() is self-rescheduling
+// and always awaits the full batch before the CYCLE_INTERVAL_MS gap starts,
+// so a larger batch just makes one cycle take longer -- it never causes two
+// cycles to run concurrently. Each report still lands in the store
+// (addReport) as soon as it individually finishes, not only once the whole
+// batch completes, so raising BATCH_SIZE shortens time-to-first-report
+// within a cycle too.
+const BATCH_SIZE = 5;
+const CYCLE_INTERVAL_MS = 2 * 60 * 1000; // 2 min
 
 // Per this feature's own spec: only Critical/High/Medium reports for now --
 // Low-severity coverage is deliberately deferred, not dropped. Matched
@@ -36,6 +41,7 @@ const CYCLE_INTERVAL_MS = 5 * 60 * 1000; // 5 min
 // so they're picked up automatically the day this list is widened, with no
 // backlog-replay step needed.
 const ELIGIBLE_SEVERITIES = new Set(["CRITICAL", "HIGH", "MEDIUM"]);
+const SEVERITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2 };
 
 function isEligibleSource(source) {
   return MAJOR_VENDOR_SOURCES.has(source) || source.startsWith("CISA");
@@ -76,6 +82,7 @@ async function runCycle() {
   const attackData = cache.getEntry("attack").data;
   const kevEntries = cache.getEntry("cisa-kev").data?.entries;
   const epssScores = cache.getEntry("epss").data;
+  const detectionRuleIndex = cache.getEntry("detection-rules").data?.index ?? [];
 
   // Severity has to be computed for every not-yet-processed candidate BEFORE
   // slicing to BATCH_SIZE -- otherwise a run of Low-severity articles sitting
@@ -95,16 +102,38 @@ async function runCycle() {
   // earlier version of this job that leaving it lowercase silently broke
   // both the severity badge's color and the critical-count in the tab
   // header -- normalized once, right here, rather than at every consumer.
+  //
+  // Confirmed live this app currently has a backlog of ~400+ unprocessed
+  // Critical/High/Medium articles across ~200 news sources -- at a few
+  // reports per cycle, a genuinely Critical, actively-exploited-CVE article
+  // could otherwise sit unprocessed behind hundreds of Medium ones purely
+  // because of where it happened to land in the raw news-cache array (no
+  // severity or recency ordering existed here before). Sorting Critical
+  // first, then newest-first within each tier, means the highest-value
+  // articles always get to the front of the queue rather than being left to
+  // chance -- it doesn't shrink the backlog, but it fixes *which* articles
+  // get covered first.
   const eligible = tagged
     .map((item) => ({ ...item, severity: item.severity.toUpperCase() }))
-    .filter((item) => ELIGIBLE_SEVERITIES.has(item.severity));
+    .filter((item) => ELIGIBLE_SEVERITIES.has(item.severity))
+    .sort((a, b) => {
+      const rankDiff = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
+      if (rankDiff !== 0) return rankDiff;
+      return new Date(b.publishedDate) - new Date(a.publishedDate);
+    });
   const batch = eligible.slice(0, BATCH_SIZE);
   if (batch.length === 0) return;
 
   for (const item of batch) {
     try {
       const cveEnrichment = await enrichCveIds(item.tags.cveIds, kevEntries, epssScores);
-      const report = await generateThreatSummary(item, { cveIds: item.tags.cveIds, severity: item.severity, cveEnrichment });
+      const report = await generateThreatSummary(item, {
+        cveIds: item.tags.cveIds,
+        severity: item.severity,
+        cveEnrichment,
+        attackTechniques: attackData?.techniques ?? [],
+        detectionRuleIndex,
+      });
       if (report) {
         addReport(report);
       } else {

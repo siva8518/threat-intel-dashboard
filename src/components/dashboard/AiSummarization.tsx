@@ -10,6 +10,21 @@ import { useAiThreatSummaries } from "@/hooks/useAiThreatSummaries";
 import type { AiThreatSummaryReport } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
+// Reports generated before the aiTechnicalSummary field existed (superseding
+// the old flat aiSummarizationBullets) won't have it at all -- falls back to
+// all-empty rather than crashing on report.aiTechnicalSummary.threat etc.
+const EMPTY_TECHNICAL_SUMMARY = {
+  threat: [],
+  attackVector: [],
+  rootCause: [],
+  exploitationDetails: [],
+  technicalFindings: [],
+  securityImplications: [],
+  detectionOpportunities: [],
+  huntingOpportunities: [],
+  immediateActions: [],
+};
+
 function timeAgo(iso: string) {
   const ms = Date.now() - new Date(iso).getTime();
   const hours = Math.floor(ms / (60 * 60 * 1000));
@@ -185,7 +200,23 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             />
           </div>
 
-          <FieldList title="AI Summarization" items={report.aiSummarizationBullets} />
+          <GroupedLists
+            title="AI Technical Summary"
+            groups={(() => {
+              const summary = report.aiTechnicalSummary ?? EMPTY_TECHNICAL_SUMMARY;
+              return [
+                ["Threat", summary.threat],
+                ["Attack Vector", summary.attackVector],
+                ["Root Cause", summary.rootCause],
+                ["Exploitation Details", summary.exploitationDetails],
+                ["Technical Findings", summary.technicalFindings],
+                ["Security Implications", summary.securityImplications],
+                ["Detection Opportunities", summary.detectionOpportunities],
+                ["Hunting Opportunities", summary.huntingOpportunities],
+                ["Immediate Actions", summary.immediateActions],
+              ] as Array<[string, string[]]>;
+            })()}
+          />
 
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Summary</h4>
@@ -413,6 +444,10 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             <div>
               <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Threat Hunter Takeaway</h4>
               <p className="text-foreground">{report.threatHunterTakeaway}</p>
+            </div>
+            <div>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Threat Intel Takeaway</h4>
+              <p className="text-foreground">{report.threatIntelTakeaway}</p>
             </div>
             <div>
               <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Leadership Takeaway</h4>

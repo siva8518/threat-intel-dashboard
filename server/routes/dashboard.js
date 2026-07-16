@@ -20,6 +20,7 @@ import { checkIndicator as checkTeamCymru } from "../lookups/teamCymru.js";
 import { checkIndicator as checkHudsonRock } from "../lookups/hudsonRock.js";
 import { checkIndicator as checkIsc } from "../lookups/isc.js";
 import { lookupCve as lookupCveCircl } from "../lookups/circl.js";
+import { fetchFallbackCves } from "../lookups/cveFallback.js";
 import { matchWarninglists } from "../connectors/mispWarninglists.js";
 import { throttleAndCache } from "../lib/lookupLimiter.js";
 import { listThreatActors, searchThreatActors, buildThreatActorProfile } from "../actorProfile.js";
@@ -123,7 +124,23 @@ router.get("/dashboard/cves", async (req, res) => {
 
     if (isDefaultView) {
       const nvd = cache.getEntry("nvd").data;
-      if (!nvd) return res.status(503).json({ error: "NVD data is still syncing, try again shortly" });
+      if (!nvd) {
+        // NVD hasn't synced yet -- most likely a fresh server start during an
+        // NVD-side outage (an already-synced NVD entry keeps serving its
+        // last-known-good data on a *later* failure, see cache.js; this branch
+        // is specifically the cold-start case where there's nothing cached at
+        // all). Fall back to CVE Program's own recent-record list, enriched
+        // per-ID via CIRCL -- see server/lookups/cveFallback.js for why this
+        // combination and not CIRCL's own bulk endpoint.
+        const cveProjectData = cache.getEntry("cve-project").data;
+        const fallbackRecords = cveProjectData ? await fetchFallbackCves(cveProjectData) : [];
+        if (fallbackRecords.length === 0) return res.status(503).json({ error: "NVD data is still syncing, try again shortly" });
+        return res.json({
+          totalResults: fallbackRecords.length,
+          records: correlateCves(fallbackRecords, kevEntries, epssScores),
+          fallbackSource: "CVE Program + CIRCL (NVD unavailable)",
+        });
+      }
       const records = nvd.latestCves.records.slice(0, Number(pageSize));
       return res.json({ totalResults: nvd.latestCves.totalResults, records: correlateCves(records, kevEntries, epssScores) });
     }

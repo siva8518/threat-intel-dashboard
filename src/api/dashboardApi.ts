@@ -51,6 +51,8 @@ export interface CveQueryParams {
 export interface CveQueryResult {
   totalResults: number;
   records: CveRecord[];
+  /** Present only when NVD's own cache is unavailable at a cold start -- the list came from CVE Program + CIRCL instead. See server/lookups/cveFallback.js. */
+  fallbackSource?: string;
 }
 
 export async function fetchCves(params: CveQueryParams): Promise<CveQueryResult> {

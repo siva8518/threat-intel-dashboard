@@ -745,6 +745,19 @@ export interface AiThreatSummaryReference {
   url: string;
 }
 
+/** Technical extraction, not an executive summary -- named vulnerability classes, config/trigger names, and mechanisms preserved verbatim from the source article, not abstracted into generic statements. */
+export interface AiThreatSummaryTechnicalSummary {
+  threat: string[];
+  attackVector: string[];
+  rootCause: string[];
+  exploitationDetails: string[];
+  technicalFindings: string[];
+  securityImplications: string[];
+  detectionOpportunities: string[];
+  huntingOpportunities: string[];
+  immediateActions: string[];
+}
+
 export interface AiThreatSummaryBusinessImpact {
   businessRisk: string;
   operationalDisruption: string;
@@ -875,7 +888,7 @@ export interface AiThreatSummaryReport {
   cves: AiThreatSummaryCve[];
   iocs: AiThreatSummaryIocs;
   references: AiThreatSummaryReference[];
-  aiSummarizationBullets: string[];
+  aiTechnicalSummary: AiThreatSummaryTechnicalSummary;
   executiveSummary: string;
   businessImpact: AiThreatSummaryBusinessImpact;
   threatOverview: AiThreatSummaryThreatOverview;
@@ -895,5 +908,6 @@ export interface AiThreatSummaryReport {
   socAnalystTakeaway: string;
   detectionEngineerTakeaway: string;
   threatHunterTakeaway: string;
+  threatIntelTakeaway: string;
   executiveLeadershipTakeaway: string;
 }
