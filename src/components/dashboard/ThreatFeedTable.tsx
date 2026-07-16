@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,7 @@ import { ErrorState, EmptyState } from "./ErrorState";
 import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { useThreatFeed } from "@/hooks/useThreatFeed";
 import type { IocType } from "@/types/threat-intel";
+import { virusTotalLookupUrl } from "@/lib/vtLookup";
 
 const TYPE_LABEL: Record<IocType, string> = {
   ip: "IP Address",
@@ -97,7 +99,18 @@ export function ThreatFeedTable({ initialDateRange }: ThreatFeedTableProps = {})
             <TableBody>
               {filtered.map((ioc) => (
                 <TableRow key={ioc.id}>
-                  <TableCell className="max-w-xs truncate font-mono text-xs">{ioc.indicator}</TableCell>
+                  <TableCell className="max-w-xs truncate font-mono text-xs">
+                    <a
+                      href={virusTotalLookupUrl(ioc)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Look up this indicator on VirusTotal"
+                      className="inline-flex items-center gap-1 hover:text-primary hover:underline"
+                    >
+                      <span className="truncate">{ioc.indicator}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  </TableCell>
                   <TableCell>{TYPE_LABEL[ioc.indicatorType]}</TableCell>
                   <TableCell>{ioc.malwareFamily}</TableCell>
                   <TableCell>{ioc.threatType}</TableCell>
