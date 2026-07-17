@@ -35,13 +35,14 @@ import { log } from "./lib/log.js";
 const BATCH_SIZE = 5;
 const CYCLE_INTERVAL_MS = 2 * 60 * 1000; // 2 min
 
-// Per this feature's own spec: only Critical/High/Medium reports for now --
-// Low-severity coverage is deliberately deferred, not dropped. Matched
-// articles are simply never marked processed while this filter is active,
-// so they're picked up automatically the day this list is widened, with no
-// backlog-replay step needed.
-const ELIGIBLE_SEVERITIES = new Set(["CRITICAL", "HIGH", "MEDIUM"]);
-const SEVERITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2 };
+// Widened to include Low -- per this feature's own spec, Low was deferred
+// (never marked processed while excluded), not dropped, specifically so
+// this moment -- flipping the filter -- would surface the whole backlog
+// automatically with no separate backfill step. Confirmed live a lot of
+// legitimate vendor-source articles were sitting unprocessed simply because
+// they tagged Low, not because anything was broken.
+const ELIGIBLE_SEVERITIES = new Set(["CRITICAL", "HIGH", "MEDIUM", "LOW"]);
+const SEVERITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
 function isEligibleSource(source) {
   return MAJOR_VENDOR_SOURCES.has(source) || source.startsWith("CISA");

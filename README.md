@@ -458,10 +458,11 @@ intel, executive leadership).
   parts that genuinely require synthesis. Exotic IOC types with no reliable extraction path (mutexes,
   registry keys, scheduled tasks, certificates, etc.) are always reported empty rather than asking the
   model to invent them.
-- Scoped to **Critical/High/Medium** severity articles only for now — Low-severity coverage is
-  deliberately deferred, not dropped; widening `ELIGIBLE_SEVERITIES` in `aiThreatSummaryJob.js` picks
-  up the backlog automatically since unmatched Low articles are never marked processed. Within the
-  eligible pool, candidates are processed Critical-first, then High, then Medium, newest-first within
+- Covers **all four severities**, including Low (widened from Critical/High/Medium-only -- Low was
+  deliberately deferred at first, not dropped, precisely so it could be turned on later with no
+  backfill step: unmatched Low articles were never marked processed, so the entire backlog picked up
+  automatically the moment `ELIGIBLE_SEVERITIES` in `aiThreatSummaryJob.js` was widened). Within the
+  eligible pool, candidates are processed Critical-first, then High, Medium, Low, newest-first within
   each tier -- so a high-priority article can't get stuck behind a large backlog of lower-priority ones.
 - `server/aiThreatSummaryJob.js` processes a small batch of articles every few minutes in the
   background, scoped to vendor/CISA sources only. Reports persist to
