@@ -111,18 +111,23 @@ export function matchCveIds(title) {
 }
 
 /**
- * Map<cveId, count> of how many news headlines (across every configured
+ * Map<cveId, count> of how many news articles (across every configured
  * source, including any just-added RSS feed -- this is a live regex scan of
  * whatever's currently cached, not a separately-maintained list) name each
- * CVE. Merged into server/githubIntel/index.js#computeTopCves the same way
+ * CVE, in either the headline or the article summary. Merged into
+ * server/githubIntel/index.js#computeTopCves the same way
  * server/attackTechniqueIntelligence.js#getNewsTechniqueCounts is merged into
  * computeAttackTechniquesObserved, so "Top CVEs" reflects news attention too,
- * not just GitHub PoC/repo activity.
+ * not just GitHub PoC/repo activity. Scanning the summary too (not just the
+ * title) matters here specifically -- confirmed live that a fresh KEV entry
+ * can be discussed at length in an article body while the headline itself
+ * never spells out the literal CVE ID string, which a title-only match would
+ * silently miss entirely.
  */
 export function getNewsCveCounts(newsItems) {
   const counts = new Map();
   for (const item of newsItems ?? []) {
-    for (const cveId of matchCveIds(item.title)) counts.set(cveId, (counts.get(cveId) ?? 0) + 1);
+    for (const cveId of matchCveIds(`${item.title} ${item.summary ?? ""}`)) counts.set(cveId, (counts.get(cveId) ?? 0) + 1);
   }
   return counts;
 }
@@ -169,7 +174,12 @@ export function tagNewsItems(newsItems, sources) {
   const now = Date.now();
 
   return newsItems.map((item) => {
-    const cveIds = matchCveIds(item.title);
+    // CVE IDs are matched against title + summary (see getNewsCveCounts'
+    // own comment above) -- actor/malware names deliberately stay
+    // title-only, a looser substring match against full article bodies
+    // would risk tagging an article to every actor/family it merely
+    // mentions in passing, not just what it's actually about.
+    const cveIds = matchCveIds(`${item.title} ${item.summary ?? ""}`);
     const actors = matchNames(item.title, actorNames);
     const malware = matchNames(item.title, malwareNames);
     const industries = matchIndustries(item.title);

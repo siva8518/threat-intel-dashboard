@@ -19,6 +19,7 @@
 // would just be empty or fabricated. Documented in the frontend instead of
 // silently omitted.
 import { threatFeedIocs } from "./threatFeed.js";
+import { matchCveIds } from "./newsCorrelation.js";
 
 function citesId(entity, cveId) {
   return (entity.cveIds ?? []).includes(cveId);
@@ -76,8 +77,14 @@ export function buildCveProfile(cveId, sources = {}) {
     .map((r) => ({ fullName: r.fullName, url: r.url, stars: r.stars, threatScore: r.threatScore?.score ?? r.threatScore ?? null }));
 
   const upperCveId = cveId.toUpperCase();
+  // Matches against title + summary, not just the headline -- confirmed
+  // live that a fresh KEV entry can be discussed at length in an article
+  // body while the headline itself never spells out the literal CVE ID
+  // string, which this used to silently miss. Same matcher
+  // server/newsCorrelation.js#getNewsCveCounts uses for "Top CVEs", so this
+  // section and that widget now agree on what counts as a mention.
   const relatedNews = (newsItems ?? [])
-    .filter((item) => item.title.toUpperCase().includes(upperCveId))
+    .filter((item) => matchCveIds(`${item.title} ${item.summary ?? ""}`).includes(upperCveId))
     .slice(0, 10)
     .map((item) => ({ id: item.link, title: item.title, link: item.link, source: item.source, publishedDate: item.publishedDate }));
 
