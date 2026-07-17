@@ -537,7 +537,19 @@ export async function generateThreatSummary(article, grounded) {
     // prompt now carries up to ~14,000 chars of article body on top of the
     // schema instructions, so the old budget left too little room for a
     // long, detail-rich completion.
-    options: { temperature: 0.2, num_ctx: 24576 },
+    //
+    // Pulled back from 24576 to 16384 -- confirmed live this app's other
+    // Ollama call (server/combinedExtraction.js) uses no num_ctx at all
+    // (Ollama's smaller default), and switching num_ctx forces Ollama to
+    // reinitialize the model's context buffer on every call. On this
+    // machine's tight free RAM (also hosting a second, separate embedding
+    // model), that repeated reinit lined up closely with a recurring Ollama
+    // "Stopping..." unload deadlock that froze this job for hours. System
+    // prompt (~12,100 chars) + article text (up to ~14,000 chars) + a large
+    // structured JSON completion tops out around 10-12K tokens in the worst
+    // case -- 16384 keeps ~1.4-1.6x headroom over that, same safety margin
+    // in spirit as the original widening above, just not double it.
+    options: { temperature: 0.2, num_ctx: 16384 },
   });
 
   const modelReport = parseModelReport(response.message?.content ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);

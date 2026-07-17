@@ -3,6 +3,7 @@
 // both so swapping the local LLM runtime later (e.g. llama.cpp's own server,
 // vLLM) means rewriting this one file, not touching the RAG pipeline above it.
 import { OLLAMA_BASE_URL } from "./config.js";
+import { recordOllamaFailure, recordOllamaSuccess } from "./ollamaWatchdog.js";
 
 export class OllamaUnavailableError extends Error {
   constructor(detail) {
@@ -25,6 +26,30 @@ export class OllamaUnavailableError extends Error {
 // every caller (both jobs, the chat route) already handles: dedup-logged
 // once, cycle retried next interval.
 const REQUEST_TIMEOUT_MS = 120_000;
+
+// Serializes every call through this file -- confirmed via ollama/ollama
+// issue #14364 that Ollama can wedge into the same permanent "Stopping..."
+// deadlock this file otherwise works around when two independent processes
+// send it concurrent chat requests at once. This app has exactly that shape:
+// aiThreatSummaryJob.js and combinedExtractionJob.js both run on a 2min
+// cycle only ~10s apart, each generation call commonly takes 20-40s+, and
+// the chat route can fire at any time on top of that -- their requests were
+// very plausibly overlapping in-flight on most cycles. A simple
+// promise-chain queue means this whole app never has more than one Ollama
+// request in flight at a time, sidestepping the trigger entirely rather
+// than reacting to it after the fact. queueTail always resolves (even when
+// the queued call itself rejects) so one failed call never blocks everyone
+// waiting behind it.
+let queueTail = Promise.resolve();
+
+function withOllamaQueue(fn) {
+  const result = queueTail.then(fn, fn);
+  queueTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
 
 function createTimeoutController(ms) {
   const controller = new AbortController();
@@ -52,7 +77,16 @@ async function request(path, body) {
     response = await fetch(`${OLLAMA_BASE_URL}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      // keep_alive: -1 tells Ollama to never auto-unload this model after
+      // idle time -- confirmed live that the repeated "Stopping..." deadlock
+      // this file works around (see REQUEST_TIMEOUT_MS and
+      // ollamaWatchdog.js) recurred on a strikingly regular ~4min cadence,
+      // matching Ollama's own idle-unload timer rather than random load
+      // contention. That auto-unload path is what appears to wedge, so
+      // skipping it entirely addresses the actual trigger, not just the
+      // symptom. The timeout + watchdog stay in place regardless, in case
+      // this doesn't fully eliminate it.
+      body: JSON.stringify({ ...body, keep_alive: -1 }),
       signal: timeout.signal,
     });
   } catch (error) {
@@ -61,7 +95,10 @@ async function request(path, body) {
     // same as an aborted-for-timeout request -- all three mean "Ollama
     // isn't usable right now," the "quiet not-configured" case, same shape
     // as every optional keyed connector in this app when its env var is
-    // absent.
+    // absent. Reported to the watchdog either way -- if Ollama really is
+    // just not installed, restarting a process that doesn't exist is a
+    // harmless no-op (see ollamaWatchdog.js's own error handling).
+    recordOllamaFailure();
     const detail = error.name === "AbortError" ? `no response within ${REQUEST_TIMEOUT_MS / 1000}s -- Ollama may be stuck` : error.message;
     throw new OllamaUnavailableError(detail);
   }
@@ -84,44 +121,57 @@ async function request(path, body) {
  * to remember that per-endpoint default themselves.
  */
 export async function ollamaJson(path, body) {
-  const { response, timeout } = await request(path, { ...body, stream: false });
-  try {
-    return await response.json();
-  } catch (error) {
-    if (error.name === "AbortError") throw new OllamaUnavailableError(`no response within ${REQUEST_TIMEOUT_MS / 1000}s -- Ollama may be stuck`);
-    throw error;
-  } finally {
-    timeout.clear();
-  }
+  return withOllamaQueue(async () => {
+    const { response, timeout } = await request(path, { ...body, stream: false });
+    try {
+      const json = await response.json();
+      recordOllamaSuccess();
+      return json;
+    } catch (error) {
+      if (error.name === "AbortError") {
+        recordOllamaFailure();
+        throw new OllamaUnavailableError(`no response within ${REQUEST_TIMEOUT_MS / 1000}s -- Ollama may be stuck`);
+      }
+      throw error;
+    } finally {
+      timeout.clear();
+    }
+  });
 }
 
 /** Streaming call -- Ollama's own stream format is NDJSON (one JSON object per line), not SSE. */
 export async function ollamaStream(path, body, onLine) {
-  const { response, timeout } = await request(path, { ...body, stream: true });
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+  return withOllamaQueue(async () => {
+    const { response, timeout } = await request(path, { ...body, stream: true });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      timeout.poke();
-      buffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        timeout.poke();
+        buffer += decoder.decode(value, { stream: true });
 
-      let newlineIndex;
-      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-        const line = buffer.slice(0, newlineIndex).trim();
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line) onLine(JSON.parse(line));
+        let newlineIndex;
+        while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+          if (line) onLine(JSON.parse(line));
+        }
       }
+      recordOllamaSuccess();
+    } catch (error) {
+      if (error.name === "AbortError") {
+        recordOllamaFailure();
+        throw new OllamaUnavailableError(`stream stalled with no data for ${REQUEST_TIMEOUT_MS / 1000}s -- Ollama may be stuck`);
+      }
+      throw error;
+    } finally {
+      timeout.clear();
     }
-  } catch (error) {
-    if (error.name === "AbortError") throw new OllamaUnavailableError(`stream stalled with no data for ${REQUEST_TIMEOUT_MS / 1000}s -- Ollama may be stuck`);
-    throw error;
-  } finally {
-    timeout.clear();
-  }
+  });
 }
 
 /** Cheap reachability + model-presence check for the chat health endpoint -- never throws. */
