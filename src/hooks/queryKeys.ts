@@ -35,4 +35,5 @@ export const queryKeys = {
   aiThreatSummaries: ["ai-threat-summaries"] as const,
   watchlist: ["watchlist"] as const,
   flashReports: ["flash-reports"] as const,
+  remediationQueue: ["remediation-queue"] as const,
 };

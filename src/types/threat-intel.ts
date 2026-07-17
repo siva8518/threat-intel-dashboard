@@ -24,6 +24,24 @@ export interface CveRecord {
   sourceUrl: string;
 }
 
+export type RemediationStatus = "pending" | "patched" | "mitigated" | "risk_accepted";
+
+/**
+ * One CVE in the Remediation Tracker's prioritized queue -- everything from
+ * CveRecord plus a deterministic urgencyScore (KEV+EPSS+CVSS, see
+ * server/remediationQueue.js), the VM team's own tracked status/note (this
+ * app's only source of truth for that -- nothing external reports it), and
+ * patch guidance pulled from AI Summarization when that article's already
+ * been analyzed.
+ */
+export interface RemediationQueueItem extends CveRecord {
+  urgencyScore: number;
+  status: RemediationStatus;
+  note: string | null;
+  statusUpdatedAt: string | null;
+  patchInfo: AiThreatSummaryPatchInformation | null;
+}
+
 export interface KevEntry {
   cveId: string;
   vendorProject: string;

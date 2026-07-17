@@ -26,6 +26,8 @@ import type {
   MalwareProfile,
   NewsItem,
   RansomwareCampaign,
+  RemediationQueueItem,
+  RemediationStatus,
   SourceHealth,
   ThreatActor,
   ThreatActorIntelligenceEntity,
@@ -202,6 +204,27 @@ export async function fetchThreatTimeline(days: number): Promise<{ events: Threa
 
 export async function fetchCveById(cveId: string): Promise<CveRecord> {
   return fetchJson(`/api/dashboard/cve/${encodeURIComponent(cveId)}`, { source: "Dashboard API" });
+}
+
+export async function fetchRemediationQueue(): Promise<{ items: RemediationQueueItem[]; ready: boolean }> {
+  return fetchJson("/api/dashboard/remediation-queue", { source: "Dashboard API" });
+}
+
+export async function setRemediationStatus(
+  cveId: string,
+  status: RemediationStatus,
+  note: string | null,
+): Promise<{ cveId: string; status: RemediationStatus; note: string | null; updatedAt: string }> {
+  return fetchJson(`/api/dashboard/remediation/${encodeURIComponent(cveId)}`, {
+    source: "Dashboard API",
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, note }),
+  });
+}
+
+export async function clearRemediationStatus(cveId: string): Promise<{ ok: boolean }> {
+  return fetchJson(`/api/dashboard/remediation/${encodeURIComponent(cveId)}`, { source: "Dashboard API", method: "DELETE" });
 }
 
 export async function fetchSourcesHealth(): Promise<{ sources: SourceHealth[]; onlineCount: number; totalCount: number }> {

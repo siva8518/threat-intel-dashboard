@@ -42,6 +42,8 @@ import { getNewsTechniqueCounts } from "../attackTechniqueIntelligence.js";
 import { getAllEntities as getDarkWebIntelligenceEntities } from "../darkWebIntelligence.js";
 import { getKeywords, addKeyword, removeKeyword, getFlashReports, getUnreadCount, markRead, markAllRead } from "../watchlist.js";
 import { getAllReports as getAllAiThreatSummaries, getReportById as getAiThreatSummaryById } from "../aiThreatSummaryStore.js";
+import { getAllStatuses as getAllRemediationStatuses, setStatus as setRemediationStatus, clearStatus as clearRemediationStatus, REMEDIATION_STATUSES } from "../remediationTracker.js";
+import { buildRemediationQueue } from "../remediationQueue.js";
 
 export const router = Router();
 
@@ -252,6 +254,36 @@ router.get("/dashboard/malware-profile/:family", (req, res) => {
 router.get("/dashboard/cve-program-activity", (_req, res) => {
   const entry = cache.getEntry("cve-project").data;
   res.json(entry ?? { fetchedAt: null, newCves: [], updatedCves: [] });
+});
+
+// --- Remediation Tracker (VM-focused patch queue, see server/remediationQueue.js) ---
+// Built from the same cached, KEV/EPSS-enriched CVE records the Latest CVEs
+// tab reads (cache.getEntry("nvd").data.latestCves.records -- up to ~100
+// CVEs, already widened to include recently-added KEV entries even if
+// outside the normal "latest" window), re-ranked by a deterministic urgency
+// score instead of raw publish-date order. No new upstream calls.
+router.get("/dashboard/remediation-queue", (_req, res) => {
+  const nvd = cache.getEntry("nvd").data;
+  if (!nvd) return res.json({ items: [], ready: false });
+  const kevEntries = cache.getEntry("cisa-kev").data?.entries ?? [];
+  const epssScores = cache.getEntry("epss").data ?? {};
+  const records = correlateCves(nvd.latestCves.records, kevEntries, epssScores);
+  const items = buildRemediationQueue(records, getAllRemediationStatuses(), getAllAiThreatSummaries());
+  res.json({ items, ready: true });
+});
+
+router.put("/dashboard/remediation/:cveId", (req, res) => {
+  const { status, note } = req.body ?? {};
+  if (!REMEDIATION_STATUSES.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${REMEDIATION_STATUSES.join(", ")}` });
+  }
+  const record = setRemediationStatus(req.params.cveId, status, note);
+  res.json({ cveId: req.params.cveId.toUpperCase(), ...record });
+});
+
+router.delete("/dashboard/remediation/:cveId", (req, res) => {
+  clearRemediationStatus(req.params.cveId);
+  res.json({ ok: true });
 });
 
 // --- KEV -----------------------------------------------------------------

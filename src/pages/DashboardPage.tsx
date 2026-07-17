@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Bot, BrainCircuit, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, UserSearch, Wifi } from "lucide-react";
+import { Bot, BrainCircuit, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, UserSearch, Wifi, Wrench } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { TriageConsole } from "@/components/dashboard/TriageConsole";
+import { RemediationTracker } from "@/components/dashboard/RemediationTracker";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
 import { WorldThreatMap } from "@/components/dashboard/WorldThreatMap";
 import { TopMitreTechniques } from "@/components/dashboard/TopMitreTechniques";
@@ -42,6 +43,7 @@ const TABS = [
   { id: "triage", label: "Triage Console", icon: Siren },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "cves", label: "Latest CVEs", icon: ShieldAlert },
+  { id: "remediation-tracker", label: "Remediation Tracker", icon: Wrench },
   { id: "correlation-engine", label: "Correlation Engine", icon: Network },
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },
   { id: "threat-actors", label: "Ransomware Data", icon: Skull },
@@ -168,6 +170,7 @@ export function DashboardPage() {
           </div>
         </>
       )}
+      {activeTab === "remediation-tracker" && <RemediationTracker />}
       {activeTab === "correlation-engine" && <CorrelationEngine />}
       {activeTab === "attack-techniques" && (
         <>
