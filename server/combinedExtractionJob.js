@@ -123,6 +123,24 @@ function githubRepoArticles() {
 // behind whatever news is currently unprocessed.
 const GITHUB_SLOTS_PER_CYCLE = 10;
 
+/**
+ * A GitHub repo's "headline" here is its own `owner/repo-name` (see
+ * githubRepoArticles() above) -- nothing like a real news headline's prose.
+ * Confirmed live this gets misread as if the repo were naming a threat
+ * actor: "drkemp187/evadelint" (a defensive Sigma-rule linter -- "score
+ * your detection rules by how easily an attacker can evade them") produced
+ * two fake "Unknown"-type actor entities, "drkemp187" and "evadelint",
+ * neither a real threat actor, both just the repo talking about itself.
+ * Strips any candidate that IS the repo's own owner/name before validation
+ * ever runs -- the same self-exclusion idea as threatActorExtraction.js's
+ * existing articleSource check, extended to the repo's own identity too.
+ */
+function selfReferenceTokens(article) {
+  if (article.source !== "GitHub Intel") return new Set();
+  const [owner, repoName] = article.title.split("/");
+  return new Set([owner, repoName].filter(Boolean).map((s) => s.toLowerCase()));
+}
+
 async function runCycle() {
   const newsItems = cache.getEntry("news").data?.items ?? [];
   const unprocessedRepos = githubRepoArticles()
@@ -148,21 +166,26 @@ async function runCycle() {
       const { malware, actors, campaigns, techniques, darkweb } = await extractAllEntities({ title: article.title, summary: article.summary });
       extracted += malware.length + actors.length + campaigns.length + techniques.length + darkweb.length;
 
-      const validMalware = validateMalwareCandidates(malware, { articleSource: article.source, knownActorNamesLower: actorNamesLower, knownToolNamesLower: toolNamesLower });
+      const selfTokens = selfReferenceTokens(article);
+      const nonSelfMalware = malware.filter((name) => !selfTokens.has(name.toLowerCase()));
+      const nonSelfActors = actors.filter((a) => !selfTokens.has((a.name ?? "").toLowerCase()));
+      const nonSelfCampaigns = campaigns.filter((name) => !selfTokens.has(name.toLowerCase()));
+
+      const validMalware = validateMalwareCandidates(nonSelfMalware, { articleSource: article.source, knownActorNamesLower: actorNamesLower, knownToolNamesLower: toolNamesLower });
       for (const name of validMalware) {
         const { isNew } = malwareIntel.upsertMention(name, article);
         if (isNew) newEntities += 1;
         else updatedEntities += 1;
       }
 
-      const validActors = validateActorCandidates(actors, { articleSource: article.source, knownMalwareNamesLower: malwareNamesLower, knownToolNamesLower: toolNamesLower });
+      const validActors = validateActorCandidates(nonSelfActors, { articleSource: article.source, knownMalwareNamesLower: malwareNamesLower, knownToolNamesLower: toolNamesLower });
       for (const { name, type } of validActors) {
         const { isNew } = actorIntel.upsertMention(name, type, article);
         if (isNew) newEntities += 1;
         else updatedEntities += 1;
       }
 
-      const validCampaigns = validateCampaignCandidates(campaigns, { articleSource: article.source, knownActorNamesLower: actorNamesLower, knownMalwareNamesLower: malwareNamesLower });
+      const validCampaigns = validateCampaignCandidates(nonSelfCampaigns, { articleSource: article.source, knownActorNamesLower: actorNamesLower, knownMalwareNamesLower: malwareNamesLower });
       for (const name of validCampaigns) {
         const { isNew } = campaignIntel.upsertMention(name, article);
         if (isNew) newEntities += 1;

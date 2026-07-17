@@ -44,8 +44,50 @@ const CYCLE_INTERVAL_MS = 2 * 60 * 1000; // 2 min
 const ELIGIBLE_SEVERITIES = new Set(["CRITICAL", "HIGH", "MEDIUM", "LOW"]);
 const SEVERITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
+// Strict Critical>High>Medium>Low ordering (below) picks the single best
+// article every cycle, but it has no anti-starvation guard: as long as new
+// Critical/High CVE articles keep arriving from the news pool -- which they
+// do, continuously -- Medium/Low never get reached at all, not just
+// delayed. Confirmed live: a 944-article backlog was 823 Low (mostly
+// malware-family/threat-actor pieces that never picked up a CVE mention --
+// computeSeverity in newsCorrelation.js only reaches Medium if the title
+// matches an already-curated ATT&CK/ransomware-tracker name, so a newer or
+// lesser-known family name defaults to Low), and after days of this
+// ordering zero Low articles had ever been processed. Reserving a couple of
+// the batch's slots specifically for the oldest Medium/Low article
+// guarantees both tiers make steady forward progress every cycle,
+// regardless of how deep the Critical/High backlog runs.
+const RESERVED_SLOTS = { MEDIUM: 1, LOW: 1 };
+
 function isEligibleSource(source) {
   return MAJOR_VENDOR_SOURCES.has(source) || source.startsWith("CISA");
+}
+
+/**
+ * Fills BATCH_SIZE slots from `eligible` (already sorted Critical>High>
+ * Medium>Low, newest-first within a tier): first claims RESERVED_SLOTS'
+ * newest pick from each tier it names, then fills whatever's left in strict
+ * priority order, skipping anything already claimed. With BATCH_SIZE=5 and
+ * RESERVED_SLOTS={MEDIUM:1,LOW:1}, that's usually 3 slots of pure priority
+ * (which Critical/High will dominate whenever they're present) plus 1
+ * guaranteed Medium and 1 guaranteed Low every cycle.
+ */
+function buildBatch(eligible) {
+  const batch = [];
+  const claimed = new Set();
+  for (const [severity, count] of Object.entries(RESERVED_SLOTS)) {
+    for (const item of eligible.filter((i) => i.severity === severity).slice(0, count)) {
+      batch.push(item);
+      claimed.add(item.link);
+    }
+  }
+  for (const item of eligible) {
+    if (batch.length >= BATCH_SIZE) break;
+    if (claimed.has(item.link)) continue;
+    batch.push(item);
+    claimed.add(item.link);
+  }
+  return batch.slice(0, BATCH_SIZE);
 }
 
 const cveEnrichmentCache = new Map(); // process-wide, same pattern as githubIntel/enrich.js's cveDetailCache -- a CVE looked up once doesn't need a second live NVD call this run
@@ -122,7 +164,7 @@ async function runCycle() {
       if (rankDiff !== 0) return rankDiff;
       return new Date(b.publishedDate) - new Date(a.publishedDate);
     });
-  const batch = eligible.slice(0, BATCH_SIZE);
+  const batch = buildBatch(eligible);
   if (batch.length === 0) return;
 
   for (const item of batch) {

@@ -15,6 +15,7 @@ import { ollamaJson } from "./rag/ollamaClient.js";
 import { OLLAMA_CHAT_MODEL } from "./rag/config.js";
 import { extractEntities } from "./githubIntel/extractor.js";
 import { detectionRulesFor } from "./correlate.js";
+import { fetchArticleText } from "./lib/articleText.js";
 
 const SYSTEM_PROMPT =
   "You are a Principal Cyber Threat Intelligence Analyst supporting an enterprise SOC, Detection Engineering, Incident Response, Threat Hunting, and Security Leadership. " +
@@ -482,7 +483,18 @@ function groundHuntingRules(modelReport, ruleIndex) {
  * @param {Array} grounded.detectionRuleIndex - server/connectors/detectionRules.js's synced SigmaHQ/YARA-Rules filename-word index
  */
 export async function generateThreatSummary(article, grounded) {
-  const sourceText = `${article.title}\n${article.summary ?? ""}`;
+  // The RSS title+summary alone is a ~200-400 character teaser -- nowhere
+  // near enough for the "preserve every technical detail" brief below.
+  // Confirmed live a Datadog Security Labs report on CVE-2026-31431 came
+  // back with detection engineering, hunting queries, IR guidance, patch
+  // info, and every role takeaway empty/"Not Reported", not because the
+  // model hallucinated or failed, but because the real article (19,774
+  // characters, with a full SECL detection rule chain and working hunting
+  // queries) was never given to it -- only a 271-character blurb was.
+  // fetchArticleText() never throws; a paywalled/blocked/slow source just
+  // falls back to the RSS summary exactly as before.
+  const articleText = await fetchArticleText(article.link, article.source);
+  const sourceText = `${article.title}\n${article.summary ?? ""}\n${articleText ?? ""}`;
   const iocs = extractIocs(sourceText);
 
   const cveContext = grounded.cveIds
@@ -500,7 +512,11 @@ export async function generateThreatSummary(article, grounded) {
 
   const userContent =
     `Source: ${article.source}\nHeadline: ${article.title}\n` +
-    (article.summary ? `Summary: ${article.summary}\n` : "") +
+    (articleText
+      ? `Full Article Text (use this as your primary source -- extract every concrete technical detail, detection rule, query, and recommendation it contains):\n${articleText}\n`
+      : article.summary
+        ? `Summary (full article text was unavailable -- work only from this, and use "Not Reported"/[] for anything it doesn't cover): ${article.summary}\n`
+        : "") +
     (cveContext ? `Verified CVE data for this article (use this, don't restate or contradict it): ${cveContext}\n` : "") +
     `Overall severity already computed for this article: ${grounded.severity}\n` +
     `${buildTechniqueCandidatesBlock(candidateTechniques)}\n`;
@@ -516,8 +532,12 @@ export async function generateThreatSummary(article, grounded) {
     // live that Ollama's default context window is small enough to risk
     // silently truncating a response this size mid-generation, which then
     // fails JSON parsing entirely. Widened well past what this prompt +
-    // article + expected output should ever need.
-    options: { temperature: 0.2, num_ctx: 16384 },
+    // article + expected output should ever need. Raised again alongside
+    // the full-article-text fetch above (server/lib/articleText.js) -- the
+    // prompt now carries up to ~14,000 chars of article body on top of the
+    // schema instructions, so the old budget left too little room for a
+    // long, detail-rich completion.
+    options: { temperature: 0.2, num_ctx: 24576 },
   });
 
   const modelReport = parseModelReport(response.message?.content ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);
