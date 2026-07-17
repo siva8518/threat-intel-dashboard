@@ -9,7 +9,13 @@
 // a time on a slow cadence -- generating for the wrong scope or too
 // aggressively would repeat the exact "recomputing something expensive too
 // often" mistake already found and fixed in this app (see the news-tagging
-// cache fix in server/routes/dashboard.js).
+// cache fix in server/routes/dashboard.js). Also scoped to RECENCY_WINDOW_MS
+// below -- this used to strictly drain an ever-growing historical backlog by
+// severity, which on a slow CPU-only local model meant it was always
+// working through old ground instead of keeping current. Restricting to
+// freshly-published advisories means the job's job is now "keep up with
+// today," a much smaller and steadier workload than "eventually finish
+// months of backlog."
 import * as cache from "./cache.js";
 import { MAJOR_VENDOR_SOURCES } from "./connectors/newsFeeds.js";
 import { tagNewsItems } from "./newsCorrelation.js";
@@ -19,19 +25,17 @@ import { queryCves } from "./connectors/nvd.js";
 import { OllamaUnavailableError } from "./rag/ollamaClient.js";
 import { log } from "./lib/log.js";
 
-// Tuned up again to work through the ~400-article Critical/High/Medium
-// backlog faster (a separate attempt to also switch to a smaller/faster
-// model just for this job was reverted -- see server/rag/config.js -- it
-// caused Ollama to thrash swapping between two different loaded models on
-// this machine's tight free memory, net slower and less reliable than
-// before). Still safe against the overlapping-cycle risk seen elsewhere in
-// this app (GitHub Intel enrichment backfill): loop() is self-rescheduling
-// and always awaits the full batch before the CYCLE_INTERVAL_MS gap starts,
-// so a larger batch just makes one cycle take longer -- it never causes two
-// cycles to run concurrently. Each report still lands in the store
-// (addReport) as soon as it individually finishes, not only once the whole
-// batch completes, so raising BATCH_SIZE shortens time-to-first-report
-// within a cycle too.
+// A separate attempt to also switch to a smaller/faster model just for this
+// job was reverted -- see server/rag/config.js -- it caused Ollama to
+// thrash swapping between two different loaded models on this machine's
+// tight free memory, net slower and less reliable than before. Safe against
+// the overlapping-cycle risk seen elsewhere in this app (GitHub Intel
+// enrichment backfill): loop() is self-rescheduling and always awaits the
+// full batch before the CYCLE_INTERVAL_MS gap starts, so a larger batch
+// just makes one cycle take longer -- it never causes two cycles to run
+// concurrently. Each report still lands in the store (addReport) as soon as
+// it individually finishes, not only once the whole batch completes, so
+// raising BATCH_SIZE shortens time-to-first-report within a cycle too.
 const BATCH_SIZE = 5;
 const CYCLE_INTERVAL_MS = 2 * 60 * 1000; // 2 min
 
@@ -61,6 +65,23 @@ const RESERVED_SLOTS = { MEDIUM: 1, LOW: 1 };
 
 function isEligibleSource(source) {
   return MAJOR_VENDOR_SOURCES.has(source) || source.startsWith("CISA");
+}
+
+// Scoped to freshly-published advisories only -- previously this drained an
+// ever-growing historical backlog (~944 articles at one point, some weeks
+// old) strictly by severity, which meant a slow CPU-only local model was
+// always working through old ground instead of keeping up with what
+// vendors/CISA published today. An article older than this window is never
+// marked processed (same "deferred, not dropped" precedent as the Low-
+// severity widening above) -- it simply ages out of eligibility on its own
+// as `now` moves past its publish date, so nothing needs a destructive bulk
+// skip and a later change to this constant costs nothing. 48h (not 24h)
+// gives feeds a bit of slack for sync lag/timezone skew without pulling in
+// genuinely old ground.
+const RECENCY_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+function isRecent(publishedDate) {
+  return Date.now() - new Date(publishedDate).getTime() <= RECENCY_WINDOW_MS;
 }
 
 /**
@@ -119,7 +140,7 @@ async function enrichCveIds(cveIds, kevEntries, epssScores) {
 
 async function runCycle() {
   const newsItems = cache.getEntry("news").data?.items ?? [];
-  const candidates = newsItems.filter((item) => isEligibleSource(item.source) && !isArticleProcessed(item.link));
+  const candidates = newsItems.filter((item) => isEligibleSource(item.source) && isRecent(item.publishedDate) && !isArticleProcessed(item.link));
   if (candidates.length === 0) return;
 
   const attackData = cache.getEntry("attack").data;
