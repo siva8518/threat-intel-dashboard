@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { Skull } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { RankedBarChart } from "./RankedBarChart";
+import { TimeframeSelector } from "./TimeframeSelector";
 import { useThreatActors } from "@/hooks/useRansomware";
 import type { ThreatActor } from "@/types/threat-intel";
 
@@ -27,16 +29,17 @@ function typeLabel(type: ThreatActor["type"]): string {
 }
 
 /**
- * All-time (not "same calendar day") merged actor activity -- see
- * server/correlate.js#mergeThreatActors, ransomware.live victim posts + OTX
- * pulse "adversary" tags + threat-actor mentions automatically extracted from
- * news article text across every configured source. Deliberately not scoped
- * to today: a same-day leaderboard resets to empty at midnight UTC, which
- * made that version of this widget show "no activity" more often than real
- * data. This one is activity-to-date, so it's essentially never empty.
+ * Merged actor activity -- see server/correlate.js#mergeThreatActors,
+ * ransomware.live victim posts + OTX pulse "adversary" tags + threat-actor
+ * mentions automatically extracted from news article text across every
+ * configured source. Scoped by the timeframe selector below (default 30d,
+ * re-derived server-side from each source's own dated records -- see
+ * server/lib/dateWindow.js -- not a client-side filter over an all-time
+ * list), with an "All" option for full activity-to-date.
  */
 export function TopThreatActors({ onSelectActor }: TopThreatActorsProps) {
-  const { data, isLoading, isError } = useThreatActors();
+  const [days, setDays] = useState<number | null>(30);
+  const { data, isLoading, isError } = useThreatActors(days);
   const actors = (data ?? []).slice().sort((a, b) => b.campaignCount - a.campaignCount).slice(0, TOP_N);
 
   return (
@@ -46,6 +49,7 @@ export function TopThreatActors({ onSelectActor }: TopThreatActorsProps) {
           <Skull className="h-4 w-4 text-primary" />
           Top Threat Actors
         </CardTitle>
+        <TimeframeSelector value={days} onChange={setDays} />
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -53,7 +57,7 @@ export function TopThreatActors({ onSelectActor }: TopThreatActorsProps) {
         ) : isError ? (
           <ErrorState message="Top Threat Actors is unavailable right now." />
         ) : actors.length === 0 ? (
-          <EmptyState message="No ransomware, OTX pulse, or news-derived actor activity recorded yet." />
+          <EmptyState message={days ? `No ransomware, OTX pulse, or news-derived actor activity in the last ${days} days.` : "No ransomware, OTX pulse, or news-derived actor activity recorded yet."} />
         ) : (
           <RankedBarChart
             hue="#fb3f5e"

@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { RankedBarChart } from "./RankedBarChart";
+import { TimeframeSelector } from "./TimeframeSelector";
 import { useGithubIntelStats } from "@/hooks/useGithubIntel";
 import { useSelection } from "@/context/SelectionContext";
 import { fetchCveById } from "@/api/dashboardApi";
@@ -15,13 +16,14 @@ const TOP_N = 8;
  * write-ups, detection rules) plus how many news headlines across every
  * configured source name it -- see server/githubIntel/index.js#computeTopCves,
  * which merges both signals the same way server/correlate.js merges IOC- and
- * news-derived ATT&CK technique counts. Not scoped to "actor-attributed KEV
- * entries added in exactly the last 7 days" -- that narrower cut is
- * frequently empty; this combined activity accumulates continuously and is
- * almost never zero.
+ * news-derived ATT&CK technique counts. Scoped by the timeframe selector
+ * below (default 30d, repos re-dated by lastEnrichedAt/discoveredAt and news
+ * items by publishedDate server-side -- see server/lib/dateWindow.js), with
+ * an "All" option for full activity-to-date.
  */
 export function TopCves() {
-  const { data, isLoading, isError } = useGithubIntelStats();
+  const [days, setDays] = useState<number | null>(30);
+  const { data, isLoading, isError } = useGithubIntelStats(days);
   const { selectCve } = useSelection();
   const [loadingCveId, setLoadingCveId] = useState<string | null>(null);
 
@@ -45,6 +47,7 @@ export function TopCves() {
           <ShieldAlert className="h-4 w-4 text-primary" />
           Top CVEs
         </CardTitle>
+        <TimeframeSelector value={days} onChange={setDays} />
       </CardHeader>
       <CardContent>
         {isLoading || loadingCveId ? (
@@ -52,7 +55,7 @@ export function TopCves() {
         ) : isError ? (
           <ErrorState message="Top CVEs is unavailable right now." />
         ) : topCves.length === 0 ? (
-          <EmptyState message="No GitHub-tracked or news-mentioned CVE activity yet." />
+          <EmptyState message={days ? `No GitHub-tracked or news-mentioned CVE activity in the last ${days} days.` : "No GitHub-tracked or news-mentioned CVE activity yet."} />
         ) : (
           <RankedBarChart
             hue="#f7913d"

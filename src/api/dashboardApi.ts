@@ -152,8 +152,9 @@ export async function markAllFlashReportsRead(): Promise<{ ok: boolean }> {
   return fetchJson("/api/dashboard/flash-reports/read-all", { source: "Dashboard API", method: "POST" });
 }
 
-export async function fetchAttackTechniques(): Promise<AttackTechnique[]> {
-  return fetchJson("/api/dashboard/attack-techniques", { source: "Dashboard API" });
+export async function fetchAttackTechniques(days?: number | null): Promise<AttackTechnique[]> {
+  const qs = days ? `?days=${days}` : "";
+  return fetchJson(`/api/dashboard/attack-techniques${qs}`, { source: "Dashboard API" });
 }
 
 export async function fetchAttackTacticHeatmap(): Promise<AttackTacticHeatmapCell[]> {
@@ -164,8 +165,9 @@ export async function fetchRansomwareCampaigns(): Promise<{ campaigns: Ransomwar
   return fetchJson("/api/dashboard/ransomware", { source: "Dashboard API" });
 }
 
-export async function fetchThreatActors(): Promise<ThreatActor[]> {
-  return fetchJson("/api/dashboard/threat-actors", { source: "Dashboard API" });
+export async function fetchThreatActors(days?: number | null): Promise<ThreatActor[]> {
+  const qs = days ? `?days=${days}` : "";
+  return fetchJson(`/api/dashboard/threat-actors${qs}`, { source: "Dashboard API" });
 }
 
 export async function fetchNews(): Promise<{ items: NewsItem[] }> {
@@ -287,8 +289,9 @@ export async function fetchGithubIntelList(params: GithubIntelListParams = {}): 
   return fetchJson(`/api/dashboard/github-intel${query ? `?${query}` : ""}`, { source: "Dashboard API" });
 }
 
-export async function fetchGithubIntelStats(): Promise<GithubIntelStats> {
-  return fetchJson("/api/dashboard/github-intel/stats", { source: "Dashboard API" });
+export async function fetchGithubIntelStats(days?: number | null): Promise<GithubIntelStats> {
+  const qs = days ? `?days=${days}` : "";
+  return fetchJson(`/api/dashboard/github-intel/stats${qs}`, { source: "Dashboard API" });
 }
 
 export async function fetchGithubRepoDetail(fullName: string): Promise<GithubRepoDetail> {

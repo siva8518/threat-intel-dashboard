@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { withinDays } from "./lib/dateWindow.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STORE_DIR = path.join(__dirname, ".cache");
@@ -58,6 +59,23 @@ export function upsertMention(techniqueId, article) {
 /** Map<techniqueId, count> -- the shape server/correlate.js's aggregation functions merge in alongside IOC-derived counts. */
 export function getNewsTechniqueCounts() {
   return new Map(Object.entries(state.mentions).map(([id, entry]) => [id, entry.count]));
+}
+
+/**
+ * Same idea as getNewsTechniqueCounts(), but each technique's count is
+ * recomputed from its own cached recent-articles list (see upsertMention's
+ * `articles`, capped at MAX_ARTICLES_PER_TECHNIQUE) restricted to the given
+ * day window, instead of the persisted all-time running count -- powers Top
+ * MITRE Techniques' timeframe selector.
+ */
+export function getNewsTechniqueCountsWindowed(days) {
+  if (!days) return getNewsTechniqueCounts();
+  const counts = new Map();
+  for (const [id, entry] of Object.entries(state.mentions)) {
+    const count = entry.articles.filter((a) => withinDays(a.publishedDate, days)).length;
+    if (count > 0) counts.set(id, count);
+  }
+  return counts;
 }
 
 export function getArticlesForTechnique(techniqueId) {

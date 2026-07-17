@@ -1,15 +1,28 @@
+import { useState } from "react";
 import { Radar } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { RankedBarChart } from "./RankedBarChart";
+import { TimeframeSelector } from "./TimeframeSelector";
 import { useAttackTechniques } from "@/hooks/useAttackTechniques";
 
 const TOP_N = 8;
 
-/** MITRE ATT&CK techniques currently observed, derived from malware families in the live threat feed cross-referenced against a curated malware-to-technique map -- see server/correlate.js#computeAttackTechniquesObserved. Best-effort approximation, not live telemetry. Clicking a bar opens that technique's MITRE ATT&CK page. */
+/**
+ * MITRE ATT&CK techniques currently observed, derived from malware families
+ * in the live threat feed cross-referenced against a curated
+ * malware-to-technique map, plus news-derived technique mentions -- see
+ * server/correlate.js#computeAttackTechniquesObserved. Best-effort
+ * approximation, not live telemetry. Scoped by the timeframe selector below
+ * (default 30d, IOCs re-dated by firstSeen and news mentions by their own
+ * cached article dates server-side -- see server/lib/dateWindow.js), with an
+ * "All" option for full activity-to-date. Clicking a bar opens that
+ * technique's MITRE ATT&CK page.
+ */
 export function TopMitreTechniques() {
-  const { data, isLoading, isError } = useAttackTechniques();
+  const [days, setDays] = useState<number | null>(30);
+  const { data, isLoading, isError } = useAttackTechniques(days);
   const entries = (data ?? []).slice(0, TOP_N);
 
   return (
@@ -19,6 +32,7 @@ export function TopMitreTechniques() {
           <Radar className="h-4 w-4 text-primary" />
           Top MITRE Techniques
         </CardTitle>
+        <TimeframeSelector value={days} onChange={setDays} />
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -26,7 +40,7 @@ export function TopMitreTechniques() {
         ) : isError ? (
           <ErrorState message="Top MITRE Techniques is unavailable right now." />
         ) : entries.length === 0 ? (
-          <EmptyState message="No techniques currently observed in the live feed." />
+          <EmptyState message={days ? `No techniques observed in the live feed in the last ${days} days.` : "No techniques currently observed in the live feed."} />
         ) : (
           <RankedBarChart
             hue="#a855f7"

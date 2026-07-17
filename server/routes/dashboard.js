@@ -36,9 +36,10 @@ import { recordAndGetSourceHistory, computeReliability } from "../sourceReliabil
 import { recordAndGetPriorSnapshot } from "../malwareTrendHistory.js";
 import { recordAndGetScoreHistory } from "../threatScoreHistory.js";
 import { getAllEntities as getMalwareIntelligenceEntities } from "../malwareIntelligence.js";
-import { getAllEntities as getThreatActorIntelligenceEntities } from "../threatActorIntelligence.js";
+import { getAllEntities as getThreatActorIntelligenceEntities, getAllEntitiesWindowed as getThreatActorIntelligenceEntitiesWindowed } from "../threatActorIntelligence.js";
 import { getAllEntities as getCampaignIntelligenceEntities } from "../campaignIntelligence.js";
-import { getNewsTechniqueCounts } from "../attackTechniqueIntelligence.js";
+import { getNewsTechniqueCounts, getNewsTechniqueCountsWindowed } from "../attackTechniqueIntelligence.js";
+import { withinDays } from "../lib/dateWindow.js";
 import { getAllEntities as getDarkWebIntelligenceEntities } from "../darkWebIntelligence.js";
 import { getKeywords, addKeyword, removeKeyword, getFlashReports, getUnreadCount, markRead, markAllRead } from "../watchlist.js";
 import { getAllReports as getAllAiThreatSummaries, getReportById as getAiThreatSummaryById } from "../aiThreatSummaryStore.js";
@@ -468,9 +469,17 @@ router.post("/dashboard/flash-reports/read-all", (_req, res) => {
   res.json({ ok: true });
 });
 
-router.get("/dashboard/attack-techniques", (_req, res) => {
+router.get("/dashboard/attack-techniques", (req, res) => {
+  // ?days=N powers Top MITRE Techniques' timeframe selector -- both the IOC-
+  // and news-derived signals are re-derived from their own dated records
+  // within the window (see server/lib/dateWindow.js), not just filtered
+  // after the fact, so a technique's count genuinely reflects that window's
+  // activity. Omitted/invalid -> all-time, unchanged from before.
+  const days = req.query.days ? Number(req.query.days) : null;
   const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
-  res.json(computeAttackTechniquesObserved(threatFeedIocs(), attackIndex, getNewsTechniqueCounts()));
+  const iocs = threatFeedIocs().filter((ioc) => withinDays(ioc.firstSeen, days));
+  const newsTechniqueCounts = days ? getNewsTechniqueCountsWindowed(days) : getNewsTechniqueCounts();
+  res.json(computeAttackTechniquesObserved(iocs, attackIndex, newsTechniqueCounts));
 });
 
 // --- ATT&CK Tactic Heat Map (see server/correlate.js#computeAttackTacticHeatmap) ---
@@ -492,9 +501,18 @@ router.get("/dashboard/ransomware", (_req, res) => {
   res.json({ campaigns });
 });
 
-router.get("/dashboard/threat-actors", (_req, res) => {
-  const otxSignals = cache.getEntry("otx").data?.actorSignals ?? [];
-  res.json(mergeThreatActors(getRansomwareCampaigns(), otxSignals, getThreatActorIntelligenceEntities()).slice(0, 30));
+router.get("/dashboard/threat-actors", (req, res) => {
+  // ?days=N powers Top Threat Actors' timeframe selector -- ransomware
+  // campaigns, OTX pulses, and news-derived mentions are each filtered/
+  // re-derived from their own dated records within the window (see
+  // server/lib/dateWindow.js) before merging, so campaignCount genuinely
+  // reflects that window's activity, not an all-time total with some rows
+  // hidden. Omitted/invalid -> all-time, unchanged from before.
+  const days = req.query.days ? Number(req.query.days) : null;
+  const otxSignals = (cache.getEntry("otx").data?.actorSignals ?? []).filter((s) => withinDays(s.date, days));
+  const campaigns = getRansomwareCampaigns().filter((c) => withinDays(c.discoveredDate, days));
+  const newsActorEntities = days ? getThreatActorIntelligenceEntitiesWindowed(days) : getThreatActorIntelligenceEntities();
+  res.json(mergeThreatActors(campaigns, otxSignals, newsActorEntities).slice(0, 30));
 });
 
 // --- Threat Actor Profiles (primary source: MITRE ATT&CK Groups) --------
@@ -610,7 +628,7 @@ router.get("/dashboard/threat-timeline", (req, res) => {
 });
 
 // --- GitHub Intel (repo discovery, classification, extraction, correlation, scoring) ---
-router.get("/dashboard/github-intel/stats", (_req, res) => {
+router.get("/dashboard/github-intel/stats", (req, res) => {
   const repos = getAllGithubRepos();
   const enriched = repos.filter((r) => r.lastEnrichedAt);
 
@@ -619,7 +637,18 @@ router.get("/dashboard/github-intel/stats", (_req, res) => {
     for (const c of repo.categories ?? []) categoryCounts[c.category] = (categoryCounts[c.category] ?? 0) + 1;
   }
 
-  const topCves = computeTopCves(repos, 10, getNewsCveCounts(cache.getEntry("news").data?.items));
+  // ?days=N powers Top CVEs' timeframe selector -- only topCves is windowed
+  // (repos re-dated by lastEnrichedAt/discoveredAt, news items by
+  // publishedDate, see server/lib/dateWindow.js), everything else on this
+  // route stays all-time since GithubIntel.tsx's own overall repo stats
+  // (totalRepos/categoryCounts/etc) call this same route with no `days` and
+  // shouldn't shrink just because the Overview widget picked a shorter window.
+  const days = req.query.days ? Number(req.query.days) : null;
+  const windowedRepos = days ? repos.filter((r) => withinDays(r.lastEnrichedAt ?? r.discoveredAt, days)) : repos;
+  const windowedNewsItems = days
+    ? (cache.getEntry("news").data?.items ?? []).filter((item) => withinDays(item.publishedDate, days))
+    : cache.getEntry("news").data?.items;
+  const topCves = computeTopCves(windowedRepos, 10, getNewsCveCounts(windowedNewsItems));
 
   res.json({
     totalRepos: repos.length,

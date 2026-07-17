@@ -15,11 +15,15 @@ export function useRansomwareCampaigns() {
   return { campaigns: query.data?.campaigns ?? [], isLoading: query.isLoading, isError: query.isError };
 }
 
-/** Ransomware groups + OTX pulse "adversary" tags merged into one activity list. */
-export function useThreatActors() {
+/**
+ * Ransomware groups + OTX pulse "adversary" tags + news-derived actor
+ * mentions merged into one activity list. `days` (null = all-time) scopes
+ * every source to that window server-side -- see server/lib/dateWindow.js.
+ */
+export function useThreatActors(days: number | null = null) {
   return useQuery({
-    queryKey: queryKeys.threatActors,
-    queryFn: fetchThreatActors,
+    queryKey: queryKeys.threatActors(days),
+    queryFn: () => fetchThreatActors(days),
     staleTime: STALE_TIME_MS,
     refetchInterval: AUTO_REFRESH_MS,
     retry: 1,

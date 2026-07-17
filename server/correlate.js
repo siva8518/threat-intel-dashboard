@@ -249,7 +249,19 @@ export function mergeThreatActors(ransomwareCampaigns, otxActorSignals, newsActo
   for (const signal of otxActorSignals ?? []) upsert(signal.name, "otx-tagged", signal.date, 1);
   for (const entity of newsActorEntities) upsert(entity.name, entity.type, entity.lastSeen, entity.mentionCount);
 
-  return Array.from(byGroup.values()).sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
+  // Sorted by campaignCount (real cross-source activity volume), not
+  // lastActivity -- confirmed live that sorting by recency instead made
+  // "Most Active Threat Actor" (server/executiveSummary.js, which just takes
+  // this array's first element) pick whichever actor happened to get the
+  // single most recent post, almost always a ransomware.live entry since
+  // that source updates far more frequently than OTX pulses or news
+  // extraction. An actor with one brand-new ransomware post beat one with 50
+  // ongoing news mentions from yesterday. TopThreatActors.tsx already
+  // independently re-sorts by campaignCount client-side for this exact
+  // reason -- sorting here the same way means every consumer of this
+  // function (both the widget and the executive summary fact) agrees on
+  // what "most active" actually means.
+  return Array.from(byGroup.values()).sort((a, b) => b.campaignCount - a.campaignCount);
 }
 
 /**

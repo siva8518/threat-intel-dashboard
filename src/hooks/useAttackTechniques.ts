@@ -9,10 +9,10 @@ import { queryKeys } from "./queryKeys";
  * malware->technique map (server/data/malware-attack-map.json) -- a
  * best-effort approximation, not live telemetry (no free source provides that).
  */
-export function useAttackTechniques() {
+export function useAttackTechniques(days: number | null = null) {
   return useQuery({
-    queryKey: queryKeys.attackTechniques,
-    queryFn: fetchAttackTechniques,
+    queryKey: queryKeys.attackTechniques(days),
+    queryFn: () => fetchAttackTechniques(days),
     staleTime: STALE_TIME_MS,
     refetchInterval: AUTO_REFRESH_MS,
     retry: 1,

@@ -14,10 +14,11 @@ export function useGithubIntelList(params: GithubIntelListParams) {
   });
 }
 
-export function useGithubIntelStats() {
+/** `days` (null = all-time) scopes only the topCves portion of this response -- see server/routes/dashboard.js's /github-intel/stats handler. */
+export function useGithubIntelStats(days: number | null = null) {
   return useQuery({
-    queryKey: queryKeys.githubIntelStats,
-    queryFn: fetchGithubIntelStats,
+    queryKey: queryKeys.githubIntelStats(days),
+    queryFn: () => fetchGithubIntelStats(days),
     staleTime: STALE_TIME_MS,
     refetchInterval: AUTO_REFRESH_MS,
     retry: 1,

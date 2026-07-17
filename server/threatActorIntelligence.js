@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { industryForSector } from "./correlate.js";
 import { matchCveIds, matchIndustries, matchCountries } from "./newsCorrelation.js";
 import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
+import { withinDays } from "./lib/dateWindow.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STORE_DIR = path.join(__dirname, ".cache");
@@ -295,6 +296,27 @@ export function getAllEntities() {
     if (a.verified !== b.verified) return a.verified ? -1 : 1;
     return new Date(b.lastSeen) - new Date(a.lastSeen);
   });
+}
+
+/**
+ * Same records as getAllEntities(), but mentionCount/lastSeen are recomputed
+ * from this entity's own cached recent-articles list (see upsertMention's
+ * `articles`, capped at MAX_ARTICLES_PER_ENTITY) restricted to the given day
+ * window, instead of the persisted all-time running totals -- powers Top
+ * Threat Actors' timeframe selector. An entity with zero articles inside the
+ * window is dropped entirely (no activity in that window, all-time totals
+ * aside), same "hide, don't zero-fill" convention the rest of this app uses.
+ */
+export function getAllEntitiesWindowed(days) {
+  if (!days) return getAllEntities();
+  const windowed = [];
+  for (const entity of state.entities) {
+    const articlesInWindow = entity.articles.filter((a) => withinDays(a.publishedDate, days));
+    if (articlesInWindow.length === 0) continue;
+    const lastSeen = articlesInWindow.reduce((latest, a) => (new Date(a.publishedDate) > new Date(latest) ? a.publishedDate : latest), articlesInWindow[0].publishedDate);
+    windowed.push({ ...entity, mentionCount: articlesInWindow.length, lastSeen });
+  }
+  return windowed.sort((a, b) => new Date(b.lastSeen) - new Date(a.lastSeen));
 }
 
 export function saveAfterMentions() {
