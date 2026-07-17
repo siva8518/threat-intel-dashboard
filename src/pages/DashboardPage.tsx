@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Bot, BrainCircuit, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi, Wrench } from "lucide-react";
+import { Bot, BrainCircuit, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { TriageConsole } from "@/components/dashboard/TriageConsole";
-import { RemediationTracker } from "@/components/dashboard/RemediationTracker";
+import { CveHub } from "@/components/dashboard/CveHub";
 import { HuntingDetectionHub } from "@/components/dashboard/HuntingDetectionHub";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
 import { WorldThreatMap } from "@/components/dashboard/WorldThreatMap";
@@ -14,10 +14,6 @@ import { ThreatScoreTrend } from "@/components/dashboard/ThreatScoreTrend";
 import { CampaignVolumeTrend } from "@/components/dashboard/CampaignVolumeTrend";
 import { TopThreatActors } from "@/components/dashboard/TopThreatActors";
 import { TopCves } from "@/components/dashboard/TopCves";
-import { CveStatsHeader } from "@/components/dashboard/CveStatsHeader";
-import { CveTable } from "@/components/dashboard/CveTable";
-import { CveProgramActivity } from "@/components/dashboard/CveProgramActivity";
-import { ExploitIntelligence } from "@/components/dashboard/ExploitIntelligence";
 import { CorrelationEngine } from "@/components/dashboard/CorrelationEngine";
 import { AttackTechniques } from "@/components/dashboard/AttackTechniques";
 import { AttackTacticHeatmap } from "@/components/dashboard/AttackTacticHeatmap";
@@ -44,7 +40,6 @@ const TABS = [
   { id: "triage", label: "Triage Console", icon: Siren },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "cves", label: "Latest CVEs", icon: ShieldAlert },
-  { id: "remediation-tracker", label: "Remediation Tracker", icon: Wrench },
   { id: "correlation-engine", label: "Correlation Engine", icon: Network },
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },
   { id: "threat-actors", label: "Ransomware Data", icon: Skull },
@@ -162,17 +157,7 @@ export function DashboardPage() {
           <TopMitreTechniques />
         </div>
       )}
-      {activeTab === "cves" && (
-        <>
-          <CveStatsHeader />
-          <CveTable initialSeverity={cveSeverityFilter} />
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <CveProgramActivity />
-            <ExploitIntelligence />
-          </div>
-        </>
-      )}
-      {activeTab === "remediation-tracker" && <RemediationTracker />}
+      {activeTab === "cves" && <CveHub initialSeverity={cveSeverityFilter} />}
       {activeTab === "correlation-engine" && <CorrelationEngine />}
       {activeTab === "attack-techniques" && (
         <>

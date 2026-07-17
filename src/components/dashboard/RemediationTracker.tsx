@@ -100,7 +100,7 @@ export function RemediationTracker() {
     <Card>
       <CardHeader className="flex-col items-start gap-3 md:flex-row md:items-center">
         <div>
-          <CardTitle className="text-base font-semibold text-foreground">Remediation Tracker</CardTitle>
+          <CardTitle className="text-base font-semibold text-foreground">Vulnerabilities Remediation Tracker</CardTitle>
           <p className="mt-1 text-xs text-muted">
             The same CVEs Latest CVEs shows, ranked by a transparent urgency score (KEV + EPSS + CVSS) instead of publish date -- so Vulnerability
             Management gets a prioritized patch queue, not a flat list, and can track what's actually been remediated.
@@ -130,7 +130,7 @@ export function RemediationTracker() {
             ))}
           </div>
         ) : isError ? (
-          <ErrorState message={(error as Error)?.message ?? "The Remediation Tracker is unavailable right now."} />
+          <ErrorState message={(error as Error)?.message ?? "The Vulnerabilities Remediation Tracker is unavailable right now."} />
         ) : !ready ? (
           <EmptyState message="NVD data is still syncing -- check back shortly." />
         ) : filtered.length === 0 ? (
