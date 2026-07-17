@@ -27,3 +27,6 @@ server/githubIntel/.cache
 
 # AI Daily Brief: rolling daily malware-trend snapshots -- see server/malwareTrendHistory.js
 server/.cache
+
+# scripts/restart-backend.ps1's own rolling output -- timestamped per run, pruned to 7 days by the script itself
+logs/
