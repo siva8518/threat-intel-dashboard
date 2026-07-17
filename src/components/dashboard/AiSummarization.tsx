@@ -161,6 +161,15 @@ function IocRow({ label, values }: { label: string; values: string[] }) {
 function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryReport; expanded: boolean; onToggle: () => void }) {
   const kevCount = report.cves.filter((c) => c.knownExploited).length;
   const totalIocs = report.iocs.ipAddresses.length + report.iocs.domains.length + report.iocs.urls.length + report.iocs.hashes.length + report.iocs.emailAddresses.length;
+  // "Not Reported" is the model's explicit "the article names nothing here"
+  // placeholder (see the "never invent facts" grounding in
+  // server/aiThreatSummary.js), not a real actor/malware name -- confirmed
+  // live it was rendering as its own card, indistinguishable from a genuine
+  // one, whenever an article discussed a CVE/technique without naming an
+  // actor or malware family. Same fix already applied to the Hunting Query
+  // Library's aggregation (server/huntingLibrary.js).
+  const namedThreatActors = report.threatActors.filter((a) => a.group !== "Not Reported");
+  const namedMalware = report.malware.filter((m) => m.family !== "Not Reported");
 
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
@@ -313,10 +322,10 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             </Section>
           )}
 
-          {report.threatActors.length > 0 && (
+          {namedThreatActors.length > 0 && (
             <Section title="Threat Actors">
               <div className="space-y-2">
-                {report.threatActors.map((a, i) => (
+                {namedThreatActors.map((a, i) => (
                   <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs">
                     <div className="font-semibold text-foreground">
                       {a.group}
@@ -334,10 +343,10 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             </Section>
           )}
 
-          {report.malware.length > 0 && (
+          {namedMalware.length > 0 && (
             <Section title="Malware">
               <div className="space-y-2">
-                {report.malware.map((m, i) => (
+                {namedMalware.map((m, i) => (
                   <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs">
                     <div className="font-semibold text-foreground">{m.family}</div>
                     <div className="mt-1 space-y-0.5 text-muted">
