@@ -455,8 +455,37 @@ const ITEMS_PER_SOURCE = 40;
 // at all; "now" is now only reached for a genuinely unrecognized format.
 const TIMEZONE_OFFSETS = { CEST: "+0200", CET: "+0100", EEST: "+0300", EET: "+0200", BST: "+0100" };
 
+// Bitsight's <pubDate> isn't RFC 822 at all -- its CMS stamps each post in
+// whatever locale that post was authored/translated in, so the *same feed*
+// mixes formats: "Thu, 07/16/2026 - 07:25" (US slash-date) for most posts,
+// but "Mo., 29.06.2026 - 08:57" (German dot-date, DD.MM.YYYY) for at least
+// one. `new Date()` can't parse either, so every affected article was
+// silently falling back to "now" below -- confirmed live this is exactly why
+// a real June 24 article ("bitsight-aids-disruption-efforts-on-amadey-
+// malware...") kept showing up under a "today" date filter: it got re-
+// stamped as the current sync time on every 15-min cycle instead of ever
+// showing its real, months-old date. A live audit of all ~165 feeds found
+// Bitsight was the only one silently collapsing to "now" this way. Both
+// known variants are converted to a parseable ISO-ish string before the
+// generic fallback below ever runs; a still-unrecognized format keeps
+// falling back to "now" same as before, rather than throwing.
+const SLASH_DASH_DATE = /(\d{2})\/(\d{2})\/(\d{4})\s*-\s*(\d{2}):(\d{2})/; // MM/DD/YYYY - HH:MM
+const DOT_DASH_DATE = /(\d{2})\.(\d{2})\.(\d{4})\s*-\s*(\d{2}):(\d{2})/; // DD.MM.YYYY - HH:MM
+
 function parseDate(pubDate) {
   if (!pubDate) return new Date();
+  const slashMatch = pubDate.match(SLASH_DASH_DATE);
+  if (slashMatch) {
+    const [, mm, dd, yyyy, hh, min] = slashMatch;
+    const parsed = new Date(`${yyyy}-${mm}-${dd}T${hh}:${min}:00Z`);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  const dotMatch = pubDate.match(DOT_DASH_DATE);
+  if (dotMatch) {
+    const [, dd, mm, yyyy, hh, min] = dotMatch;
+    const parsed = new Date(`${yyyy}-${mm}-${dd}T${hh}:${min}:00Z`);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
   const abbrMatch = pubDate.match(/ ([A-Z]{2,4})$/);
   const normalized = abbrMatch && TIMEZONE_OFFSETS[abbrMatch[1]] ? pubDate.slice(0, -abbrMatch[1].length) + TIMEZONE_OFFSETS[abbrMatch[1]] : pubDate;
   const parsed = new Date(normalized);
@@ -537,6 +566,30 @@ export default {
         };
       }
     });
+
+    // A systemic failure (network down, DNS not yet resolved, the machine
+    // just woke from sleep before connectivity came back -- confirmed live:
+    // every one of ~165 feeds failed in the same instant right after a
+    // sleep/wake gap) looks identical, per-feed, to an ordinary isolated
+    // feed blip. The per-feed grace period above (OFFLINE_AFTER_CONSECUTIVE_
+    // FAILURES) is deliberately lenient about a single blip so one flaky
+    // feed doesn't page anyone -- but that leniency backfires when literally
+    // every feed among ~165 independent, geographically-diverse publishers
+    // fails in the same cycle: each one's *first* failure this session still
+    // reads as "ok" individually, so health showed "163/165 online" while
+    // this synced and cached zero items -- exactly what made "Security News
+    // is not loading" silently persist for a full cycle with no visible
+    // error. Throwing here instead of returning `{ items: [], sources }`
+    // routes this through the scheduler's normal retry + graceful-
+    // degradation path (server/scheduler.js -> cache.setError, same as
+    // every other connector): it retries almost immediately, and if the
+    // outage is still ongoing, keeps serving the last-known-good cached
+    // items/sources rather than overwriting good data with an empty result.
+    // ~165 diverse feeds legitimately producing zero combined items is not a
+    // real scenario, so this has no meaningful false-positive risk.
+    if (items.length === 0 && FEEDS.length > 0) {
+      throw new Error(`news sync produced zero items across all ${FEEDS.length} feeds -- treating as a systemic failure, not genuine "no news"`);
+    }
 
     items.sort((a, b) => new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime());
     return { items, sources };

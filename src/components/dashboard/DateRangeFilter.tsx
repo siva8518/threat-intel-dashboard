@@ -10,11 +10,39 @@ export interface DateRange {
 
 export const EMPTY_DATE_RANGE: DateRange = { from: "", to: "" };
 
-/** True if `iso` (any ISO datetime/date string) falls within `range`, inclusive on both ends. An empty `from`/`to` leaves that side unbounded. */
+function localIsoDate(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** Today's date as the browser's local calendar day -- same format `<input type="date">` uses, so callers can compare against it directly (e.g. to label a range as "today"). */
+export function todayLocalIsoDate(): string {
+  return localIsoDate(new Date());
+}
+
+/**
+ * True if `iso` (any ISO datetime/date string) falls within `range`,
+ * inclusive on both ends. An empty `from`/`to` leaves that side unbounded.
+ *
+ * Compares by the item's *local* calendar day, not a raw UTC slice of the
+ * ISO string -- `<input type="date">` produces local-timezone dates (e.g.
+ * clicking "today" gives the browser's local today), but every item's
+ * `publishedDate` is stored in UTC. Confirmed live for a user in UTC+5:30:
+ * an article published at 00:15 local time is already "yesterday" in UTC
+ * (18:45 the prior day), so the old `iso.slice(0, 10)` comparison excluded
+ * genuinely-today articles from a "today" filter -- and could just as
+ * easily include a late-UTC-evening article a local user wouldn't consider
+ * "today" yet. Converting to a real `Date` and reading local
+ * year/month/day fixes both directions.
+ */
 export function isWithinDateRange(iso: string | null | undefined, range: DateRange) {
   if (!iso) return false;
   if (!range.from && !range.to) return true;
-  const day = iso.slice(0, 10);
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return false;
+  const day = localIsoDate(date);
   if (range.from && day < range.from) return false;
   if (range.to && day > range.to) return false;
   return true;

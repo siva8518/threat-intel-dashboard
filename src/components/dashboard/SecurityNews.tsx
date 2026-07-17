@@ -6,7 +6,7 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { SEVERITY_STYLE } from "./BreakingNewsStrip";
-import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
+import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, todayLocalIsoDate, type DateRange } from "./DateRangeFilter";
 import { useSecurityNews } from "@/hooks/useSecurityNews";
 import { useSelection } from "@/context/SelectionContext";
 import { fetchCveById } from "@/api/dashboardApi";
@@ -93,6 +93,22 @@ const MAJOR_VENDOR_SOURCES = new Set([
   "Cato Networks",
 ]);
 const MAJOR_VENDORS_FILTER = "__major-vendors__";
+
+function formatDateLabel(dateStr: string) {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Describes the active date filter in words, so the match count below reads "X articles today" instead of a bare number the user has to cross-reference against the calendar inputs themselves. */
+function dateRangeLabel(range: DateRange): string | null {
+  if (!range.from && !range.to) return null;
+  const today = todayLocalIsoDate();
+  if (range.from && range.to && range.from === range.to) {
+    return range.from === today ? "today" : `on ${formatDateLabel(range.from)}`;
+  }
+  if (range.from && range.to) return `from ${formatDateLabel(range.from)} to ${formatDateLabel(range.to)}`;
+  if (range.from) return `since ${formatDateLabel(range.from)}`;
+  return `through ${formatDateLabel(range.to)}`;
+}
 
 function timeAgo(iso: string) {
   const ms = Date.now() - new Date(iso).getTime();
@@ -255,6 +271,13 @@ export function SecurityNews() {
           </div>
         </CardHeader>
         <CardContent>
+          <p className="mb-3 text-xs text-muted" aria-live="polite">
+            <span className="font-semibold text-foreground">{sourceFiltered.length.toLocaleString()}</span>{" "}
+            article{sourceFiltered.length === 1 ? "" : "s"}
+            {dateRangeLabel(dateRange) ? ` ${dateRangeLabel(dateRange)}` : ""}
+            {severityFilter !== "all" ? ` · ${SEVERITY_FILTER_LABEL[severityFilter]}` : ""}
+            {sourceFilter !== "ALL" ? ` · ${sourceFilter === MAJOR_VENDORS_FILTER ? "Major Vendors" : sourceFilter}` : ""}
+          </p>
           <div className="mb-3 flex flex-wrap gap-1.5">
             {SEVERITY_FILTERS.map((s) => (
               <button
