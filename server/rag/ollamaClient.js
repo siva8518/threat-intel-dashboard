@@ -11,26 +11,67 @@ export class OllamaUnavailableError extends Error {
   }
 }
 
+// fetch() here previously had no timeout at all -- confirmed live that a
+// model wedged in Ollama's own "Stopping..." unload deadlock (recurs on
+// this machine every so often, a bug in Ollama itself, not this app) hung
+// an in-flight request forever with no error and no response. Both
+// server/aiThreatSummaryJob.js and server/combinedExtractionJob.js are
+// self-rescheduling only after their current cycle settles (to guarantee
+// exactly one cycle in flight at a time -- see their own loop() comments),
+// so an unbounded hang here didn't just fail one request, it permanently
+// froze the entire job loop with zero log output until someone noticed
+// hours later and restarted Ollama by hand. Aborting after this long
+// converts that silent freeze back into the OllamaUnavailableError path
+// every caller (both jobs, the chat route) already handles: dedup-logged
+// once, cycle retried next interval.
+const REQUEST_TIMEOUT_MS = 120_000;
+
+function createTimeoutController(ms) {
+  const controller = new AbortController();
+  let timer = setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    // Called after each chunk of a streamed response arrives, so a
+    // slow-but-actively-generating reply isn't cut off mid-stream -- only a
+    // genuine stall (no bytes at all for the full window, including the
+    // wait for the very first byte) trips the abort.
+    poke() {
+      clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(), ms);
+    },
+    clear() {
+      clearTimeout(timer);
+    },
+  };
+}
+
 async function request(path, body) {
+  const timeout = createTimeoutController(REQUEST_TIMEOUT_MS);
   let response;
   try {
     response = await fetch(`${OLLAMA_BASE_URL}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: timeout.signal,
     });
   } catch (error) {
-    // ECONNREFUSED (Ollama not running) and DNS failures both land here --
-    // this is the "quiet not-configured" case, same shape as every optional
-    // keyed connector in this app when its env var is absent.
-    throw new OllamaUnavailableError(error.message);
+    timeout.clear();
+    // ECONNREFUSED (Ollama not running) and DNS failures both land here,
+    // same as an aborted-for-timeout request -- all three mean "Ollama
+    // isn't usable right now," the "quiet not-configured" case, same shape
+    // as every optional keyed connector in this app when its env var is
+    // absent.
+    const detail = error.name === "AbortError" ? `no response within ${REQUEST_TIMEOUT_MS / 1000}s -- Ollama may be stuck` : error.message;
+    throw new OllamaUnavailableError(detail);
   }
 
   if (!response.ok) {
+    timeout.clear();
     const detail = await response.text().catch(() => response.statusText);
     throw new Error(`Ollama ${path} responded with ${response.status}: ${detail}`);
   }
-  return response;
+  return { response, timeout };
 }
 
 /**
@@ -43,28 +84,43 @@ async function request(path, body) {
  * to remember that per-endpoint default themselves.
  */
 export async function ollamaJson(path, body) {
-  const response = await request(path, { ...body, stream: false });
-  return response.json();
+  const { response, timeout } = await request(path, { ...body, stream: false });
+  try {
+    return await response.json();
+  } catch (error) {
+    if (error.name === "AbortError") throw new OllamaUnavailableError(`no response within ${REQUEST_TIMEOUT_MS / 1000}s -- Ollama may be stuck`);
+    throw error;
+  } finally {
+    timeout.clear();
+  }
 }
 
 /** Streaming call -- Ollama's own stream format is NDJSON (one JSON object per line), not SSE. */
 export async function ollamaStream(path, body, onLine) {
-  const response = await request(path, { ...body, stream: true });
+  const { response, timeout } = await request(path, { ...body, stream: true });
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      timeout.poke();
+      buffer += decoder.decode(value, { stream: true });
 
-    let newlineIndex;
-    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-      const line = buffer.slice(0, newlineIndex).trim();
-      buffer = buffer.slice(newlineIndex + 1);
-      if (line) onLine(JSON.parse(line));
+      let newlineIndex;
+      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line) onLine(JSON.parse(line));
+      }
     }
+  } catch (error) {
+    if (error.name === "AbortError") throw new OllamaUnavailableError(`stream stalled with no data for ${REQUEST_TIMEOUT_MS / 1000}s -- Ollama may be stuck`);
+    throw error;
+  } finally {
+    timeout.clear();
   }
 }
 
