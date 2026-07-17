@@ -11,6 +11,7 @@ import { useIocSearch } from "@/hooks/useIocSearch";
 import { useMalwareIntelligence } from "@/hooks/useMalwareIntelligence";
 import { useThreatActorIntelligence } from "@/hooks/useThreatActorIntelligence";
 import { useCampaignIntelligence } from "@/hooks/useCampaignIntelligence";
+import { useThreatActors } from "@/hooks/useRansomware";
 import { fetchCveById } from "@/api/dashboardApi";
 import { virusTotalLookupUrl } from "@/lib/vtLookup";
 import type {
@@ -20,6 +21,7 @@ import type {
   MalwareIntelligenceEntity,
   ThreatActorIntelligenceEntity,
   CampaignIntelligenceEntity,
+  ThreatActor,
 } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
@@ -84,6 +86,17 @@ const IOC_VERDICT: Record<IocSearchResult["correlatedVerdict"], Verdict> = {
   clean: { level: "low", label: "Clean", action: "No malicious signal found across configured sources — likely benign, but confirm against the original alert context." },
   unknown: { level: "unknown", label: "No data", action: "No configured source has data on this indicator — treat per your SOC's baseline for unknowns, or add more IOC Search API keys." },
 };
+
+/**
+ * Label for the source/type of a merged (ransomware.live/OTX) actor entry --
+ * same helper as TopThreatActors.tsx#typeLabel, duplicated locally rather
+ * than shared since it's a tiny, self-contained formatter.
+ */
+function typeLabel(type: ThreatActor["type"]): string {
+  if (type === "ransomware") return "Ransomware group";
+  if (type === "otx-tagged") return "OTX-tagged actor";
+  return `${type} (news-tracked)`;
+}
 
 function matchesQuery(name: string, aliases: string[], query: string) {
   const q = query.toLowerCase();
@@ -234,6 +247,7 @@ function NameMatchView({
   query,
   malware,
   actors,
+  ransomwareOnly,
   campaigns,
   onOpenMalware,
   onOpenActor,
@@ -242,12 +256,13 @@ function NameMatchView({
   query: string;
   malware: MalwareIntelligenceEntity[];
   actors: ThreatActorIntelligenceEntity[];
+  ransomwareOnly: ThreatActor[];
   campaigns: CampaignIntelligenceEntity[];
   onOpenMalware: (entity: MalwareIntelligenceEntity) => void;
   onOpenActor: (name: string) => void;
   onOpenCampaign: () => void;
 }) {
-  const total = malware.length + actors.length + campaigns.length;
+  const total = malware.length + actors.length + ransomwareOnly.length + campaigns.length;
   if (total === 0) {
     return <EmptyState message={`No malware family, threat actor, or campaign matches "${query}". Try the exact name, or paste an IP/domain/hash/CVE instead.`} />;
   }
@@ -306,6 +321,25 @@ function NameMatchView({
           </div>
         </div>
       )}
+      {ransomwareOnly.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Ransomware / OTX-Tagged Groups (no news profile yet)</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {ransomwareOnly.map((a) => (
+              <div key={a.name} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 text-left text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono font-semibold text-foreground">{a.name}</span>
+                  <Badge variant="danger">{typeLabel(a.type)}</Badge>
+                </div>
+                <p className="mt-1 text-muted">
+                  {a.campaignCount} campaign{a.campaignCount === 1 ? "" : "s"} · last active {new Date(a.lastActivity).toLocaleDateString()}
+                </p>
+                <p className="mt-1 text-muted/70">Tracked via {a.type === "ransomware" ? "ransomware.live" : "OTX"} only — no news-derived profile to open yet.</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {campaigns.length > 0 && (
         <div>
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Campaigns</p>
@@ -359,16 +393,31 @@ export function TriageConsole({ onOpenActor, onOpenCampaign }: TriageConsoleProp
   const malwareIntel = useMalwareIntelligence();
   const actorIntel = useThreatActorIntelligence();
   const campaignIntel = useCampaignIntelligence();
+  const threatActors = useThreatActors();
 
   const nameMatches = useMemo(() => {
     if (!submitted || submitted.type !== "name") return null;
     const q = submitted.query;
+    const actors = (actorIntel.data?.entities ?? []).filter((e) => matchesQuery(e.name, e.aliases, q)).slice(0, 6);
+    // Ransomware groups and OTX-only "adversary" tags never get a
+    // threatActorIntelligence record unless news extraction also picked
+    // them up by name -- confirmed live that active, well-known ransomware
+    // groups can otherwise be completely invisible to this search even
+    // though this app already tracks their campaigns elsewhere (Ransomware
+    // Data tab, Top Threat Actors). Only added here if not already covered
+    // by an `actors` match above, so an actor with both a ransomware.live
+    // record AND a real news profile isn't shown twice under two shapes.
+    const alreadyCovered = new Set(actors.map((a) => a.name.toLowerCase()));
+    const ransomwareOnly = (threatActors.data ?? [])
+      .filter((a) => a.name.toLowerCase().includes(q.toLowerCase()) && !alreadyCovered.has(a.name.toLowerCase()))
+      .slice(0, 6);
     return {
       malware: (malwareIntel.data?.entities ?? []).filter((e) => matchesQuery(e.name, e.aliases, q)).slice(0, 6),
-      actors: (actorIntel.data?.entities ?? []).filter((e) => matchesQuery(e.name, e.aliases, q)).slice(0, 6),
+      actors,
+      ransomwareOnly,
       campaigns: (campaignIntel.data?.entities ?? []).filter((e) => matchesQuery(e.name, e.aliases, q)).slice(0, 6),
     };
-  }, [submitted, malwareIntel.data, actorIntel.data, campaignIntel.data]);
+  }, [submitted, malwareIntel.data, actorIntel.data, campaignIntel.data, threatActors.data]);
 
   // One hop into this platform's own already-ingested feed -- an IOC search
   // result only tells you what external sources think; this tells you
@@ -468,6 +517,7 @@ export function TriageConsole({ onOpenActor, onOpenCampaign }: TriageConsoleProp
                 query={submitted.query}
                 malware={nameMatches.malware}
                 actors={nameMatches.actors}
+                ransomwareOnly={nameMatches.ransomwareOnly}
                 campaigns={nameMatches.campaigns}
                 onOpenMalware={openMalware}
                 onOpenActor={onOpenActor}
