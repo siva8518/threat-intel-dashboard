@@ -12,12 +12,15 @@ import type {
   CveProgramActivity,
   CveRecord,
   CveSeverityDistribution,
+  DetectionBacklogItem,
+  DetectionBacklogStatus,
   ExecutiveSummary,
   ExploitIntelligence,
   GeoTargeting,
   GithubIntelStats,
   GithubRepoDetail,
   GithubRepoSummary,
+  HuntingQueryItem,
   IocRecord,
   IocSearchIndicatorType,
   IocSearchResult,
@@ -225,6 +228,31 @@ export async function setRemediationStatus(
 
 export async function clearRemediationStatus(cveId: string): Promise<{ ok: boolean }> {
   return fetchJson(`/api/dashboard/remediation/${encodeURIComponent(cveId)}`, { source: "Dashboard API", method: "DELETE" });
+}
+
+export async function fetchHuntingLibrary(): Promise<{ items: HuntingQueryItem[] }> {
+  return fetchJson("/api/dashboard/hunting-library", { source: "Dashboard API" });
+}
+
+export async function fetchDetectionBacklog(): Promise<{ items: DetectionBacklogItem[] }> {
+  return fetchJson("/api/dashboard/detection-backlog", { source: "Dashboard API" });
+}
+
+export async function setDetectionBacklogStatus(
+  id: string,
+  status: DetectionBacklogStatus,
+  note: string | null,
+): Promise<{ id: string; status: DetectionBacklogStatus; note: string | null; updatedAt: string }> {
+  return fetchJson(`/api/dashboard/detection-backlog/${encodeURIComponent(id)}`, {
+    source: "Dashboard API",
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, note }),
+  });
+}
+
+export async function clearDetectionBacklogStatus(id: string): Promise<{ ok: boolean }> {
+  return fetchJson(`/api/dashboard/detection-backlog/${encodeURIComponent(id)}`, { source: "Dashboard API", method: "DELETE" });
 }
 
 export async function fetchSourcesHealth(): Promise<{ sources: SourceHealth[]; onlineCount: number; totalCount: number }> {

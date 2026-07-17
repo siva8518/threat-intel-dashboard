@@ -44,6 +44,14 @@ import { getKeywords, addKeyword, removeKeyword, getFlashReports, getUnreadCount
 import { getAllReports as getAllAiThreatSummaries, getReportById as getAiThreatSummaryById } from "../aiThreatSummaryStore.js";
 import { getAllStatuses as getAllRemediationStatuses, setStatus as setRemediationStatus, clearStatus as clearRemediationStatus, REMEDIATION_STATUSES } from "../remediationTracker.js";
 import { buildRemediationQueue } from "../remediationQueue.js";
+import { buildHuntingQueryLibrary } from "../huntingLibrary.js";
+import { buildDetectionBacklog } from "../detectionBacklog.js";
+import {
+  getAllStatuses as getAllDetectionBacklogStatuses,
+  setStatus as setDetectionBacklogStatus,
+  clearStatus as clearDetectionBacklogStatus,
+  DETECTION_BACKLOG_STATUSES,
+} from "../detectionBacklogTracker.js";
 
 export const router = Router();
 
@@ -393,6 +401,37 @@ router.get("/dashboard/ai-summaries/:id", (req, res) => {
   const report = getAiThreatSummaryById(decodeURIComponent(req.params.id));
   if (!report) return res.status(404).json({ error: "not found" });
   res.json(report);
+});
+
+// --- Hunting Query Library (rolled-up threatHuntingOpportunities across every
+// AI Summarization report, see server/huntingLibrary.js) -- turns one-off
+// per-report hunting queries into a searchable, per-platform team asset. ---
+router.get("/dashboard/hunting-library", (_req, res) => {
+  res.json({ items: buildHuntingQueryLibrary(getAllAiThreatSummaries()) });
+});
+
+// --- Detection Backlog (rolled-up detectionEngineeringOpportunities across
+// every AI Summarization report, see server/detectionBacklog.js) -- paired
+// with a status this app has no other way to know (has Detection
+// Engineering actually built it), same pattern as the Remediation Tracker. ---
+router.get("/dashboard/detection-backlog", (_req, res) => {
+  const items = buildDetectionBacklog(getAllAiThreatSummaries(), getAllDetectionBacklogStatuses());
+  res.json({ items });
+});
+
+router.put("/dashboard/detection-backlog/:id", (req, res) => {
+  const { status, note } = req.body ?? {};
+  if (!DETECTION_BACKLOG_STATUSES.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${DETECTION_BACKLOG_STATUSES.join(", ")}` });
+  }
+  const id = decodeURIComponent(req.params.id);
+  const record = setDetectionBacklogStatus(id, status, note);
+  res.json({ id, ...record });
+});
+
+router.delete("/dashboard/detection-backlog/:id", (req, res) => {
+  clearDetectionBacklogStatus(decodeURIComponent(req.params.id));
+  res.json({ ok: true });
 });
 
 // --- Watchlist (user-curated client/org names, continuously monitored --

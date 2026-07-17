@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Bot, BrainCircuit, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, UserSearch, Wifi, Wrench } from "lucide-react";
+import { Bot, BrainCircuit, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi, Wrench } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { TriageConsole } from "@/components/dashboard/TriageConsole";
 import { RemediationTracker } from "@/components/dashboard/RemediationTracker";
+import { HuntingDetectionHub } from "@/components/dashboard/HuntingDetectionHub";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
 import { WorldThreatMap } from "@/components/dashboard/WorldThreatMap";
 import { TopMitreTechniques } from "@/components/dashboard/TopMitreTechniques";
@@ -53,6 +54,7 @@ const TABS = [
   { id: "campaign-intelligence", label: "Campaign Intelligence", icon: Crosshair },
   { id: "darkweb-intelligence", label: "Dark Web Intelligence", icon: Ghost },
   { id: "ai-summarization", label: "AI Summarization", icon: BrainCircuit },
+  { id: "hunting-detection", label: "Hunting & Detection", icon: Telescope },
   { id: "news", label: "Security News", icon: Newspaper },
   { id: "watchlist", label: "Watchlist", icon: Eye },
   { id: "ai-assistant", label: "Chat Bot", icon: Bot },
@@ -193,6 +195,7 @@ export function DashboardPage() {
       {activeTab === "campaign-intelligence" && <CampaignIntelligence />}
       {activeTab === "darkweb-intelligence" && <DarkWebIntelligence />}
       {activeTab === "ai-summarization" && <AiSummarization />}
+      {activeTab === "hunting-detection" && <HuntingDetectionHub />}
       {activeTab === "news" && <SecurityNews />}
       {activeTab === "watchlist" && <Watchlist />}
       {activeTab === "ai-assistant" && <Chatbot />}

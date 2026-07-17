@@ -42,6 +42,64 @@ export interface RemediationQueueItem extends CveRecord {
   patchInfo: AiThreatSummaryPatchInformation | null;
 }
 
+export type HuntingQueryPlatform =
+  | "defenderXdrKql"
+  | "sentinelKql"
+  | "splunkSpl"
+  | "elastic"
+  | "sigma"
+  | "yara"
+  | "crowdstrikeFalcon"
+  | "carbonBlack";
+
+/** One hunting query, flattened out of an AI Summarization report's threatHuntingOpportunities (see server/huntingLibrary.js) -- traced back to the article/CVEs/malware/actors it came from, so a hit in the library is never just a bare query with no context. */
+export interface HuntingQueryItem {
+  id: string;
+  platform: HuntingQueryPlatform;
+  platformLabel: string;
+  query: string;
+  reportId: string;
+  articleTitle: string;
+  articleLink: string;
+  articleSource: string;
+  generatedAt: string;
+  severity: Severity;
+  cveIds: string[];
+  malware: string[];
+  threatActors: string[];
+}
+
+export type DetectionBacklogCategory =
+  | "newAnalytics"
+  | "newCorrelationRules"
+  | "newSigmaRules"
+  | "newKqlDetections"
+  | "edrBehavioralDetections"
+  | "siemCorrelationLogic"
+  | "mitreCoverageGaps"
+  | "telemetryGaps"
+  | "logSourceRequirements";
+
+export type DetectionBacklogStatus = "open" | "in_progress" | "implemented" | "wont_do";
+
+/** One detection-engineering gap, flattened out of an AI Summarization report's detectionEngineeringOpportunities (see server/detectionBacklog.js), paired with Detection Engineering's own tracked status/note -- this app's only source of truth for whether the gap's actually been closed. */
+export interface DetectionBacklogItem {
+  id: string;
+  category: DetectionBacklogCategory;
+  categoryLabel: string;
+  description: string;
+  status: DetectionBacklogStatus;
+  note: string | null;
+  statusUpdatedAt: string | null;
+  reportId: string;
+  articleTitle: string;
+  articleLink: string;
+  articleSource: string;
+  generatedAt: string;
+  severity: Severity;
+  cveIds: string[];
+}
+
 export interface KevEntry {
   cveId: string;
   vendorProject: string;

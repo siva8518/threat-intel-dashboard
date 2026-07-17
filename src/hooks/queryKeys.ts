@@ -36,4 +36,6 @@ export const queryKeys = {
   watchlist: ["watchlist"] as const,
   flashReports: ["flash-reports"] as const,
   remediationQueue: ["remediation-queue"] as const,
+  huntingLibrary: ["hunting-library"] as const,
+  detectionBacklog: ["detection-backlog"] as const,
 };
