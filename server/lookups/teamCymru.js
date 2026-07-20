@@ -30,18 +30,18 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-async function txtLookup(hostname) {
+async function txtLookup(hostname, source) {
   try {
     const records = await withTimeout(resolver.resolveTxt(hostname), LOOKUP_TIMEOUT_MS);
     return records[0]?.join("") ?? null;
   } catch (error) {
     if (error.code === "ENOTFOUND" || error.code === "ENODATA") return null; // not in the registry -- routine, not a failure
-    throw new ApiError(`Team Cymru DNS lookup failed: ${error.message}`, "Team Cymru");
+    throw new ApiError(`Team Cymru DNS lookup failed: ${error.message}`, source);
   }
 }
 
 async function checkIp(value) {
-  const answer = await txtLookup(`${value}.origin.asn.cymru.com`);
+  const answer = await txtLookup(`${value}.origin.asn.cymru.com`, "Team Cymru");
   if (!answer) return { source: "Team Cymru", verdict: "unknown", asn: null, prefix: null, country: null, registry: null };
 
   const [asn, prefix, country, registry, allocated] = answer.split("|").map((s) => s.trim());
@@ -49,7 +49,17 @@ async function checkIp(value) {
 }
 
 async function checkHash(value) {
-  const answer = await txtLookup(`${value.toLowerCase()}.malware.hash.cymru.com`);
+  // Confirmed live: a SHA256 hex string is 64 characters, one over DNS's
+  // hard 63-byte label limit -- the query fails with a low-level EBADNAME
+  // rather than any real "not found" answer. Not a transient error, a
+  // structural one (Team Cymru's own docs only ever documented MD5/SHA1
+  // for this service) -- worth telling the analyst plainly instead of
+  // surfacing a cryptic DNS error every time.
+  if (value.length > 40) {
+    throw new ApiError("Team Cymru MHR only supports MD5/SHA1 hashes (SHA256 exceeds DNS's label length limit)", "Team Cymru MHR", 400);
+  }
+
+  const answer = await txtLookup(`${value.toLowerCase()}.malware.hash.cymru.com`, "Team Cymru MHR");
   if (!answer) return { source: "Team Cymru MHR", verdict: "unknown", note: "Not found in Malware Hash Registry" };
 
   const [lastSeenEpoch, detectionPercent] = answer.trim().split(/\s+/);

@@ -853,6 +853,7 @@ router.get("/ioc-search", async (req, res) => {
   const results = [];
   const notConfigured = [];
   const rateLimited = [];
+  const skipped = [];
   for (const outcome of settled) {
     if (outcome.status === "fulfilled") {
       results.push(outcome.value);
@@ -860,12 +861,37 @@ router.get("/ioc-search", async (req, res) => {
       notConfigured.push(outcome.reason.source);
     } else if (outcome.reason?.status === 429) {
       rateLimited.push(outcome.reason.source);
+    } else if (outcome.reason?.source) {
+      // Confirmed live this bucket was previously missing entirely: e.g.
+      // Hybrid Analysis's own 400 ("only supports SHA256, not MD5/SHA1") or
+      // a Team Cymru DNS failure just vanished with no signal at all -- an
+      // analyst had no way to tell "this source has nothing to say" apart
+      // from "this source was never even asked". Anything that isn't a
+      // missing-key or rate-limit case still gets surfaced, with the
+      // specific reason, instead of silently disappearing.
+      skipped.push({ source: outcome.reason.source, reason: outcome.reason.message ?? "Lookup failed" });
     }
   }
 
   const maliciousVotes = results.filter((r) => r.verdict === "malicious").length;
   const suspiciousVotes = results.filter((r) => r.verdict === "suspicious").length;
-  const correlatedVerdict = maliciousVotes >= 2 ? "malicious" : maliciousVotes >= 1 || suspiciousVotes >= 1 ? "suspicious" : results.length > 0 ? "clean" : "unknown";
+  // A single source's own internal consensus can already be decisive --
+  // VirusTotal reporting 7/7 AV engines malicious, Hybrid Analysis scoring
+  // a sample 70+/100, or Team Cymru's Malware Hash Registry showing >=50%
+  // historical detection -- confirmed live the old "needs >=2 corroborating
+  // sources" rule was downgrading exactly this case to "Suspicious" even
+  // when one source's own evidence was already overwhelming. Thresholds
+  // below are commonly-used industry rules of thumb for "high-confidence",
+  // not arbitrary: they only fire on evidence a source already returned,
+  // never invent anything.
+  const highConfidenceHit = results.some((r) => {
+    if (r.source === "VirusTotal") return (r.malicious ?? 0) >= 5;
+    if (r.source === "Hybrid Analysis") return (r.threatScore ?? 0) >= 70;
+    if (r.source === "Team Cymru MHR") return (r.detectionPercent ?? 0) >= 50;
+    return false;
+  });
+  const correlatedVerdict =
+    highConfidenceHit || maliciousVotes >= 2 ? "malicious" : maliciousVotes >= 1 || suspiciousVotes >= 1 ? "suspicious" : results.length > 0 ? "clean" : "unknown";
 
-  res.json({ indicator: value, type, correlatedVerdict, results, notConfigured, rateLimited });
+  res.json({ indicator: value, type, correlatedVerdict, results, notConfigured, rateLimited, skipped });
 });

@@ -298,6 +298,8 @@ export interface IocSearchResult {
   results: IocLookupResult[];
   notConfigured: string[];
   rateLimited: string[];
+  /** Sources that were attempted but returned neither data nor a missing-key/rate-limit error (e.g. Hybrid Analysis rejecting a non-SHA256 hash, a Team Cymru DNS failure) -- surfaced with the real reason instead of silently vanishing from Source Breakdown. */
+  skipped: { source: string; reason: string }[];
 }
 
 export interface CveProgramEntry {

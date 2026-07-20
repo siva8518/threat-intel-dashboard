@@ -274,6 +274,10 @@ function buildKeyFacts(type: IocSearchIndicatorType, results: IocLookupResult[])
     if (vt) {
       const total = (vt.malicious as number) + (vt.suspicious as number) + (vt.harmless as number);
       facts.push({ label: "VirusTotal Detections", value: `${vt.malicious} / ${total} engines flagged malicious` });
+      if (vt.threatLabel) facts.push({ label: "Threat Classification", value: String(vt.threatLabel) });
+      if (vt.fileType) facts.push({ label: "File Type", value: String(vt.fileType) });
+      if (vt.fileName) facts.push({ label: "Known File Name", value: String(vt.fileName) });
+      if (vt.firstSubmitted) facts.push({ label: "First Seen (VirusTotal)", value: new Date(vt.firstSubmitted as string).toLocaleDateString() });
     }
     if (ha) {
       facts.push({ label: "Malware Family", value: (ha.malwareFamily as string) || "Not identified" });
@@ -334,7 +338,13 @@ function renderSourceFacts(r: IocLookupResult): KeyFact[] {
         ...(Array.isArray(r.threats) && r.threats.length > 0 ? [{ label: "Threats", value: r.threats.join(", ") }] : []),
       ];
     case "VirusTotal":
-      return [{ label: "Detections", value: `${r.malicious} malicious · ${r.suspicious} suspicious · ${r.harmless} harmless` }];
+      return [
+        { label: "Detections", value: `${r.malicious} malicious · ${r.suspicious} suspicious · ${r.harmless} harmless` },
+        ...(r.threatLabel ? [{ label: "Threat Classification", value: String(r.threatLabel) }] : []),
+        ...(r.fileType ? [{ label: "File Type", value: String(r.fileType) }] : []),
+        ...(r.fileName ? [{ label: "Known File Name", value: String(r.fileName) }] : []),
+        ...(r.firstSubmitted ? [{ label: "First Seen", value: new Date(r.firstSubmitted as string).toLocaleDateString() }] : []),
+      ];
     case "GreyNoise":
       return [
         { label: "Classification", value: safe(r.classification) },
@@ -475,6 +485,11 @@ function IocResultView({
       )}
       {result.notConfigured.length > 0 && <p className="text-xs text-muted">Not configured (missing API key): {result.notConfigured.join(", ")}</p>}
       {result.rateLimited.length > 0 && <p className="text-xs text-medium">Rate limited, try again shortly: {result.rateLimited.join(", ")}</p>}
+      {result.skipped.length > 0 && (
+        <p className="text-xs text-muted">
+          Not applicable to this indicator: {result.skipped.map((s) => `${s.source} (${s.reason})`).join(" · ")}
+        </p>
+      )}
       <a
         href={virusTotalLookupUrl({ indicator: result.indicator, indicatorType: result.type === "url" ? "url" : result.type })}
         target="_blank"
