@@ -18,6 +18,7 @@ import type {
   CveRecord,
   IocSearchIndicatorType,
   IocSearchResult,
+  IocLookupResult,
   MalwareIntelligenceEntity,
   ThreatActorIntelligenceEntity,
   CampaignIntelligenceEntity,
@@ -183,6 +184,240 @@ function CveResultView({ cve, cveError, cveLoading, onViewProfile }: { cve: CveR
   );
 }
 
+interface KeyFact {
+  label: string;
+  value: string;
+}
+
+/**
+ * Cross-source "so what" summary an L1/L2 analyst actually wants at a
+ * glance -- IP geolocation/ASN/open ports/known CVEs, domain cert/exposure
+ * data, hash malware-family/detection ratio -- pulled from whichever
+ * sources happened to answer, not a fixed list every one has to fill in.
+ * Confirmed live this was the actual gap: every source already returns
+ * this data, it just wasn't surfaced anywhere except as a raw JSON dump.
+ */
+/** Some sources genuinely have nothing to report for a given field (e.g. SANS ISC's reportCount/firstSeen when an IP has no sighting history there) -- renders as "—", not the literal word "null"/"undefined". */
+function safe(v: unknown): string {
+  return v == null || v === "" ? "—" : String(v);
+}
+
+function buildKeyFacts(type: IocSearchIndicatorType, results: IocLookupResult[]): KeyFact[] {
+  const facts: KeyFact[] = [];
+  const find = (source: string) => results.find((r) => r.source === source);
+
+  if (type === "ip") {
+    const abuseIpdb = find("AbuseIPDB");
+    const shodan = find("Shodan");
+    const ripestat = find("RIPEstat");
+    const teamCymru = find("Team Cymru");
+    const isc = find("SANS ISC");
+    const greynoise = find("GreyNoise");
+    const otx = find("OTX");
+
+    const country = abuseIpdb?.countryCode ?? isc?.country ?? teamCymru?.country;
+    if (country) facts.push({ label: "Country", value: String(country) });
+
+    const org = shodan?.org ?? isc?.asName ?? ripestat?.holder;
+    const asn = ripestat?.asn ?? teamCymru?.asn ?? isc?.asn;
+    if (org || asn) facts.push({ label: "ASN / Organization", value: [asn ? `AS${asn}` : null, org].filter(Boolean).join(" · ") });
+
+    if (Array.isArray(shodan?.openPorts) && shodan.openPorts.length > 0) {
+      facts.push({ label: "Open Ports", value: shodan.openPorts.slice(0, 12).join(", ") });
+    }
+    if (typeof shodan?.vulnCount === "number" && shodan.vulnCount > 0) {
+      facts.push({ label: "Known Vulnerabilities (Shodan)", value: String(shodan.vulnCount) });
+    }
+    if (abuseIpdb) facts.push({ label: "Abuse Reports", value: `${abuseIpdb.abuseConfidenceScore}% confidence · ${abuseIpdb.totalReports} reports` });
+    if (greynoise) {
+      facts.push({
+        label: "GreyNoise",
+        value: greynoise.riot ? "Known-benign business service" : `${greynoise.classification}${greynoise.name ? ` (${greynoise.name})` : ""}`,
+      });
+    }
+    if (isc && (typeof isc.reportCount === "number" || typeof isc.attackTargets === "number")) {
+      facts.push({ label: "SANS ISC Sightings", value: `${safe(isc.reportCount)} reports · ${safe(isc.attackTargets)} targets` });
+    }
+    if (typeof otx?.pulseCount === "number" && otx.pulseCount > 0) facts.push({ label: "OTX Pulses", value: String(otx.pulseCount) });
+  }
+
+  if (type === "domain" || type === "url") {
+    const crtsh = find("crt.sh");
+    const hudsonRock = find("Hudson Rock");
+    const leakix = find("LeakIX");
+    const pulsedive = find("Pulsedive");
+    const otx = find("OTX");
+    const vt = find("VirusTotal");
+
+    if (crtsh) {
+      facts.push({ label: "Subdomains Found", value: String(crtsh.subdomainCount) });
+      if (crtsh.latestIssuer) facts.push({ label: "Latest Cert Issuer", value: String(crtsh.latestIssuer) });
+    }
+    if (hudsonRock && typeof hudsonRock.infostealerInfections === "number" && hudsonRock.infostealerInfections > 0) {
+      facts.push({
+        label: "Infostealer Exposure",
+        value: `${hudsonRock.infostealerInfections} infections (${hudsonRock.employeesExposed} employees, ${hudsonRock.usersExposed} users)`,
+      });
+    }
+    if (leakix && typeof leakix.serviceCount === "number" && leakix.serviceCount > 0) {
+      facts.push({ label: "Exposed Services", value: `${leakix.serviceCount} services · ${leakix.leakCount} leaks` });
+    }
+    if (pulsedive) facts.push({ label: "Pulsedive Risk", value: String(pulsedive.risk) });
+    if (vt) facts.push({ label: "VirusTotal Detections", value: `${vt.malicious} malicious / ${vt.harmless} harmless` });
+    if (typeof otx?.pulseCount === "number" && otx.pulseCount > 0) facts.push({ label: "OTX Pulses", value: String(otx.pulseCount) });
+  }
+
+  if (type === "hash") {
+    const vt = find("VirusTotal");
+    const ha = find("Hybrid Analysis");
+    const cymru = find("Team Cymru MHR");
+    if (vt) {
+      const total = (vt.malicious as number) + (vt.suspicious as number) + (vt.harmless as number);
+      facts.push({ label: "VirusTotal Detections", value: `${vt.malicious} / ${total} engines flagged malicious` });
+    }
+    if (ha) {
+      facts.push({ label: "Malware Family", value: (ha.malwareFamily as string) || "Not identified" });
+      facts.push({ label: "Hybrid Analysis Threat Score", value: `${ha.threatScore}/100` });
+    }
+    if (cymru) {
+      facts.push({
+        label: "Malware Hash Registry",
+        value: `${cymru.detectionPercent}% detection · last seen ${new Date(cymru.lastSeen as string).toLocaleDateString()}`,
+      });
+    }
+  }
+
+  return facts;
+}
+
+function KeyFactsPanel({ facts }: { facts: KeyFact[] }) {
+  if (facts.length === 0) return null;
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Key Facts</p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+        {facts.map((f) => (
+          <div key={f.label} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
+            <p className="text-[10px] uppercase tracking-wide text-muted">{f.label}</p>
+            <p className="mt-0.5 text-xs font-semibold text-foreground" title={f.value}>
+              {f.value}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Per-source facts, labeled and formatted for what each field actually
+ * means -- replaces a raw JSON dump of the same data. Falls back to a
+ * generic key/value listing for any source not explicitly mapped here, so
+ * a newly added lookup still renders something rather than nothing.
+ */
+function renderSourceFacts(r: IocLookupResult): KeyFact[] {
+  switch (r.source) {
+    case "OTX":
+      return [
+        { label: "Pulses", value: safe(r.pulseCount) },
+        ...(Array.isArray(r.tags) && r.tags.length > 0 ? [{ label: "Tags", value: r.tags.slice(0, 8).join(", ") }] : []),
+      ];
+    case "AbuseIPDB":
+      return [
+        { label: "Abuse Confidence", value: `${r.abuseConfidenceScore}%` },
+        { label: "Total Reports", value: safe(r.totalReports) },
+        { label: "Country", value: safe(r.countryCode) },
+      ];
+    case "Pulsedive":
+      return [
+        { label: "Risk", value: safe(r.risk) },
+        ...(Array.isArray(r.threats) && r.threats.length > 0 ? [{ label: "Threats", value: r.threats.join(", ") }] : []),
+      ];
+    case "VirusTotal":
+      return [{ label: "Detections", value: `${r.malicious} malicious · ${r.suspicious} suspicious · ${r.harmless} harmless` }];
+    case "GreyNoise":
+      return [
+        { label: "Classification", value: safe(r.classification) },
+        ...(r.name ? [{ label: "Known Actor/Scanner", value: String(r.name) }] : []),
+        { label: "Known-Benign Service (RIOT)", value: r.riot ? "Yes" : "No" },
+      ];
+    case "Shodan":
+      return [
+        ...(r.org ? [{ label: "Organization", value: String(r.org) }] : []),
+        ...(Array.isArray(r.openPorts) && r.openPorts.length > 0 ? [{ label: "Open Ports", value: r.openPorts.join(", ") }] : []),
+        { label: "Known Vulnerabilities", value: safe(r.vulnCount) },
+        ...(Array.isArray(r.tags) && r.tags.length > 0 ? [{ label: "Tags", value: r.tags.join(", ") }] : []),
+      ];
+    case "LeakIX":
+      return [
+        { label: "Exposed Services", value: safe(r.serviceCount) },
+        { label: "Leaks Found", value: safe(r.leakCount) },
+        ...(Array.isArray(r.sampleServices) && r.sampleServices.length > 0
+          ? [{ label: "Sample Services", value: r.sampleServices.slice(0, 3).map((sv: { host: string; port: string; protocol: string }) => `${sv.host}:${sv.port}/${sv.protocol}`).join(", ") }]
+          : []),
+      ];
+    case "RIPEstat":
+      return [
+        { label: "ASN", value: safe(r.asn) },
+        { label: "Prefix", value: safe(r.prefix) },
+        { label: "Holder", value: safe(r.holder) },
+      ];
+    case "Team Cymru":
+      return [
+        { label: "ASN", value: safe(r.asn) },
+        { label: "Prefix", value: safe(r.prefix) },
+        { label: "Country", value: safe(r.country) },
+        { label: "Registry", value: safe(r.registry) },
+        { label: "Allocated", value: safe(r.allocated) },
+      ];
+    case "Team Cymru MHR":
+      return [
+        { label: "Last Seen", value: r.lastSeen ? new Date(r.lastSeen as string).toLocaleDateString() : "—" },
+        { label: "Detection", value: `${r.detectionPercent}%` },
+        ...(r.note ? [{ label: "Note", value: String(r.note) }] : []),
+      ];
+    case "SANS ISC":
+      return [
+        { label: "Reports", value: safe(r.reportCount) },
+        { label: "Attack Targets", value: safe(r.attackTargets) },
+        { label: "First Seen", value: safe(r.firstSeen) },
+        { label: "Last Seen", value: safe(r.lastSeen) },
+        { label: "ASN", value: `${safe(r.asn)}${r.asName ? ` (${r.asName})` : ""}` },
+        { label: "Country", value: safe(r.country) },
+        ...(Array.isArray(r.threatFeeds) && r.threatFeeds.length > 0 ? [{ label: "Listed On", value: r.threatFeeds.join(", ") }] : []),
+        ...(r.comment ? [{ label: "Comment", value: String(r.comment) }] : []),
+      ];
+    case "MISP Warning Lists":
+      return Array.isArray(r.matchedLists) && r.matchedLists.length > 0
+        ? [{ label: "Matched Lists", value: r.matchedLists.join(", ") }]
+        : [{ label: "Matched Lists", value: "None" }];
+    case "crt.sh":
+      return [
+        { label: "Certificates", value: safe(r.certificateCount) },
+        { label: "Subdomains Found", value: safe(r.subdomainCount) },
+        ...(r.latestIssuer ? [{ label: "Latest Issuer", value: String(r.latestIssuer) }] : []),
+        ...(r.latestNotBefore ? [{ label: "Latest Cert Date", value: new Date(r.latestNotBefore as string).toLocaleDateString() }] : []),
+      ];
+    case "Hudson Rock":
+      return [
+        { label: "Infostealer Infections", value: safe(r.infostealerInfections) },
+        { label: "Employees Exposed", value: safe(r.employeesExposed) },
+        { label: "Users Exposed", value: safe(r.usersExposed) },
+        { label: "Third Parties Exposed", value: safe(r.thirdPartiesExposed) },
+      ];
+    case "Hybrid Analysis":
+      return [
+        { label: "Threat Score", value: `${r.threatScore}/100` },
+        { label: "Malware Family", value: r.malwareFamily ? String(r.malwareFamily) : "Not identified" },
+        { label: "Verdict", value: safe(r.verdictLabel) },
+      ];
+    default:
+      return Object.entries(r)
+        .filter(([k]) => k !== "source" && k !== "verdict")
+        .map(([k, v]) => ({ label: k, value: typeof v === "object" ? JSON.stringify(v) : String(v) }));
+  }
+}
+
 function IocResultView({
   result,
   error,
@@ -196,9 +431,11 @@ function IocResultView({
 }) {
   if (error) return <EmptyState message={error} />;
   if (!result) return null;
+  const keyFacts = buildKeyFacts(result.type, result.results);
   return (
     <div className="space-y-3">
       <VerdictBanner verdict={IOC_VERDICT[result.correlatedVerdict]} />
+      <KeyFactsPanel facts={keyFacts} />
       {linkedFamily && (
         <button
           type="button"
@@ -212,20 +449,28 @@ function IocResultView({
         </button>
       )}
       {result.results.length > 0 && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {result.results.map((r) => (
-            <div key={r.source} className="rounded-md border border-border p-3 text-xs">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="font-semibold">{r.source}</span>
-                <Badge variant={VERDICT_BADGE[r.verdict === "malicious" ? "critical" : r.verdict === "suspicious" ? "high" : r.verdict === "clean" ? "low" : "unknown"]}>
-                  {r.verdict}
-                </Badge>
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Source Breakdown</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {result.results.map((r) => (
+              <div key={r.source} className="rounded-md border border-border p-3 text-xs">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="font-semibold">{r.source}</span>
+                  <Badge variant={VERDICT_BADGE[r.verdict === "malicious" ? "critical" : r.verdict === "suspicious" ? "high" : r.verdict === "clean" ? "low" : "unknown"]}>
+                    {r.verdict}
+                  </Badge>
+                </div>
+                <dl className="space-y-1">
+                  {renderSourceFacts(r).map((f) => (
+                    <div key={f.label} className="flex gap-1.5">
+                      <dt className="shrink-0 text-muted">{f.label}:</dt>
+                      <dd className="min-w-0 break-words text-foreground">{f.value}</dd>
+                    </div>
+                  ))}
+                </dl>
               </div>
-              <pre className="whitespace-pre-wrap break-words text-muted">
-                {JSON.stringify(Object.fromEntries(Object.entries(r).filter(([k]) => k !== "source" && k !== "verdict")), null, 2)}
-              </pre>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
       {result.notConfigured.length > 0 && <p className="text-xs text-muted">Not configured (missing API key): {result.notConfigured.join(", ")}</p>}
