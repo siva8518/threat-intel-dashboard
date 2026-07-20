@@ -52,12 +52,13 @@ export type HuntingQueryPlatform =
   | "crowdstrikeFalcon"
   | "carbonBlack";
 
-/** One hunting query, flattened out of an AI Summarization report's threatHuntingOpportunities (see server/huntingLibrary.js) -- traced back to the article/CVEs/malware/actors it came from, so a hit in the library is never just a bare query with no context. */
+/** One hunting query, either flattened out of an AI Summarization report's threatHuntingOpportunities, or derived deterministically from a Malware/Threat Actor Intelligence entity's own live indicators/detection-rule matches (see server/huntingLibrary.js) -- traced back to the article/rule/CVEs/malware/actors it came from, so a hit in the library is never just a bare query with no context. */
 export interface HuntingQueryItem {
   id: string;
   platform: HuntingQueryPlatform;
   platformLabel: string;
   query: string;
+  source: "ai-report" | "entity";
   reportId: string;
   articleTitle: string;
   articleLink: string;
@@ -82,7 +83,7 @@ export type DetectionBacklogCategory =
 
 export type DetectionBacklogStatus = "open" | "in_progress" | "implemented" | "wont_do";
 
-/** One detection-engineering gap, flattened out of an AI Summarization report's detectionEngineeringOpportunities (see server/detectionBacklog.js), paired with Detection Engineering's own tracked status/note -- this app's only source of truth for whether the gap's actually been closed. */
+/** One detection-engineering gap, either flattened out of an AI Summarization report's detectionEngineeringOpportunities, or derived deterministically from a Malware/Threat Actor Intelligence entity (an active family with no matching public rule, or an actor's own ATT&CK technique) (see server/detectionBacklog.js), paired with Detection Engineering's own tracked status/note -- this app's only source of truth for whether the gap's actually been closed. */
 export interface DetectionBacklogItem {
   id: string;
   category: DetectionBacklogCategory;
@@ -91,6 +92,7 @@ export interface DetectionBacklogItem {
   status: DetectionBacklogStatus;
   note: string | null;
   statusUpdatedAt: string | null;
+  source: "ai-report" | "entity";
   reportId: string;
   articleTitle: string;
   articleLink: string;

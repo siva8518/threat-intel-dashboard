@@ -158,7 +158,7 @@ function HuntingQueriesSection() {
         <EmptyState
           message={
             items.length === 0
-              ? "No hunting queries generated yet -- AI Summarization runs a few articles at a time in the background; check back shortly."
+              ? "No hunting queries yet -- generated from AI Summarization reports plus known-active malware/threat-actor entities; check back shortly."
               : "No queries match this search/platform filter."
           }
         />
@@ -252,7 +252,7 @@ function DetectionBacklogSection() {
         <EmptyState
           message={
             items.length === 0
-              ? "No detection-engineering gaps identified yet -- AI Summarization runs a few articles at a time in the background; check back shortly."
+              ? "No detection-engineering gaps identified yet -- generated from AI Summarization reports plus known-active malware/threat-actor entities; check back shortly."
               : "No items match this status filter."
           }
         />
@@ -358,8 +358,9 @@ export function HuntingDetectionHub() {
           <div>
             <CardTitle className="text-base font-semibold text-foreground">Hunting &amp; Detection</CardTitle>
             <p className="mt-1 text-xs text-muted">
-              Every hunting query and detection-engineering gap AI Summarization has generated, rolled up across reports -- a searchable library for Hunt,
-              a trackable backlog for Detection Engineering.
+              Hunting queries and detection-engineering gaps rolled up from every AI Summarization report plus active Malware/Threat Actor Intelligence
+              entities (live indicators, ATT&amp;CK techniques, public YARA/Sigma rule matches) -- a searchable library for Hunt, a trackable backlog for
+              Detection Engineering.
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">

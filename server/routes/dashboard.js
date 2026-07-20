@@ -405,18 +405,35 @@ router.get("/dashboard/ai-summaries/:id", (req, res) => {
 });
 
 // --- Hunting Query Library (rolled-up threatHuntingOpportunities across every
-// AI Summarization report, see server/huntingLibrary.js) -- turns one-off
+// AI Summarization report, see server/huntingLibrary.js, PLUS deterministic
+// queries derived from Malware/Threat Actor Intelligence entities -- confirmed
+// live the report-only version looked CVE-only simply because AI Summarization
+// is a sparse, CVE-skewed pool; the entity-derived half draws on the platform's
+// much larger malware/actor intelligence stores instead) -- turns one-off
 // per-report hunting queries into a searchable, per-platform team asset. ---
 router.get("/dashboard/hunting-library", (_req, res) => {
-  res.json({ items: buildHuntingQueryLibrary(getAllAiThreatSummaries()) });
+  const ruleIndex = cache.getEntry("detection-rules").data?.index ?? [];
+  const items = buildHuntingQueryLibrary(getAllAiThreatSummaries(), getMalwareIntelligenceEntities(), getThreatActorIntelligenceEntities(), ruleIndex);
+  res.json({ items });
 });
 
 // --- Detection Backlog (rolled-up detectionEngineeringOpportunities across
-// every AI Summarization report, see server/detectionBacklog.js) -- paired
+// every AI Summarization report, see server/detectionBacklog.js, PLUS
+// deterministic gaps derived from Malware/Threat Actor Intelligence entities,
+// same broadening rationale as the Hunting Query Library above) -- paired
 // with a status this app has no other way to know (has Detection
 // Engineering actually built it), same pattern as the Remediation Tracker. ---
 router.get("/dashboard/detection-backlog", (_req, res) => {
-  const items = buildDetectionBacklog(getAllAiThreatSummaries(), getAllDetectionBacklogStatuses());
+  const ruleIndex = cache.getEntry("detection-rules").data?.index ?? [];
+  const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
+  const items = buildDetectionBacklog(
+    getAllAiThreatSummaries(),
+    getAllDetectionBacklogStatuses(),
+    getMalwareIntelligenceEntities(),
+    getThreatActorIntelligenceEntities(),
+    ruleIndex,
+    attackIndex,
+  );
   res.json({ items });
 });
 
