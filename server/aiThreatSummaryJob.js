@@ -20,7 +20,7 @@ import * as cache from "./cache.js";
 import { MAJOR_VENDOR_SOURCES } from "./connectors/newsFeeds.js";
 import { tagNewsItems } from "./newsCorrelation.js";
 import { generateThreatSummary } from "./aiThreatSummary.js";
-import { isArticleProcessed, markArticleProcessed, addReport } from "./aiThreatSummaryStore.js";
+import { isArticleProcessed, markArticleProcessed, addReport, pruneExpiredReports, getLastCycleAt, setLastCycleAt } from "./aiThreatSummaryStore.js";
 import { queryCves } from "./connectors/nvd.js";
 import { OllamaUnavailableError } from "./rag/ollamaClient.js";
 import { log } from "./lib/log.js";
@@ -31,13 +31,32 @@ import { log } from "./lib/log.js";
 // tight free memory, net slower and less reliable than before. Safe against
 // the overlapping-cycle risk seen elsewhere in this app (GitHub Intel
 // enrichment backfill): loop() is self-rescheduling and always awaits the
-// full batch before the CYCLE_INTERVAL_MS gap starts, so a larger batch
-// just makes one cycle take longer -- it never causes two cycles to run
-// concurrently. Each report still lands in the store (addReport) as soon as
-// it individually finishes, not only once the whole batch completes, so
-// raising BATCH_SIZE shortens time-to-first-report within a cycle too.
-const BATCH_SIZE = 5;
-const CYCLE_INTERVAL_MS = 2 * 60 * 1000; // 2 min
+// full batch before the next cycle is due, so a larger batch just makes one
+// cycle take longer -- it never causes two cycles to run concurrently. Each
+// report still lands in the store (addReport) as soon as it individually
+// finishes, not only once the whole batch completes, so raising BATCH_SIZE
+// shortens time-to-first-report within a cycle too.
+//
+// Moved from a continuous every-2-minutes drip to one batch a day, plus the
+// store's own 24h rotation (see aiThreatSummaryStore.js#pruneExpiredReports)
+// -- this was the actual, most direct lever for cutting how often this app
+// hits the local Ollama model, distinct from (and on top of) the timeout/
+// watchdog/queue mitigations already in place for the deadlock itself.
+// BATCH_SIZE raised from 5 to 20 to match: at once-a-day, 5 would leave most
+// of a day's Critical/High volume never covered before it aged out of
+// RECENCY_WINDOW_MS below, defeating the "new reports flowing in" goal this
+// cadence change is for.
+const BATCH_SIZE = 20;
+const CYCLE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h -- the real generation cadence, persisted (see below), not just a setTimeout gap
+// How often loop() wakes up to check whether CYCLE_INTERVAL_MS has actually
+// elapsed since the last real run -- cheap (a Date comparison against a
+// persisted timestamp), so this can run far more often than generation
+// itself without adding any Ollama load. Needed because this backend gets
+// restarted often (Ollama crash recovery, deploys, the scheduled restart
+// task) -- without persisting lastCycleAt, every restart would otherwise
+// re-arm a fresh 24h setTimeout and could drift into running much more than
+// once a day, exactly what this change is meant to prevent.
+const CHECK_INTERVAL_MS = 10 * 60 * 1000; // 10 min
 
 // Widened to include Low -- per this feature's own spec, Low was deferred
 // (never marked processed while excluded), not dropped, specifically so
@@ -139,6 +158,13 @@ async function enrichCveIds(cveIds, kevEntries, epssScores) {
 }
 
 async function runCycle() {
+  // Unconditional, even if today turns out to have zero eligible candidates
+  // below -- the 24h rotation is a standing rule ("clear them out post 24
+  // hours"), not something that should depend on whether a replacement is
+  // ready yet. See aiThreatSummaryStore.js#pruneExpiredReports for why this
+  // isn't instead done reactively on every read.
+  pruneExpiredReports();
+
   const newsItems = cache.getEntry("news").data?.items ?? [];
   const candidates = newsItems.filter((item) => isEligibleSource(item.source) && isRecent(item.publishedDate) && !isArticleProcessed(item.link));
   if (candidates.length === 0) return;
@@ -215,26 +241,52 @@ async function runCycle() {
 
 let hasWarnedUnavailable = false;
 
+/**
+ * Returns whether today's cycle should count as "done" for lastCycleAt
+ * purposes. Ollama being unavailable does NOT count -- if the daily cycle
+ * lands during an Ollama outage, we want the next CHECK_INTERVAL_MS tick to
+ * retry (and keep retrying) until it recovers, not silently skip an entire
+ * day's reports waiting for the next 24h boundary. Any other failure
+ * (a bad article, an NVD hiccup) still counts as this day's attempt --
+ * those already log per-article inside runCycle() and don't warrant a
+ * retry-loop every 10 minutes.
+ */
 async function safeCycle() {
   try {
     await runCycle();
     hasWarnedUnavailable = false;
+    return true;
   } catch (error) {
     if (error instanceof OllamaUnavailableError) {
       if (!hasWarnedUnavailable) {
         log.warn("ai-threat-summary", `${error.message} -- AI Summarization will report itself unavailable until Ollama is running.`);
         hasWarnedUnavailable = true;
       }
-    } else {
-      log.error("ai-threat-summary", `cycle failed: ${error.message}`);
+      return false;
     }
+    log.error("ai-threat-summary", `cycle failed: ${error.message}`);
+    return true;
   }
 }
 
-/** Self-rescheduling, same reasoning as server/combinedExtractionJob.js#loop -- a report generation can run long on CPU-only local inference, and this guarantees exactly one cycle in flight at a time. */
+/**
+ * Wakes up every CHECK_INTERVAL_MS (cheap -- just a Date comparison) and
+ * only actually runs a cycle once CYCLE_INTERVAL_MS has elapsed since the
+ * last one that completed, per the persisted lastCycleAt (see
+ * aiThreatSummaryStore.js). This is what makes the daily cadence survive
+ * backend restarts -- a plain setTimeout(loop, 24h) would otherwise reset
+ * to a fresh 24h wait on every restart, which given how often this backend
+ * gets restarted (Ollama recovery, deploys, the scheduled restart task)
+ * could mean it never actually fires, or fires far more than once a day.
+ */
 async function loop() {
-  await safeCycle();
-  setTimeout(loop, CYCLE_INTERVAL_MS);
+  const last = getLastCycleAt();
+  const due = !last || Date.now() - new Date(last).getTime() >= CYCLE_INTERVAL_MS;
+  if (due) {
+    const completed = await safeCycle();
+    if (completed) setLastCycleAt(new Date().toISOString());
+  }
+  setTimeout(loop, CHECK_INTERVAL_MS);
 }
 
 export function startAiThreatSummaryJob() {
