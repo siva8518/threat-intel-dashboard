@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { BrainCircuit, ChevronDown, ChevronRight, ExternalLink, ShieldAlert, Gauge } from "lucide-react";
+import { BrainCircuit, ChevronDown, ChevronRight, ExternalLink, ShieldAlert, Gauge, FileDown, FileType } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { SeverityBadge } from "./SeverityBadge";
 import { useAiThreatSummaries } from "@/hooks/useAiThreatSummaries";
 import type { AiThreatSummaryReport } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
+import { downloadReportAsPdf, downloadReportAsWord } from "@/lib/reportExport";
 
 // Reports generated before the aiTechnicalSummary field existed (superseding
 // the old flat aiSummarizationBullets) won't have it at all -- falls back to
@@ -140,6 +141,32 @@ function GroupedLists({ title, groups }: { title: string; groups: Array<[string,
   );
 }
 
+/** Stops the click from also toggling the parent row's expand/collapse -- these buttons sit inside that row's clickable header area. */
+function DownloadButtons({ report }: { report: AiThreatSummaryReport }) {
+  return (
+    <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => downloadReportAsPdf(report)}
+        title="Download as PDF"
+        className="flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-muted transition-colors hover:text-foreground"
+      >
+        <FileDown className="h-3 w-3" />
+        PDF
+      </button>
+      <button
+        type="button"
+        onClick={() => downloadReportAsWord(report)}
+        title="Download as Word (.doc)"
+        className="flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-muted transition-colors hover:text-foreground"
+      >
+        <FileType className="h-3 w-3" />
+        Word
+      </button>
+    </div>
+  );
+}
+
 function IocRow({ label, values }: { label: string; values: string[] }) {
   if (values.length === 0) return null;
   return (
@@ -173,14 +200,16 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
 
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
-      <button type="button" onClick={onToggle} className="flex w-full items-start justify-between gap-3 p-3 text-left">
-        <div className="flex min-w-0 items-start gap-2">
+      <div className="flex w-full items-start justify-between gap-3 p-3">
+        <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-start gap-2 text-left">
           {expanded ? <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted" /> : <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted" />}
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-foreground">{report.articleTitle}</span>
               <SeverityBadge severity={report.severity} />
-              <Badge variant={priorityVariant(report.aiRiskScoring.priority)}>{report.aiRiskScoring.priority} priority</Badge>
+              <Badge variant={priorityVariant(report.aiRiskScoring.priority)} title={`AI-computed risk score: ${report.aiRiskScoring.score ?? "—"}/100. See "AI Risk Score" below for the reasoning.`}>
+                {report.aiRiskScoring.priority} priority
+              </Badge>
               {kevCount > 0 && (
                 <Badge variant="critical" className="gap-1">
                   <ShieldAlert className="h-3 w-3" />
@@ -190,23 +219,27 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             </div>
             <p className="mt-1 line-clamp-1 text-xs text-muted">{report.executiveSummary}</p>
           </div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1 text-xs text-muted">
+        </button>
+        <div className="flex shrink-0 flex-col items-end gap-1.5 text-xs text-muted">
+          <DownloadButtons report={report} />
           <span>{report.articleSource}</span>
           <span>{timeAgo(report.generatedAt)}</span>
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div className="space-y-5 border-t border-white/[0.06] px-3 pb-4 pt-3 text-sm">
-          <div className="flex flex-wrap gap-2">
-            <ScoreGauge label="AI Risk Score" value={report.aiRiskScoring.score == null ? "—" : `${report.aiRiskScoring.score}/100`} variant={priorityVariant(report.aiRiskScoring.priority)} />
-            <ScoreGauge label="SOC Priority" value={report.vendorSeverityAssessment.overallSocPriority} variant={priorityVariant(report.vendorSeverityAssessment.overallSocPriority)} />
-            <ScoreGauge
-              label="Confidence"
-              value={report.confidenceAssessment.level}
-              variant={report.confidenceAssessment.level === "High" ? "low" : report.confidenceAssessment.level === "Medium" ? "medium" : "high"}
-            />
+          <div>
+            <div className="flex flex-wrap gap-2">
+              <ScoreGauge label="AI Risk Score" value={report.aiRiskScoring.score == null ? "—" : `${report.aiRiskScoring.score}/100`} variant={priorityVariant(report.aiRiskScoring.priority)} />
+              <ScoreGauge
+                label="Analysis Confidence"
+                value={report.confidenceAssessment.level}
+                variant={report.confidenceAssessment.level === "High" ? "low" : report.confidenceAssessment.level === "Medium" ? "medium" : "high"}
+              />
+            </div>
+            {/* Confirmed live this reads as a contradiction otherwise -- "Confidence" sits right next to a risk/priority score, so a reader assumes it's on the same severity scale. It isn't: it's the model's own certainty that *this report* accurately reflects the source article, completely independent of how severe the underlying threat is. "Medium priority, High confidence" means "I'm quite sure this really is Medium," not "actually High." */}
+            <p className="mt-1.5 text-[11px] text-muted">Analysis Confidence is the model's certainty that this report reflects the source article -- not a severity signal. See "Overall SOC priority" below for the vendor-context assessment.</p>
           </div>
 
           <GroupedLists
