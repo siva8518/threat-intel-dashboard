@@ -117,7 +117,7 @@ const BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKi
 // pass and deliberately NOT added: Sysdig, Invicti, Doyensec, SpecterOps,
 // Positive Technologies, CyberArk, Trustwave SpiderLabs, SecurityScorecard,
 // Patchstack, Shadowserver, Fortra, WatchGuard, Malwation, Group-IB, Sansec,
-// NetSPI, Binary Defense, eSentire, Arctic Wolf, Kroll, Kudelski Security,
+// NetSPI, Binary Defense, eSentire, Kroll, Kudelski Security,
 // SEC Consult, SANS Institute's main blog (distinct from SANS ISC already
 // tracked), Offensive Security, HackTheBox, Intigriti, Team Cymru's blog
 // (its IP/ASN lookup is already used directly as an IOC-search lookup),
@@ -185,6 +185,16 @@ const FEEDS = [
   { source: "Canadian Centre for Cyber Security", url: "https://www.cyber.gc.ca/webservice/en/rss/alerts" },
 
   // -- Major vendor / security-firm threat research (see MAJOR_VENDOR_SOURCES below) --
+  // Arctic Wolf was previously tried and dropped as dead (see the batch note
+  // above) -- re-confirmed live it's back and its main /feed/ works, but that
+  // feed is dominated by webinars/buyer's-guides/product-update posts (5 of
+  // 6 sampled items were non-research). Its own RSS autodiscovery tag on the
+  // blog listing page points at a narrower "Blog Category Feed"
+  // (/resources/category/blog/feed/), confirmed live to be real threat
+  // research (CVE exploitation writeups, ransomware TTP breakdowns, security
+  // bulletins) -- used that instead, same "find the specific feed, not just
+  // any feed" approach as FortiGuard/AWS above.
+  { source: "Arctic Wolf", url: "https://arcticwolf.com/resources/category/blog/feed/" },
   { source: "Huntress", url: "https://www.huntress.com/blog/rss.xml" },
   { source: "Cybereason", url: "https://www.cybereason.com/blog/rss.xml" },
   { source: "Wiz Research", url: "https://www.wiz.io/blog/rss.xml" },
@@ -386,6 +396,7 @@ const FEEDS = [
  * (grouped)" filter option there.
  */
 export const MAJOR_VENDOR_SOURCES = new Set([
+  "Arctic Wolf",
   "Cisco Talos",
   "CrowdStrike",
   "Unit 42",

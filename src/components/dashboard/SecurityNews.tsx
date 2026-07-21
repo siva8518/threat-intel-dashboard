@@ -44,6 +44,7 @@ const GROUP_OPTIONS: Array<{ value: GroupBy; label: string; icon: typeof Skull }
 // manually with server/connectors/newsFeeds.js#MAJOR_VENDOR_SOURCES -- this
 // app has no shared client/server code layer.
 const MAJOR_VENDOR_SOURCES = new Set([
+  "Arctic Wolf",
   "Cisco Talos",
   "CrowdStrike",
   "Unit 42",
