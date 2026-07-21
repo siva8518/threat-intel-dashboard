@@ -2,12 +2,14 @@ import { useMemo, useState } from "react";
 import { BrainCircuit, ChevronDown, ChevronRight, ExternalLink, ShieldAlert, Gauge, FileDown, FileType } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { SeverityBadge } from "./SeverityBadge";
+import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { useAiThreatSummaries } from "@/hooks/useAiThreatSummaries";
-import type { AiThreatSummaryReport } from "@/types/threat-intel";
+import type { AiThreatSummaryReport, Severity } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 import { downloadReportAsPdf, downloadReportAsWord } from "@/lib/reportExport";
 
@@ -540,23 +542,42 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
  * Runs one report at a time in the background (see
  * server/aiThreatSummaryJob.js), so this fills in gradually.
  */
+const SEVERITY_FILTERS: Array<Severity | "all"> = ["all", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
+const SEVERITY_FILTER_LABEL: Record<Severity | "all", string> = {
+  all: "All severities",
+  CRITICAL: "Critical",
+  HIGH: "High",
+  MEDIUM: "Medium",
+  LOW: "Low",
+  UNKNOWN: "Unknown",
+};
+
 export function AiSummarization() {
   const { data, isLoading, isError, error } = useAiThreatSummaries();
   const [search, setSearch] = useState("");
+  const [severityFilter, setSeverityFilter] = useState<Severity | "all">("all");
+  const [dateRange, setDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const reports = data?.reports ?? [];
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return reports;
-    return reports.filter(
-      (r) =>
+    return reports.filter((r) => {
+      if (severityFilter !== "all" && r.severity !== severityFilter) return false;
+      // Filters by generatedAt (when the report itself appeared in this tab),
+      // not publishedDate (when the underlying article came out) -- matches
+      // the "just now"/"Nh ago" timestamp already shown on each row, so the
+      // date picker answers the same question the row itself is showing.
+      if (!isWithinDateRange(r.generatedAt, dateRange)) return false;
+      if (!q) return true;
+      return (
         r.articleTitle.toLowerCase().includes(q) ||
         r.cves.some((c) => c.id.toLowerCase().includes(q)) ||
         r.threatActors.some((a) => a.group.toLowerCase().includes(q)) ||
-        r.malware.some((m) => m.family.toLowerCase().includes(q)),
-    );
-  }, [reports, search]);
+        r.malware.some((m) => m.family.toLowerCase().includes(q))
+      );
+    });
+  }, [reports, search, severityFilter, dateRange]);
 
   function toggle(id: string) {
     setExpandedIds((prev) => {
@@ -585,7 +606,17 @@ export function AiSummarization() {
             guidance across major platforms, IR guidance, and role-based takeaways, not a news recap.
           </p>
         </div>
-        <Input placeholder="Search by title, CVE, actor, or malware…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:w-80" />
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <Input placeholder="Search by title, CVE, actor, or malware…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:w-72" />
+          <Select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value as Severity | "all")} className="w-full sm:w-40">
+            {SEVERITY_FILTERS.map((s) => (
+              <option key={s} value={s}>
+                {SEVERITY_FILTER_LABEL[s]}
+              </option>
+            ))}
+          </Select>
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
+        </div>
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -601,7 +632,7 @@ export function AiSummarization() {
             message={
               reports.length === 0
                 ? "No reports generated yet -- summarization runs one Critical/High/Medium vendor/CISA article at a time in the background; check back shortly."
-                : "No reports match this search."
+                : "No reports match this search/severity/date filter."
             }
           />
         ) : (
