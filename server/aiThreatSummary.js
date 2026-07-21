@@ -11,11 +11,18 @@
 // parts that genuinely require synthesis: narrative analysis, attack-chain
 // reconstruction, detection/hunting/IR guidance, and its own self-assessed
 // confidence/risk scoring.
-import { ollamaJson } from "./rag/ollamaClient.js";
-import { OLLAMA_CHAT_MODEL } from "./rag/config.js";
+import { groqJson } from "./groqClient.js";
 import { extractEntities } from "./githubIntel/extractor.js";
 import { detectionRulesFor } from "./correlate.js";
 import { fetchArticleText } from "./lib/articleText.js";
+
+// Groq's largest generally-available free-tier model -- this report's own
+// schema (25+ sections, several with per-platform hunting-query arrays) is
+// exactly the kind of output a smaller model struggles to fill out reliably
+// (confirmed live earlier with a local 1.5B-parameter model producing mostly
+// "Not Reported"/empty fields) -- so this stays on the strongest free option
+// rather than trading down for speed/quota headroom.
+const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || "llama-3.3-70b-versatile";
 
 const SYSTEM_PROMPT =
   "You are a Principal Cyber Threat Intelligence Analyst supporting an enterprise SOC, Detection Engineering, Incident Response, Threat Hunting, and Security Leadership. " +
@@ -521,35 +528,18 @@ export async function generateThreatSummary(article, grounded) {
     `Overall severity already computed for this article: ${grounded.severity}\n` +
     `${buildTechniqueCandidatesBlock(candidateTechniques)}\n`;
 
-  const response = await ollamaJson("/api/chat", {
-    model: OLLAMA_CHAT_MODEL,
+  // Groq is a hosted service with its own large context window (well past
+  // what this prompt + article text + completion ever needs), so none of
+  // the num_ctx/keep_alive tuning the old local-Ollama call needed here
+  // applies -- that was all working around this machine's own limited free
+  // RAM, not a property of the model or the task itself.
+  const response = await groqJson({
+    model: GROQ_CHAT_MODEL,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userContent },
     ],
-    // This report is far larger than this app's other LLM calls (25+
-    // sections, several with per-platform hunting-query arrays) -- confirmed
-    // live that Ollama's default context window is small enough to risk
-    // silently truncating a response this size mid-generation, which then
-    // fails JSON parsing entirely. Widened well past what this prompt +
-    // article + expected output should ever need. Raised again alongside
-    // the full-article-text fetch above (server/lib/articleText.js) -- the
-    // prompt now carries up to ~14,000 chars of article body on top of the
-    // schema instructions, so the old budget left too little room for a
-    // long, detail-rich completion.
-    //
-    // Pulled back from 24576 to 16384 -- confirmed live this app's other
-    // Ollama call (server/combinedExtraction.js) uses no num_ctx at all
-    // (Ollama's smaller default), and switching num_ctx forces Ollama to
-    // reinitialize the model's context buffer on every call. On this
-    // machine's tight free RAM (also hosting a second, separate embedding
-    // model), that repeated reinit lined up closely with a recurring Ollama
-    // "Stopping..." unload deadlock that froze this job for hours. System
-    // prompt (~12,100 chars) + article text (up to ~14,000 chars) + a large
-    // structured JSON completion tops out around 10-12K tokens in the worst
-    // case -- 16384 keeps ~1.4-1.6x headroom over that, same safety margin
-    // in spirit as the original widening above, just not double it.
-    options: { temperature: 0.2, num_ctx: 16384 },
+    temperature: 0.2,
   });
 
   const modelReport = parseModelReport(response.message?.content ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);

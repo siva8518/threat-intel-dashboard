@@ -439,11 +439,13 @@ response guidance, priority-bucketed immediate recommendations, patch informatio
 scoring, and five role-specific takeaways (SOC analyst, detection engineer, threat hunter, threat
 intel, executive leadership).
 
-- `server/aiThreatSummary.js` builds the prompt and calls the same local Ollama chat model the AI
-  Assistant tab uses (`llama3.1:8b` by default) — same free, local, no-API-key setup as the RAG
-  chatbot above, no additional install needed. Both features deliberately share one model: an earlier
-  attempt to give AI Summarization its own smaller/faster model caused Ollama to thrash swapping
-  between two loaded models under constrained memory, net slower and less reliable than sharing one.
+- `server/aiThreatSummary.js` builds the prompt and calls Groq's free hosted API (`llama-3.3-70b-versatile`
+  by default) — unlike the RAG Assistant above, this does **not** run on local Ollama. It's this app's
+  single heaviest LLM call (a 25+ section structured report per article), and moving just this one call
+  to a hosted free tier avoids the local model's own memory/reliability limits under sustained load. Get
+  a free key (no card required) at [console.groq.com/keys](https://console.groq.com/keys) and set
+  `GROQ_API_KEY` in `.env` — without it, AI Summarization reports itself unavailable, same "quiet
+  not-configured" pattern as every other optional keyed source in this app.
 - The AI Technical Summary is explicitly a technical-extraction task, not an executive summary --
   the prompt instructs the model to preserve named vulnerability classes, exact configuration/trigger
   names, and precise exploitation mechanisms verbatim rather than abstracting them into generic
@@ -464,13 +466,13 @@ intel, executive leadership).
   automatically the moment `ELIGIBLE_SEVERITIES` in `aiThreatSummaryJob.js` was widened). Within the
   eligible pool, candidates are processed Critical-first, then High, Medium, Low, newest-first within
   each tier -- so a high-priority article can't get stuck behind a large backlog of lower-priority ones.
-- `server/aiThreatSummaryJob.js` processes a small batch of articles every few minutes in the
-  background, scoped to vendor/CISA sources only. Reports persist to
-  `server/.cache/ai-threat-summaries.json` and are never regenerated once produced.
-- Generation speed depends entirely on your Ollama setup — CPU-only inference can take several minutes
-  per report given the schema's size; a GPU speeds this up substantially. A smaller/faster model is
-  tempting but risky on memory-constrained machines if it means Ollama has to keep swapping between it
-  and whatever model your other AI features already use.
+- `server/aiThreatSummaryJob.js` runs once every 24h (not continuously), processing up to 20 vendor/CISA
+  articles per run. The 24h cadence is persisted (`lastCycleAt` in the report store) so a backend
+  restart mid-day doesn't reset the clock and trigger an extra run early. Reports persist to
+  `server/.cache/ai-threat-summaries.json`, are never regenerated once produced, and are pruned once
+  they're more than 24h old -- the tab is a rolling "today" view, not a growing archive.
+- Generation speed is Groq's hosted inference (typically seconds per report, not minutes) rather than
+  whatever this machine's own CPU/GPU can do locally.
 
 ## Environment variables
 

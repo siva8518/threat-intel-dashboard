@@ -22,7 +22,7 @@ import { tagNewsItems } from "./newsCorrelation.js";
 import { generateThreatSummary } from "./aiThreatSummary.js";
 import { isArticleProcessed, markArticleProcessed, addReport, pruneExpiredReports, getLastCycleAt, setLastCycleAt } from "./aiThreatSummaryStore.js";
 import { queryCves } from "./connectors/nvd.js";
-import { OllamaUnavailableError } from "./rag/ollamaClient.js";
+import { GroqUnavailableError } from "./groqClient.js";
 import { log } from "./lib/log.js";
 
 // A separate attempt to also switch to a smaller/faster model just for this
@@ -157,7 +157,23 @@ async function enrichCveIds(cveIds, kevEntries, epssScores) {
   return enrichment;
 }
 
+/**
+ * Distinct from "genuinely zero eligible candidates today" -- thrown when
+ * the news cache hasn't populated yet at all (cache.getEntry returns no
+ * `.data`), which only happens in the ~30-60s window right after a cold
+ * boot before the news connector's first sync completes. Confirmed live:
+ * this job's own 30s startup delay is shorter than that window, so its
+ * very first check on a fresh boot could see an empty cache, call it "no
+ * candidates," and -- under the daily cadence -- lock the schedule for 24h
+ * having never actually looked at real data. safeCycle() below treats this
+ * the same as an Ollama outage: don't advance lastCycleAt, just retry on
+ * the next CHECK_INTERVAL_MS tick once the cache is actually warm.
+ */
+class NewsCacheNotReadyError extends Error {}
+
 async function runCycle() {
+  if (!cache.getEntry("news").data) throw new NewsCacheNotReadyError("News cache has not synced yet");
+
   // Unconditional, even if today turns out to have zero eligible candidates
   // below -- the 24h rotation is a standing rule ("clear them out post 24
   // hours"), not something that should depend on whether a replacement is
@@ -230,7 +246,7 @@ async function runCycle() {
         markArticleProcessed(item.link);
       }
     } catch (error) {
-      if (error instanceof OllamaUnavailableError) throw error; // stop the cycle -- Ollama being down affects every remaining article the same way
+      if (error instanceof GroqUnavailableError) throw error; // stop the cycle -- Groq being down/rate-limited affects every remaining article the same way
       log.error("ai-threat-summary", `failed to summarize "${item.title.slice(0, 60)}...": ${error.message}`);
       markArticleProcessed(item.link);
     }
@@ -243,13 +259,13 @@ let hasWarnedUnavailable = false;
 
 /**
  * Returns whether today's cycle should count as "done" for lastCycleAt
- * purposes. Ollama being unavailable does NOT count -- if the daily cycle
- * lands during an Ollama outage, we want the next CHECK_INTERVAL_MS tick to
- * retry (and keep retrying) until it recovers, not silently skip an entire
- * day's reports waiting for the next 24h boundary. Any other failure
- * (a bad article, an NVD hiccup) still counts as this day's attempt --
- * those already log per-article inside runCycle() and don't warrant a
- * retry-loop every 10 minutes.
+ * purposes. Groq being unavailable (down, or free-tier rate-limited) does
+ * NOT count -- if the daily cycle lands during an outage, we want the next
+ * CHECK_INTERVAL_MS tick to retry (and keep retrying) until it recovers,
+ * not silently skip an entire day's reports waiting for the next 24h
+ * boundary. Any other failure (a bad article, an NVD hiccup) still counts
+ * as this day's attempt -- those already log per-article inside runCycle()
+ * and don't warrant a retry-loop every 10 minutes.
  */
 async function safeCycle() {
   try {
@@ -257,11 +273,17 @@ async function safeCycle() {
     hasWarnedUnavailable = false;
     return true;
   } catch (error) {
-    if (error instanceof OllamaUnavailableError) {
+    if (error instanceof GroqUnavailableError) {
       if (!hasWarnedUnavailable) {
-        log.warn("ai-threat-summary", `${error.message} -- AI Summarization will report itself unavailable until Ollama is running.`);
+        log.warn("ai-threat-summary", `${error.message} -- AI Summarization will report itself unavailable until Groq is reachable again.`);
         hasWarnedUnavailable = true;
       }
+      return false;
+    }
+    if (error instanceof NewsCacheNotReadyError) {
+      // Deliberately no log line -- this fires routinely on every cold boot
+      // for one tick and would just be noise; it's not a fault, just "too
+      // early," resolved by the very next check a few minutes later.
       return false;
     }
     log.error("ai-threat-summary", `cycle failed: ${error.message}`);
