@@ -205,8 +205,50 @@ const TECHNIQUE_ID_SHAPE = /^T\d{4}(\.\d{3})?$/i;
 // a later report put a genuinely correct ID ("T1213.002", SharePoint data
 // collection) into the `technique` (name) field instead of `techniqueId`,
 // which the ID-only check above would have silently missed.
+// Second-tier recovery for the exact-name lookup above: the model
+// frequently paraphrases MITRE's own technique names (e.g. "Exploitation of
+// Public-Facing Application" instead of MITRE's actual "Exploit
+// Public-Facing Application" for T1190) well enough that a human reads it as
+// obviously the same technique, but a plain case-insensitive string compare
+// misses it -- confirmed live this was rendering as the "T????" placeholder
+// for a completely standard, correctly-identified technique. Stripping
+// filler words and crude-stemming common verb suffixes (-ation/-ing/-ed/-s)
+// collapses both phrasings to the same key without ever inventing an ID that
+// isn't already in the real catalog -- a normalized match still only ever
+// resolves to a real (id, name) pair pulled from idToTechniqueName.
+const MITRE_NAME_STOPWORDS = new Set(["of", "the", "a", "an", "via", "and", "or", "in", "on", "to", "for", "with"]);
+
+function stemTechniqueWord(word) {
+  if (word.length > 6 && word.endsWith("ation")) return word.slice(0, -5);
+  if (word.length > 5 && word.endsWith("ing")) return word.slice(0, -3);
+  if (word.length > 4 && word.endsWith("ed")) return word.slice(0, -2);
+  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  return word;
+}
+
+function normalizeTechniqueName(name) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .split(/\s+/)
+    .filter((w) => w && !MITRE_NAME_STOPWORDS.has(w))
+    .map(stemTechniqueWord)
+    .sort()
+    .join(" ");
+}
+
+function buildNormalizedNameToId(idToTechniqueName) {
+  const map = new Map();
+  for (const [id, name] of idToTechniqueName) {
+    const key = normalizeTechniqueName(name);
+    if (!map.has(key)) map.set(key, id);
+  }
+  return map;
+}
+
 function safeMitreArray(value, validTechniqueIds, techniqueNameToId, idToTechniqueName) {
   if (!Array.isArray(value)) return [];
+  const normalizedNameToId = buildNormalizedNameToId(idToTechniqueName);
   return value
     .filter((v) => v && typeof v === "object" && typeof v.technique === "string")
     .map((v) => {
@@ -232,6 +274,9 @@ function safeMitreArray(value, validTechniqueIds, techniqueNameToId, idToTechniq
         // backfill -- it's not a guess, it's looking up a name the model
         // already committed to.
         techniqueId = techniqueNameToId.get(techniqueName.toLowerCase()) ?? null;
+      }
+      if (!techniqueId) {
+        techniqueId = normalizedNameToId.get(normalizeTechniqueName(techniqueName)) ?? null;
       }
       return {
         technique: techniqueName,
