@@ -90,7 +90,34 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   parts.push(`<p class="meta">Analysis Confidence: ${esc(report.confidenceAssessment.level)} (the model's certainty in this report, not a severity signal)</p>`);
 
   parts.push(heading(2, "Executive Summary"));
+  if (report.executiveHeadline) parts.push(`<p><strong>${esc(report.executiveHeadline)}</strong></p>`);
   parts.push(paragraph(report.executiveSummary));
+
+  parts.push(
+    keyValueSection("Business Impact", [
+      ["Business risk", report.businessImpact.businessRisk],
+      ["Operational disruption", report.businessImpact.operationalDisruption],
+      ["Likelihood of exploitation", report.businessImpact.likelihoodOfExploitation],
+      ["Impact if unpatched", report.businessImpact.impactIfUnpatched],
+    ]),
+  );
+
+  parts.push(
+    groupedListsSection("Affected Industries", [
+      ["Industries commonly targeted", report.businessImpact.industriesCommonlyTargeted ?? []],
+      ["Regions impacted", report.businessImpact.regionsCommonlyTargeted ?? []],
+    ]),
+  );
+
+  parts.push(
+    groupedListsSection("Affected Products", [
+      ["Products", report.affectedProducts.products],
+      ["Versions", report.affectedProducts.versions],
+      ["Operating systems", report.affectedProducts.operatingSystems],
+      ["Cloud services", report.affectedProducts.cloudServices],
+      ["Applications", report.affectedProducts.applications],
+    ]),
+  );
 
   parts.push(
     keyValueSection("Threat Overview", [
@@ -118,31 +145,6 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
       ["Detection Opportunities", summary.detectionOpportunities],
       ["Hunting Opportunities", summary.huntingOpportunities],
       ["Immediate Actions", summary.immediateActions],
-    ]),
-  );
-
-  parts.push(
-    keyValueSection("Business Impact", [
-      ["Business risk", report.businessImpact.businessRisk],
-      ["Operational disruption", report.businessImpact.operationalDisruption],
-      ["Likelihood of exploitation", report.businessImpact.likelihoodOfExploitation],
-      ["Impact if unpatched", report.businessImpact.impactIfUnpatched],
-    ]),
-  );
-  if (report.businessImpact.industriesCommonlyTargeted?.length > 0) {
-    parts.push(`<p><em>Industries commonly targeted: ${report.businessImpact.industriesCommonlyTargeted.map(esc).join(", ")}</em></p>`);
-  }
-  if (report.businessImpact.regionsCommonlyTargeted?.length > 0) {
-    parts.push(`<p><em>Regions impacted: ${report.businessImpact.regionsCommonlyTargeted.map(esc).join(", ")}</em></p>`);
-  }
-
-  parts.push(
-    groupedListsSection("Affected Products", [
-      ["Products", report.affectedProducts.products],
-      ["Versions", report.affectedProducts.versions],
-      ["Operating systems", report.affectedProducts.operatingSystems],
-      ["Cloud services", report.affectedProducts.cloudServices],
-      ["Applications", report.affectedProducts.applications],
     ]),
   );
 

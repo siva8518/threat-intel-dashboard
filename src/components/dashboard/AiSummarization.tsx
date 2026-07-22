@@ -252,8 +252,38 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
 
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Summary</h4>
+            {report.executiveHeadline && <p className="mb-1.5 text-base font-semibold text-foreground">{report.executiveHeadline}</p>}
             <p className="text-foreground">{report.executiveSummary}</p>
           </div>
+
+          <KeyValueBlock
+            title="Business Impact"
+            pairs={[
+              ["Business risk", report.businessImpact.businessRisk],
+              ["Operational disruption", report.businessImpact.operationalDisruption],
+              ["Likelihood of exploitation", report.businessImpact.likelihoodOfExploitation],
+              ["Impact if unpatched", report.businessImpact.impactIfUnpatched],
+            ]}
+          />
+
+          <GroupedLists
+            title="Affected Industries"
+            groups={[
+              ["Industries commonly targeted", report.businessImpact.industriesCommonlyTargeted ?? []],
+              ["Regions impacted", report.businessImpact.regionsCommonlyTargeted ?? []],
+            ]}
+          />
+
+          <GroupedLists
+            title="Affected Products"
+            groups={[
+              ["Products", report.affectedProducts.products],
+              ["Versions", report.affectedProducts.versions],
+              ["Operating systems", report.affectedProducts.operatingSystems],
+              ["Cloud services", report.affectedProducts.cloudServices],
+              ["Applications", report.affectedProducts.applications],
+            ]}
+          />
 
           <KeyValueBlock
             title="Threat Overview"
@@ -287,38 +317,6 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                 ["Immediate Actions", summary.immediateActions],
               ] as Array<[string, string[]]>;
             })()}
-          />
-
-          <KeyValueBlock
-            title="Business Impact"
-            pairs={[
-              ["Business risk", report.businessImpact.businessRisk],
-              ["Operational disruption", report.businessImpact.operationalDisruption],
-              ["Likelihood of exploitation", report.businessImpact.likelihoodOfExploitation],
-              ["Impact if unpatched", report.businessImpact.impactIfUnpatched],
-            ]}
-          />
-          {(() => {
-            const industries = report.businessImpact.industriesCommonlyTargeted ?? [];
-            const regions = report.businessImpact.regionsCommonlyTargeted ?? [];
-            if (industries.length === 0 && regions.length === 0) return null;
-            return (
-              <div className="-mt-3 space-y-0.5 text-xs text-muted">
-                {industries.length > 0 && <div>Industries commonly targeted: {industries.join(", ")}</div>}
-                {regions.length > 0 && <div>Regions impacted: {regions.join(", ")}</div>}
-              </div>
-            );
-          })()}
-
-          <GroupedLists
-            title="Affected Products"
-            groups={[
-              ["Products", report.affectedProducts.products],
-              ["Versions", report.affectedProducts.versions],
-              ["Operating systems", report.affectedProducts.operatingSystems],
-              ["Cloud services", report.affectedProducts.cloudServices],
-              ["Applications", report.affectedProducts.applications],
-            ]}
           />
 
           <KeyValueBlock

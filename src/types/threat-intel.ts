@@ -970,6 +970,7 @@ export interface AiThreatSummaryReport {
   iocs: AiThreatSummaryIocs;
   references: AiThreatSummaryReference[];
   aiTechnicalSummary: AiThreatSummaryTechnicalSummary;
+  executiveHeadline: string;
   executiveSummary: string;
   businessImpact: AiThreatSummaryBusinessImpact;
   threatOverview: AiThreatSummaryThreatOverview;
