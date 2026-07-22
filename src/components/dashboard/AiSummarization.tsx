@@ -250,8 +250,24 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             <p className="text-foreground">{report.executiveSummary}</p>
           </div>
 
+          <KeyValueBlock
+            title="Threat Overview"
+            pairs={[
+              ["Attack chain", report.threatOverview.attackChain],
+              ["Initial access", report.threatOverview.initialAccess],
+              ["Privilege escalation", report.threatOverview.privilegeEscalation],
+              ["Execution", report.threatOverview.execution],
+              ["Persistence", report.threatOverview.persistence],
+              ["Defense evasion", report.threatOverview.defenseEvasion],
+              ["Lateral movement", report.threatOverview.lateralMovement],
+              ["Command & control", report.threatOverview.commandAndControl],
+              ["Data theft", report.threatOverview.dataTheft],
+              ["Ransomware deployment", report.threatOverview.ransomwareDeployment],
+            ]}
+          />
+
           <GroupedLists
-            title="AI Technical Summary"
+            title="Technical Summary"
             groups={(() => {
               const summary = report.aiTechnicalSummary ?? EMPTY_TECHNICAL_SUMMARY;
               return [
@@ -288,22 +304,6 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               </div>
             );
           })()}
-
-          <KeyValueBlock
-            title="Threat Overview"
-            pairs={[
-              ["Attack chain", report.threatOverview.attackChain],
-              ["Initial access", report.threatOverview.initialAccess],
-              ["Privilege escalation", report.threatOverview.privilegeEscalation],
-              ["Execution", report.threatOverview.execution],
-              ["Persistence", report.threatOverview.persistence],
-              ["Defense evasion", report.threatOverview.defenseEvasion],
-              ["Lateral movement", report.threatOverview.lateralMovement],
-              ["Command & control", report.threatOverview.commandAndControl],
-              ["Data theft", report.threatOverview.dataTheft],
-              ["Ransomware deployment", report.threatOverview.ransomwareDeployment],
-            ]}
-          />
 
           <GroupedLists
             title="Affected Products"

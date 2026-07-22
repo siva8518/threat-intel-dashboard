@@ -93,7 +93,22 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   parts.push(paragraph(report.executiveSummary));
 
   parts.push(
-    groupedListsSection("AI Technical Summary", [
+    keyValueSection("Threat Overview", [
+      ["Attack chain", report.threatOverview.attackChain],
+      ["Initial access", report.threatOverview.initialAccess],
+      ["Privilege escalation", report.threatOverview.privilegeEscalation],
+      ["Execution", report.threatOverview.execution],
+      ["Persistence", report.threatOverview.persistence],
+      ["Defense evasion", report.threatOverview.defenseEvasion],
+      ["Lateral movement", report.threatOverview.lateralMovement],
+      ["Command & control", report.threatOverview.commandAndControl],
+      ["Data theft", report.threatOverview.dataTheft],
+      ["Ransomware deployment", report.threatOverview.ransomwareDeployment],
+    ]),
+  );
+
+  parts.push(
+    groupedListsSection("Technical Summary", [
       ["Threat", summary.threat],
       ["Attack Vector", summary.attackVector],
       ["Root Cause", summary.rootCause],
@@ -120,21 +135,6 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   if (report.businessImpact.regionsCommonlyTargeted?.length > 0) {
     parts.push(`<p><em>Regions impacted: ${report.businessImpact.regionsCommonlyTargeted.map(esc).join(", ")}</em></p>`);
   }
-
-  parts.push(
-    keyValueSection("Threat Overview", [
-      ["Attack chain", report.threatOverview.attackChain],
-      ["Initial access", report.threatOverview.initialAccess],
-      ["Privilege escalation", report.threatOverview.privilegeEscalation],
-      ["Execution", report.threatOverview.execution],
-      ["Persistence", report.threatOverview.persistence],
-      ["Defense evasion", report.threatOverview.defenseEvasion],
-      ["Lateral movement", report.threatOverview.lateralMovement],
-      ["Command & control", report.threatOverview.commandAndControl],
-      ["Data theft", report.threatOverview.dataTheft],
-      ["Ransomware deployment", report.threatOverview.ransomwareDeployment],
-    ]),
-  );
 
   parts.push(
     groupedListsSection("Affected Products", [
