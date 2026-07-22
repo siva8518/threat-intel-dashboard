@@ -209,7 +209,7 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-foreground">{report.articleTitle}</span>
               <SeverityBadge severity={report.severity} />
-              <Badge variant={priorityVariant(report.aiRiskScoring.priority)} title={`AI-computed risk score: ${report.aiRiskScoring.score ?? "—"}/100. See "AI Risk Score" below for the reasoning.`}>
+              <Badge variant={priorityVariant(report.aiRiskScoring.priority)} title={`AI-computed risk score: ${report.aiRiskScoring.score ?? "—"}/100. See "Risk Score" below for the reasoning.`}>
                 {report.aiRiskScoring.priority} priority
               </Badge>
               {kevCount > 0 && (
@@ -233,7 +233,12 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
         <div className="space-y-5 border-t border-white/[0.06] px-3 pb-4 pt-3 text-sm">
           <div>
             <div className="flex flex-wrap gap-2">
-              <ScoreGauge label="AI Risk Score" value={report.aiRiskScoring.score == null ? "—" : `${report.aiRiskScoring.score}/100`} variant={priorityVariant(report.aiRiskScoring.priority)} />
+              <ScoreGauge
+                label="Risk Score"
+                value={report.aiRiskScoring.score == null ? "—" : `${report.aiRiskScoring.score}/100`}
+                variant={priorityVariant(report.aiRiskScoring.priority)}
+                title={`Why ${report.aiRiskScoring.score ?? "—"}/100: ${report.aiRiskScoring.reasoning}`}
+              />
               <ScoreGauge
                 label="Analysis Confidence"
                 value={report.confidenceAssessment.level}
