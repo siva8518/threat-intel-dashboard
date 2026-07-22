@@ -89,6 +89,9 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   // model is that *this report* reflects the source article.
   parts.push(`<p class="meta">Analysis Confidence: ${esc(report.confidenceAssessment.level)} (the model's certainty in this report, not a severity signal)</p>`);
 
+  parts.push(heading(2, "Executive Summary"));
+  parts.push(paragraph(report.executiveSummary));
+
   parts.push(
     groupedListsSection("AI Technical Summary", [
       ["Threat", summary.threat],
@@ -103,9 +106,6 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     ]),
   );
 
-  parts.push(heading(2, "Executive Summary"));
-  parts.push(paragraph(report.executiveSummary));
-
   parts.push(
     keyValueSection("Business Impact", [
       ["Business risk", report.businessImpact.businessRisk],
@@ -114,8 +114,11 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
       ["Impact if unpatched", report.businessImpact.impactIfUnpatched],
     ]),
   );
-  if (report.businessImpact.industriesCommonlyTargeted.length > 0) {
+  if (report.businessImpact.industriesCommonlyTargeted?.length > 0) {
     parts.push(`<p><em>Industries commonly targeted: ${report.businessImpact.industriesCommonlyTargeted.map(esc).join(", ")}</em></p>`);
+  }
+  if (report.businessImpact.regionsCommonlyTargeted?.length > 0) {
+    parts.push(`<p><em>Regions impacted: ${report.businessImpact.regionsCommonlyTargeted.map(esc).join(", ")}</em></p>`);
   }
 
   parts.push(
@@ -287,6 +290,10 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   parts.push(paragraph(report.threatIntelTakeaway));
   parts.push(heading(3, "Executive Leadership"));
   parts.push(paragraph(report.executiveLeadershipTakeaway));
+  if (report.cves.length > 0 && report.vulnerabilityManagementTakeaway && report.vulnerabilityManagementTakeaway !== "Not Applicable") {
+    parts.push(heading(3, "Vulnerability Management"));
+    parts.push(paragraph(report.vulnerabilityManagementTakeaway));
+  }
 
   parts.push(heading(2, "Confidence & Risk Reasoning"));
   parts.push(paragraph(`Confidence (${report.confidenceAssessment.level}): ${report.confidenceAssessment.reasoning}`));

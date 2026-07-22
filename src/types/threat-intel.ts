@@ -843,6 +843,7 @@ export interface AiThreatSummaryBusinessImpact {
   operationalDisruption: string;
   likelihoodOfExploitation: string;
   industriesCommonlyTargeted: string[];
+  regionsCommonlyTargeted: string[];
   impactIfUnpatched: string;
 }
 
@@ -990,4 +991,5 @@ export interface AiThreatSummaryReport {
   threatHunterTakeaway: string;
   threatIntelTakeaway: string;
   executiveLeadershipTakeaway: string;
+  vulnerabilityManagementTakeaway: string;
 }

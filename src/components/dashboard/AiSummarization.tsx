@@ -45,10 +45,10 @@ function priorityVariant(priority: string): "critical" | "high" | "medium" | "lo
   return "muted";
 }
 
-function ScoreGauge({ label, value, variant }: { label: string; value: string; variant: "critical" | "high" | "medium" | "low" | "muted" }) {
+function ScoreGauge({ label, value, variant, title }: { label: string; value: string; variant: "critical" | "high" | "medium" | "low" | "muted"; title?: string }) {
   const iconClass = variant === "critical" ? "text-critical" : variant === "high" ? "text-high" : variant === "medium" ? "text-medium" : variant === "low" ? "text-low" : "text-muted";
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2">
+    <div className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2" title={title}>
       <Gauge className={cn("h-4 w-4", iconClass)} />
       <div>
         <div className="text-[10px] uppercase tracking-wider text-muted">{label}</div>
@@ -238,10 +238,16 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                 label="Analysis Confidence"
                 value={report.confidenceAssessment.level}
                 variant={report.confidenceAssessment.level === "High" ? "low" : report.confidenceAssessment.level === "Medium" ? "medium" : "high"}
+                title={`Why ${report.confidenceAssessment.level}: ${report.confidenceAssessment.reasoning}`}
               />
             </div>
             {/* Confirmed live this reads as a contradiction otherwise -- "Confidence" sits right next to a risk/priority score, so a reader assumes it's on the same severity scale. It isn't: it's the model's own certainty that *this report* accurately reflects the source article, completely independent of how severe the underlying threat is. "Medium priority, High confidence" means "I'm quite sure this really is Medium," not "actually High." */}
             <p className="mt-1.5 text-[11px] text-muted">Analysis Confidence is the model's certainty that this report reflects the source article -- not a severity signal. See "Overall SOC priority" below for the vendor-context assessment.</p>
+          </div>
+
+          <div>
+            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Summary</h4>
+            <p className="text-foreground">{report.executiveSummary}</p>
           </div>
 
           <GroupedLists
@@ -262,11 +268,6 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             })()}
           />
 
-          <div>
-            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Summary</h4>
-            <p className="text-foreground">{report.executiveSummary}</p>
-          </div>
-
           <KeyValueBlock
             title="Business Impact"
             pairs={[
@@ -276,9 +277,17 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               ["Impact if unpatched", report.businessImpact.impactIfUnpatched],
             ]}
           />
-          {report.businessImpact.industriesCommonlyTargeted.length > 0 && (
-            <div className="-mt-3 text-xs text-muted">Industries commonly targeted: {report.businessImpact.industriesCommonlyTargeted.join(", ")}</div>
-          )}
+          {(() => {
+            const industries = report.businessImpact.industriesCommonlyTargeted ?? [];
+            const regions = report.businessImpact.regionsCommonlyTargeted ?? [];
+            if (industries.length === 0 && regions.length === 0) return null;
+            return (
+              <div className="-mt-3 space-y-0.5 text-xs text-muted">
+                {industries.length > 0 && <div>Industries commonly targeted: {industries.join(", ")}</div>}
+                {regions.length > 0 && <div>Regions impacted: {regions.join(", ")}</div>}
+              </div>
+            );
+          })()}
 
           <KeyValueBlock
             title="Threat Overview"
@@ -497,6 +506,12 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Leadership Takeaway</h4>
               <p className="text-foreground">{report.executiveLeadershipTakeaway}</p>
             </div>
+            {report.cves.length > 0 && report.vulnerabilityManagementTakeaway && report.vulnerabilityManagementTakeaway !== "Not Applicable" && (
+              <div>
+                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Vulnerability Management Takeaway</h4>
+                <p className="text-foreground">{report.vulnerabilityManagementTakeaway}</p>
+              </div>
+            )}
           </div>
 
           <div>
