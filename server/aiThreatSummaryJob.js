@@ -171,6 +171,21 @@ async function enrichCveIds(cveIds, kevEntries, epssScores) {
  */
 class NewsCacheNotReadyError extends Error {}
 
+// Thrown instead of a plain early return so a day with genuinely nothing new
+// to summarize doesn't get treated the same as a day that actually generated
+// reports. Confirmed live: with a plain `return`, safeCycle() saw this as a
+// full success and called setLastCycleAt(), locking the schedule for a full
+// 24h even though zero reports were produced -- combined with an extended
+// Groq outage eating into the same window and the store's own 24h report
+// rotation pruning whatever was already there, the tab went completely
+// empty for the better part of a day with no way to recover early even
+// after Groq came back and new articles arrived. Checking for candidates is
+// just a cache filter, no LLM call -- so retrying this every
+// CHECK_INTERVAL_MS instead of waiting out the full cycle costs nothing
+// against Groq's quota; lastCycleAt only ever advances once real work
+// (a non-empty batch) has actually been attempted.
+class NoEligibleCandidatesError extends Error {}
+
 async function runCycle() {
   if (!cache.getEntry("news").data) throw new NewsCacheNotReadyError("News cache has not synced yet");
 
@@ -183,7 +198,7 @@ async function runCycle() {
 
   const newsItems = cache.getEntry("news").data?.items ?? [];
   const candidates = newsItems.filter((item) => isEligibleSource(item.source) && isRecent(item.publishedDate) && !isArticleProcessed(item.link));
-  if (candidates.length === 0) return;
+  if (candidates.length === 0) throw new NoEligibleCandidatesError("No eligible candidates in this check");
 
   const attackData = cache.getEntry("attack").data;
   const kevEntries = cache.getEntry("cisa-kev").data?.entries;
@@ -263,9 +278,11 @@ let hasWarnedUnavailable = false;
  * NOT count -- if the daily cycle lands during an outage, we want the next
  * CHECK_INTERVAL_MS tick to retry (and keep retrying) until it recovers,
  * not silently skip an entire day's reports waiting for the next 24h
- * boundary. Any other failure (a bad article, an NVD hiccup) still counts
- * as this day's attempt -- those already log per-article inside runCycle()
- * and don't warrant a retry-loop every 10 minutes.
+ * boundary. Zero eligible candidates also does NOT count, same reasoning --
+ * see NoEligibleCandidatesError above. Any other failure (a bad article, an
+ * NVD hiccup) still counts as this day's attempt -- those already log
+ * per-article inside runCycle() and don't warrant a retry-loop every 10
+ * minutes.
  */
 async function safeCycle() {
   try {
@@ -280,10 +297,10 @@ async function safeCycle() {
       }
       return false;
     }
-    if (error instanceof NewsCacheNotReadyError) {
-      // Deliberately no log line -- this fires routinely on every cold boot
-      // for one tick and would just be noise; it's not a fault, just "too
-      // early," resolved by the very next check a few minutes later.
+    if (error instanceof NewsCacheNotReadyError || error instanceof NoEligibleCandidatesError) {
+      // Deliberately no log line for either -- both fire routinely (cold
+      // boot / a genuinely quiet news cycle) and would just be noise; not a
+      // fault, resolved on its own the moment real data/candidates show up.
       return false;
     }
     log.error("ai-threat-summary", `cycle failed: ${error.message}`);
