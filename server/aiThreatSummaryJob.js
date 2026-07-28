@@ -20,7 +20,7 @@ import * as cache from "./cache.js";
 import { MAJOR_VENDOR_SOURCES } from "./connectors/newsFeeds.js";
 import { tagNewsItems } from "./newsCorrelation.js";
 import { generateThreatSummary } from "./aiThreatSummary.js";
-import { isArticleProcessed, markArticleProcessed, addReport, pruneExpiredReports, getLastCycleAt, setLastCycleAt } from "./aiThreatSummaryStore.js";
+import { isArticleProcessed, markArticleProcessed, addReport, getLastCycleAt, setLastCycleAt } from "./aiThreatSummaryStore.js";
 import { queryCves } from "./connectors/nvd.js";
 import { GroqUnavailableError } from "./groqClient.js";
 import { log } from "./lib/log.js";
@@ -37,15 +37,21 @@ import { log } from "./lib/log.js";
 // finishes, not only once the whole batch completes, so raising BATCH_SIZE
 // shortens time-to-first-report within a cycle too.
 //
-// Moved from a continuous every-2-minutes drip to one batch a day, plus the
-// store's own 24h rotation (see aiThreatSummaryStore.js#pruneExpiredReports)
-// -- this was the actual, most direct lever for cutting how often this app
-// hits the local Ollama model, distinct from (and on top of) the timeout/
-// watchdog/queue mitigations already in place for the deadlock itself.
-// BATCH_SIZE raised from 5 to 20 to match: at once-a-day, 5 would leave most
-// of a day's Critical/High volume never covered before it aged out of
+// Moved from a continuous every-2-minutes drip to one batch a day -- this
+// was the actual, most direct lever for cutting how often this app hits the
+// local Ollama model, distinct from (and on top of) the timeout/watchdog/
+// queue mitigations already in place for the deadlock itself. BATCH_SIZE
+// raised from 5 to 20 to match: at once-a-day, 5 would leave most of a
+// day's Critical/High volume never covered before it aged out of
 // RECENCY_WINDOW_MS below, defeating the "new reports flowing in" goal this
 // cadence change is for.
+//
+// The store's own 24h report-retention window was removed (see
+// aiThreatSummaryStore.js) -- with Groq's free tier frequently unable to
+// complete a full batch before rate-limiting, pruning "yesterday's" reports
+// on a fixed clock could empty the tab for a long stretch with nothing yet
+// generated to replace them. Reports now simply accumulate up to
+// MAX_REPORTS and age out by count, not by a clock.
 const BATCH_SIZE = 20;
 const CYCLE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h -- the real generation cadence, persisted (see below), not just a setTimeout gap
 // How often loop() wakes up to check whether CYCLE_INTERVAL_MS has actually
@@ -188,13 +194,6 @@ class NoEligibleCandidatesError extends Error {}
 
 async function runCycle() {
   if (!cache.getEntry("news").data) throw new NewsCacheNotReadyError("News cache has not synced yet");
-
-  // Unconditional, even if today turns out to have zero eligible candidates
-  // below -- the 24h rotation is a standing rule ("clear them out post 24
-  // hours"), not something that should depend on whether a replacement is
-  // ready yet. See aiThreatSummaryStore.js#pruneExpiredReports for why this
-  // isn't instead done reactively on every read.
-  pruneExpiredReports();
 
   const newsItems = cache.getEntry("news").data?.items ?? [];
   const candidates = newsItems.filter((item) => isEligibleSource(item.source) && isRecent(item.publishedDate) && !isArticleProcessed(item.link));

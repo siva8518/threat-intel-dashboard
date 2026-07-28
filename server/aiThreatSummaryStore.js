@@ -13,15 +13,6 @@ const STORE_DIR = path.join(__dirname, ".cache");
 const STORE_PATH = path.join(STORE_DIR, "ai-threat-summaries.json");
 const MAX_REPORTS = 300; // bounded so this file (and the tab's list) doesn't grow unbounded over months of runtime
 
-// Report generation moved from a continuous every-2-minutes drip to one
-// batch a day (see aiThreatSummaryJob.js) specifically to cut how often this
-// app hits the local Ollama model -- keeping reports around indefinitely
-// (up to MAX_REPORTS) no longer matches that "today's reports" cadence, so
-// this store now also rotates anything older than a day out on its own,
-// same "clear it, don't just cap the count" ask that motivated the cadence
-// change in the first place.
-const MAX_REPORT_AGE_MS = 24 * 60 * 60 * 1000;
-
 let state = load();
 
 function load() {
@@ -45,22 +36,6 @@ function persist() {
     lastCycleAt: state.lastCycleAt,
   };
   fs.writeFileSync(STORE_PATH, JSON.stringify(trimmed), "utf-8");
-}
-
-/**
- * Drops any report whose generatedAt is more than 24h old. Called once at
- * the start of every daily cycle (aiThreatSummaryJob.js#runCycle), not on
- * every read -- pruning on every GET would empty the tab mid-day the moment
- * yesterday's reports crossed the 24h line, well before today's fresh batch
- * finishes generating. Doing it once, right before that day's batch starts,
- * keeps the "old reports gone, new ones arriving" swap as one clean step
- * instead of a slow bleed-out with nothing to replace it.
- */
-export function pruneExpiredReports() {
-  const cutoff = Date.now() - MAX_REPORT_AGE_MS;
-  const before = state.reports.length;
-  state.reports = state.reports.filter((r) => new Date(r.generatedAt).getTime() >= cutoff);
-  if (state.reports.length !== before) persist();
 }
 
 export function isArticleProcessed(articleId) {
