@@ -121,7 +121,7 @@ function ScoreGauge({ label, value, variant, title }: { label: string; value: st
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">{title}</h4>
+      {title && <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">{title}</h4>}
       {children}
     </div>
   );
@@ -301,6 +301,14 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                   {kevCount} KEV
                 </Badge>
               )}
+              {report.shouldICare && (
+                <Badge
+                  variant={report.shouldICare.verdict === "YES" ? "critical" : report.shouldICare.verdict === "NO" ? "low" : "medium"}
+                  title={`Should I care? ${report.shouldICare.verdict} -- ${report.shouldICare.reasoning}`}
+                >
+                  Should I care? {report.shouldICare.verdict}
+                </Badge>
+              )}
             </div>
             <p className="mt-1 line-clamp-1 text-xs text-muted">{report.executiveSummary}</p>
           </div>
@@ -324,7 +332,7 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               />
               <ScoreGauge
                 label="Analysis Confidence"
-                value={report.confidenceAssessment.level}
+                value={report.confidenceAssessment.score != null ? `${report.confidenceAssessment.level} (${report.confidenceAssessment.score}%)` : report.confidenceAssessment.level}
                 variant={report.confidenceAssessment.level === "High" ? "low" : report.confidenceAssessment.level === "Medium" ? "medium" : "high"}
                 title={`Why ${report.confidenceAssessment.level}: ${report.confidenceAssessment.reasoning}`}
               />
@@ -338,6 +346,15 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             {report.executiveHeadline && <p className="mb-1.5 text-base font-semibold text-foreground">{report.executiveHeadline}</p>}
             <p className="text-foreground">{report.executiveSummary}</p>
           </div>
+
+          {report.shouldICare && (
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Should I Care?</h4>
+              <p className="text-foreground">
+                <span className="font-semibold">{report.shouldICare.verdict}.</span> {report.shouldICare.reasoning}
+              </p>
+            </div>
+          )}
 
           {(() => {
             const risk = report.businessRisk ?? EMPTY_BUSINESS_RISK;
@@ -533,86 +550,94 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               <>
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">Operational Actions</h4>
 
-                {(actions.socAnalyst.telemetryToCheck.length > 0 || actions.socAnalyst.whatToLookFor !== "Not Reported" || actions.socAnalyst.immediateNextStep !== "Not Reported") && (
-                  <div className="-mt-3">
-                    <h4 className="mb-1 text-xs font-semibold text-foreground">SOC Analyst</h4>
-                    <GroupedCodeLists title="Telemetry to Check" groups={[["Sources", actions.socAnalyst.telemetryToCheck]]} />
-                    <dl className="mt-1.5 space-y-1 text-sm">
-                      {actions.socAnalyst.whatToLookFor !== "Not Reported" && (
-                        <div>
-                          <dt className="inline font-semibold text-foreground">What to look for: </dt>
-                          <dd className="inline text-foreground">{actions.socAnalyst.whatToLookFor}</dd>
-                        </div>
-                      )}
-                      {actions.socAnalyst.immediateNextStep !== "Not Reported" && (
-                        <div>
-                          <dt className="inline font-semibold text-foreground">Immediate next step: </dt>
-                          <dd className="inline text-foreground">{actions.socAnalyst.immediateNextStep}</dd>
-                        </div>
-                      )}
-                    </dl>
-                  </div>
-                )}
+                {/* Every team section below always renders, even when the model had little to say for that
+                    specific article -- "Not Reported" is the same explicit placeholder convention used
+                    throughout this report (see server/aiThreatSummary.js's grounding rules), not a real
+                    absence. Confirmed live: hiding a whole section whenever its content was thin read as
+                    "this data doesn't exist" rather than "nothing applicable for this article," which is
+                    misleading for a low-signal (e.g. non-attack) article that still deserves a SOC Analyst/
+                    Detection Engineer section, just a sparse one. */}
+                <div className="-mt-3">
+                  <h4 className="mb-1 text-xs font-semibold text-foreground">SOC Analyst</h4>
+                  <GroupedCodeLists title="Telemetry to Check" groups={[["Sources", actions.socAnalyst.telemetryToCheck]]} />
+                  {actions.socAnalyst.telemetryToCheck.length === 0 && <p className="text-xs text-muted">Telemetry to check: Not Reported</p>}
+                  <dl className="mt-1.5 space-y-1 text-sm">
+                    <div>
+                      <dt className="inline font-semibold text-foreground">What to look for: </dt>
+                      <dd className="inline text-foreground">{actions.socAnalyst.whatToLookFor}</dd>
+                    </div>
+                    <div>
+                      <dt className="inline font-semibold text-foreground">Immediate next step: </dt>
+                      <dd className="inline text-foreground">{actions.socAnalyst.immediateNextStep}</dd>
+                    </div>
+                  </dl>
+                </div>
 
-                <HypothesisList hypotheses={actions.threatHunter.hypotheses} />
+                <div>
+                  <h4 className="mb-1 text-xs font-semibold text-foreground">Threat Hunter</h4>
+                  {actions.threatHunter.hypotheses.length > 0 ? (
+                    <HypothesisList hypotheses={actions.threatHunter.hypotheses} />
+                  ) : (
+                    <p className="text-xs text-muted">No specific hunting hypotheses reported for this article.</p>
+                  )}
+                </div>
 
-                {(actions.detectionEngineer.existingRulesAvailable.length > 0 ||
-                  actions.detectionEngineer.newDetectionLogic.length > 0 ||
-                  actions.detectionEngineer.recommendedAction !== "Not Reported") && (
-                  <div>
-                    <h4 className="mb-1 text-xs font-semibold text-foreground">Detection Engineer</h4>
-                    <GroupedCodeLists
-                      title="Rules"
-                      groups={[
-                        ["Existing rules available", actions.detectionEngineer.existingRulesAvailable],
-                        ["New detection logic to build", actions.detectionEngineer.newDetectionLogic],
-                      ]}
-                    />
-                    <dl className="mt-1.5 space-y-1 text-sm">
-                      {actions.detectionEngineer.recommendedAction !== "Not Reported" && (
-                        <div>
-                          <dt className="inline font-semibold text-foreground">Recommended action: </dt>
-                          <dd className="inline text-foreground">{actions.detectionEngineer.recommendedAction}</dd>
-                        </div>
-                      )}
-                      {actions.detectionEngineer.yaraApplicable && (
-                        <div>
-                          <dt className="inline font-semibold text-foreground">YARA: </dt>
-                          <dd className="inline text-foreground">{actions.detectionEngineer.yaraApplicable}</dd>
-                        </div>
-                      )}
-                      {actions.detectionEngineer.expectedFalsePositives !== "Not Reported" && (
-                        <div>
-                          <dt className="inline font-semibold text-foreground">Expected false positives: </dt>
-                          <dd className="inline text-foreground">{actions.detectionEngineer.expectedFalsePositives}</dd>
-                        </div>
-                      )}
-                    </dl>
-                    <GroupedLists
-                      title="Detection Engineering Notes"
-                      groups={[
-                        ["Log sources required", actions.detectionEngineer.logSourcesRequired],
-                        ["Detection gaps", actions.detectionEngineer.detectionGaps],
-                      ]}
-                    />
-                  </div>
-                )}
-
-                {vm.applicable && (
-                  <KeyValueBlock
-                    title="Vulnerability Management"
-                    pairs={[
-                      ["Affected assets", vm.affectedAssetsSummary],
-                      ["Internet facing", vm.internetFacing],
-                      ["Exploit maturity", vm.exploitMaturity],
-                      ["Patch priority", vm.patchPriority],
-                      ["Maintenance window", vm.maintenanceWindowRecommendation],
-                      ["Business criticality", vm.businessCriticality],
-                      ["Known workaround", vm.knownWorkaround],
+                <div>
+                  <h4 className="mb-1 text-xs font-semibold text-foreground">Detection Engineer</h4>
+                  <GroupedCodeLists
+                    title="Rules"
+                    groups={[
+                      ["Existing rules available", actions.detectionEngineer.existingRulesAvailable],
+                      ["New detection logic to build", actions.detectionEngineer.newDetectionLogic],
                     ]}
                   />
-                )}
-                {vm.applicable && <FieldList title="Compensating Controls" items={vm.compensatingControls} />}
+                  {actions.detectionEngineer.existingRulesAvailable.length === 0 && actions.detectionEngineer.newDetectionLogic.length === 0 && (
+                    <p className="text-xs text-muted">Rules: Not Reported</p>
+                  )}
+                  <dl className="mt-1.5 space-y-1 text-sm">
+                    <div>
+                      <dt className="inline font-semibold text-foreground">Recommended action: </dt>
+                      <dd className="inline text-foreground">{actions.detectionEngineer.recommendedAction}</dd>
+                    </div>
+                    <div>
+                      <dt className="inline font-semibold text-foreground">YARA: </dt>
+                      <dd className="inline text-foreground">{actions.detectionEngineer.yaraApplicable ?? "Not Applicable"}</dd>
+                    </div>
+                    <div>
+                      <dt className="inline font-semibold text-foreground">Expected false positives: </dt>
+                      <dd className="inline text-foreground">{actions.detectionEngineer.expectedFalsePositives}</dd>
+                    </div>
+                  </dl>
+                  <GroupedLists
+                    title="Detection Engineering Notes"
+                    groups={[
+                      ["Log sources required", actions.detectionEngineer.logSourcesRequired],
+                      ["Detection gaps", actions.detectionEngineer.detectionGaps],
+                    ]}
+                  />
+                </div>
+
+                <div>
+                  <h4 className="mb-1 text-xs font-semibold text-foreground">Vulnerability Management</h4>
+                  {!vm.applicable && <p className="text-xs text-muted">Not Applicable -- this article does not involve a specific CVE.</p>}
+                  {vm.applicable && (
+                    <>
+                      <KeyValueBlock
+                        title=""
+                        pairs={[
+                          ["Affected assets", vm.affectedAssetsSummary],
+                          ["Internet facing", vm.internetFacing],
+                          ["Exploit maturity", vm.exploitMaturity],
+                          ["Patch priority", vm.patchPriority],
+                          ["Maintenance window", vm.maintenanceWindowRecommendation],
+                          ["Business criticality", vm.businessCriticality],
+                          ["Known workaround", vm.knownWorkaround],
+                        ]}
+                      />
+                      <FieldList title="Compensating Controls" items={vm.compensatingControls} />
+                    </>
+                  )}
+                </div>
 
                 <GroupedLists
                   title="Incident Response"
@@ -640,9 +665,32 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Confidence & Risk Reasoning</h4>
             <p className="text-xs text-muted">
-              <span className="font-semibold text-foreground">Confidence ({report.confidenceAssessment.level}):</span> {report.confidenceAssessment.reasoning}
+              <span className="font-semibold text-foreground">
+                Confidence ({report.confidenceAssessment.level}{report.confidenceAssessment.score != null ? `, ${report.confidenceAssessment.score}%` : ""}):
+              </span>{" "}
+              {report.confidenceAssessment.reasoning}
             </p>
-            <p className="mt-1 text-xs text-muted">
+            {(report.confidenceAssessment.factorsPresent?.length > 0 || report.confidenceAssessment.factorsMissing?.length > 0) && (
+              <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {report.confidenceAssessment.factorsPresent?.length > 0 && (
+                  <ul className="space-y-0.5 text-xs text-muted">
+                    {report.confidenceAssessment.factorsPresent.map((f, i) => (
+                      <li key={i} className="text-low">
+                        ✓ {f}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {report.confidenceAssessment.factorsMissing?.length > 0 && (
+                  <ul className="space-y-0.5 text-xs text-muted">
+                    {report.confidenceAssessment.factorsMissing.map((f, i) => (
+                      <li key={i}>– {f}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            <p className="mt-1.5 text-xs text-muted">
               <span className="font-semibold text-foreground">Risk score reasoning:</span> {report.aiRiskScoring.reasoning}
             </p>
           </div>

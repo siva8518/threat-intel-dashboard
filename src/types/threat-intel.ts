@@ -841,6 +841,19 @@ export interface AiThreatSummaryBusinessRisk {
 }
 
 /**
+ * A conditional decision aid, not a personalized verdict (this app has no
+ * knowledge of the reader's own environment) -- "YES" for broadly-applicable/
+ * mass-exploited risk, "NO" for narrow/theoretical risk most readers can
+ * ignore, "UNKNOWN" (the common case for a specific-product vulnerability)
+ * with reasoning that tells the reader exactly what to check in their own
+ * stack.
+ */
+export interface AiThreatSummaryShouldICare {
+  verdict: "YES" | "NO" | "UNKNOWN";
+  reasoning: string;
+}
+
+/**
  * Merges the former threatOverview/aiTechnicalSummary/affectedProducts/
  * vendorSeverityAssessment sections into one -- driven by an explicit
  * reasoning chain (what happened / why it matters / who's affected / is
@@ -896,7 +909,12 @@ export interface AiThreatSummaryMalware {
 
 export interface AiThreatSummaryConfidence {
   level: "High" | "Medium" | "Low";
+  score: number | null;
   reasoning: string;
+  /** Specific, concrete factors that increase confidence -- e.g. "Official CISA advisory", "KEV inclusion confirmed". */
+  factorsPresent: string[];
+  /** What would have increased confidence further but isn't available for this article. */
+  factorsMissing: string[];
 }
 
 export interface AiThreatSummaryRiskScoring {
@@ -988,6 +1006,7 @@ export interface AiThreatSummaryReport {
   executiveHeadline: string;
   executiveSummary: string;
   businessRisk: AiThreatSummaryBusinessRisk;
+  shouldICare: AiThreatSummaryShouldICare;
   technicalAnalysis: AiThreatSummaryTechnicalAnalysis;
   mitreAttack: AiThreatSummaryMitreTechnique[];
   threatActors: AiThreatSummaryActor[];

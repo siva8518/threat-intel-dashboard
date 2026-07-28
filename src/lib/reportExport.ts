@@ -89,6 +89,11 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   if (report.executiveHeadline) parts.push(`<p><strong>${esc(report.executiveHeadline)}</strong></p>`);
   parts.push(paragraph(report.executiveSummary));
 
+  if (report.shouldICare) {
+    parts.push(heading(2, "Should I Care?"));
+    parts.push(paragraph(`${report.shouldICare.verdict}. ${report.shouldICare.reasoning}`));
+  }
+
   if (risk) {
     parts.push(heading(2, "Business Risk"));
     if (risk.requiresExecutiveAttention) parts.push(`<p><strong>Requires executive attention</strong></p>`);
@@ -225,19 +230,20 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     parts.push(heading(2, "Operational Actions"));
 
     const soc = actions.socAnalyst;
-    if (soc.telemetryToCheck.length > 0 || soc.whatToLookFor !== "Not Reported" || soc.immediateNextStep !== "Not Reported") {
-      parts.push(heading(3, "SOC Analyst"));
-      parts.push(groupedListsSection("", [["Telemetry to check", soc.telemetryToCheck]]));
-      parts.push(
-        keyValueSection("", [
-          ["What to look for", soc.whatToLookFor],
-          ["Immediate next step", soc.immediateNextStep],
-        ]),
-      );
-    }
+    // Every team section below always renders, even when the model had
+    // little to say for that specific article -- "Not Reported" is the same
+    // explicit placeholder convention used throughout this report, not a
+    // real absence. Confirmed live: hiding a whole section whenever its
+    // content was thin read as "this data doesn't exist" rather than
+    // "nothing applicable for this article."
+    parts.push(heading(3, "SOC Analyst"));
+    parts.push(groupedListsSection("", [["Telemetry to check", soc.telemetryToCheck]]));
+    if (soc.telemetryToCheck.length === 0) parts.push(paragraph("Telemetry to check: Not Reported"));
+    parts.push(paragraph(`What to look for: ${soc.whatToLookFor}`));
+    parts.push(paragraph(`Immediate next step: ${soc.immediateNextStep}`));
 
+    parts.push(heading(3, "Threat Hunter"));
     if (actions.threatHunter.hypotheses.length > 0) {
-      parts.push(heading(3, "Threat Hunter -- Hypotheses"));
       const rows = actions.threatHunter.hypotheses
         .map((h, i) => {
           const details = [
@@ -249,35 +255,34 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
         })
         .join("");
       parts.push(`<ul>${rows}</ul>`);
+    } else {
+      parts.push(paragraph("No specific hunting hypotheses reported for this article."));
     }
 
     const de = actions.detectionEngineer;
-    if (de.existingRulesAvailable.length > 0 || de.newDetectionLogic.length > 0 || de.recommendedAction !== "Not Reported") {
-      parts.push(heading(3, "Detection Engineer"));
-      parts.push(
-        groupedListsSection("", [
-          ["Existing rules available", de.existingRulesAvailable],
-          ["New detection logic to build", de.newDetectionLogic],
-        ]),
-      );
-      parts.push(
-        keyValueSection("", [
-          ["Recommended action", de.recommendedAction],
-          ["YARA applicable", de.yaraApplicable],
-          ["Expected false positives", de.expectedFalsePositives],
-        ]),
-      );
-      parts.push(
-        groupedListsSection("", [
-          ["Log sources required", de.logSourcesRequired],
-          ["Detection gaps", de.detectionGaps],
-        ]),
-      );
-    }
+    parts.push(heading(3, "Detection Engineer"));
+    parts.push(
+      groupedListsSection("", [
+        ["Existing rules available", de.existingRulesAvailable],
+        ["New detection logic to build", de.newDetectionLogic],
+      ]),
+    );
+    if (de.existingRulesAvailable.length === 0 && de.newDetectionLogic.length === 0) parts.push(paragraph("Rules: Not Reported"));
+    parts.push(paragraph(`Recommended action: ${de.recommendedAction}`));
+    parts.push(paragraph(`YARA applicable: ${de.yaraApplicable ?? "Not Applicable"}`));
+    parts.push(paragraph(`Expected false positives: ${de.expectedFalsePositives}`));
+    parts.push(
+      groupedListsSection("", [
+        ["Log sources required", de.logSourcesRequired],
+        ["Detection gaps", de.detectionGaps],
+      ]),
+    );
 
     const vm = actions.vulnerabilityManagement;
-    if (vm.applicable) {
-      parts.push(heading(3, "Vulnerability Management"));
+    parts.push(heading(3, "Vulnerability Management"));
+    if (!vm.applicable) {
+      parts.push(paragraph("Not Applicable -- this article does not involve a specific CVE."));
+    } else {
       parts.push(
         keyValueSection("", [
           ["Affected assets", vm.affectedAssetsSummary],
@@ -307,7 +312,14 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   }
 
   parts.push(heading(2, "Confidence & Risk Reasoning"));
-  parts.push(paragraph(`Confidence (${report.confidenceAssessment.level}): ${report.confidenceAssessment.reasoning}`));
+  const confidenceScore = report.confidenceAssessment.score != null ? `, ${report.confidenceAssessment.score}%` : "";
+  parts.push(paragraph(`Confidence (${report.confidenceAssessment.level}${confidenceScore}): ${report.confidenceAssessment.reasoning}`));
+  if (report.confidenceAssessment.factorsPresent?.length > 0) {
+    parts.push(`<ul>${report.confidenceAssessment.factorsPresent.map((f) => `<li>&check; ${esc(f)}</li>`).join("")}</ul>`);
+  }
+  if (report.confidenceAssessment.factorsMissing?.length > 0) {
+    parts.push(`<p><em>Missing:</em></p><ul>${report.confidenceAssessment.factorsMissing.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`);
+  }
   parts.push(paragraph(`Risk score reasoning: ${report.aiRiskScoring.reasoning}`));
 
   if (report.references.length > 0) {

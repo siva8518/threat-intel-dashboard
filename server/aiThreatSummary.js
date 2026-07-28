@@ -45,6 +45,7 @@ const SYSTEM_PROMPT =
   '"executiveHeadline": a single headline (under 12 words) an executive skimming a list of reports would see first, e.g. "Critical WordPress flaw under active exploitation -- patch this week." Grounded only in what the article states, never sensationalized beyond it.\n' +
   '"executiveSummary": 2-4 sentences, written for an executive audience with zero technical jargon, that will be read as-is with no further context -- clear and crisp, and grounded ONLY in what the article/verified data actually supports (never speculate, never invent a detail to sound more complete). It MUST answer, in this order: (1) what this means for the business in concrete terms -- financial, operational, reputational, legal/compliance exposure, stated directly rather than vaguely; (2) what decision or action is being asked of the reader right now (e.g. approve an emergency patch window, allocate remediation budget, authorize customer notification) -- if nothing is currently being asked of leadership, say so explicitly (e.g. "No executive decision is required at this time; the SOC is handling remediation.") rather than omitting it.\n' +
   '"businessRisk": {"businessRisk": string, "operationalDisruption": string, "likelihoodOfExploitation": string, "impactIfUnpatched": string, "industriesCommonlyTargeted": string[], "regionsCommonlyTargeted": string[], "requiresExecutiveAttention": boolean, "topActions": string[] (the single most important 1-3 actions across every team -- not a repeat of every recommendation elsewhere, just the top priorities), "whatsMissing": string or null (what information a reader would want that this article/data genuinely doesn\'t provide -- null if nothing notable is missing)} -- regionsCommonlyTargeted: specific countries/regions the article says are impacted, targeted, or where victims/exploitation were observed, [] if the article doesn\'t specify geography -- never guess a region the article doesn\'t state.\n' +
+  '"shouldICare": {"verdict": "YES"|"NO"|"UNKNOWN", "reasoning": string} -- this app has no knowledge of the specific reader\'s own environment, so answer as a conditional decision aid, not a personalized verdict: "YES" if the affected technology is so broadly deployed or the exploitation so indiscriminate that almost any reader should assume it applies to them (e.g. a mass-exploited, widely-used product/library, or active internet-wide scanning); "NO" if the described risk is narrow, theoretical, vendor-internal, or otherwise not something a typical reader needs to act on (e.g. an AI research announcement, a already-patched issue with no current relevance); "UNKNOWN" (the common case for a specific-product vulnerability) with reasoning that tells the reader exactly what to check, e.g. "YES if you run Fortinet FortiOS or Arista VeloCloud Orchestrator; otherwise this specific advisory does not apply to you directly." Ground the verdict only in what the article states about affected products/scope -- never guess at a reader\'s stack.\n' +
   '"technicalAnalysis": {"whatHappened": string, "whyItMatters": string (technical/operational significance -- what an attacker gains, the blast radius -- distinct from the business-language executiveSummary), "whoIsAffected": string, "exploitationStatus": string (state plainly: confirmed active exploitation / public PoC only / theoretical, with the evidence), "attackVector": string[], "rootCause": string[], "exploitationDetails": string[], "technicalFindings": string[], "attackChain": string (1-2 sentence kill-chain overview), "initialAccess": string|null, "privilegeEscalation": string|null, "execution": string|null, "persistence": string|null, "defenseEvasion": string|null, "lateralMovement": string|null, "commandAndControl": string|null, "dataTheft": string|null, "ransomwareDeployment": string|null, "products": string[], "versions": string[], "operatingSystems": string[], "cloudServices": string[], "applications": string[], "vendorSeverity": string, "activeExploitation": string, "overallSocPriority": "Critical"|"High"|"Medium"|"Low"} -- kill-chain fields: null (not "Not Reported") for any stage not described in the article, do not fabricate a kill chain the article doesn\'t support. affectedProducts fields: exactly as named in the article. vendorSeverity is the vendor\'s own stated rating, not your own guess -- CVSS/EPSS/KEV are supplied separately, don\'t restate them here. Every bullet should read like it came from a technical researcher, not a press release -- name the specific thing, don\'t generalize it away.\n' +
   '"mitreAttack": array of {"technique": string, "techniqueId": string or null, "reason": string (why this technique applies, grounded in what the article describes), "killChainPhase": string} -- techniqueId MUST be copied exactly from the CANDIDATE MITRE ATT&CK TECHNIQUES list in the user message, or null if none genuinely apply. Never invent a technique ID that isn\'t in that list, even if it looks plausible.\n' +
   '"threatActors": array of {"group": string, "aliases": string[], "motivation": string|null, "targetSectors": string[], "geography": string|null, "knownCampaigns": string[]} -- only actors explicitly named in the article.\n' +
@@ -58,7 +59,7 @@ const SYSTEM_PROMPT =
   '  "threatIntelTakeaway": string (a detailed paragraph, 3-5 sentences -- attribution and campaign tracking, correlating this activity/actor/malware against existing intelligence holdings, watching for related infrastructure or TTPs reappearing elsewhere, and who internally needs this disseminated),\n' +
   '  "executiveLeadershipTakeaway": string (under 100 words, the business risk with zero technical jargon)\n' +
   '}\n' +
-  '"confidenceAssessment": {"level": "High"|"Medium"|"Low", "reasoning": string} -- your confidence this report accurately reflects the source article. reasoning MUST explain the specific reason for that level (e.g. "High: the article includes a full technical writeup with confirmed IOCs and a named vendor" or "Medium: the article covers the vulnerability but exploitation details beyond the vendor advisory are limited") -- this reasoning is shown directly to the analyst, so a vague or generic sentence is not acceptable.\n' +
+  '"confidenceAssessment": {"level": "High"|"Medium"|"Low", "score": integer 0-100, "reasoning": string, "factorsPresent": string[] (specific, concrete factors that are actually true of THIS article/data and increase confidence -- e.g. "Official CISA advisory", "KEV inclusion confirmed", "CVE ID confirmed against NVD", "Active exploitation confirmed by vendor", "Named vendor advisory available", "Full technical writeup with confirmed IOCs" -- only list what genuinely applies here, never pad with factors that don\'t apply), "factorsMissing": string[] (what would have increased confidence further but isn\'t available for this article -- e.g. "No IOC validation available", "No public PoC confirmed", "Not confirmed via independent telemetry", "Exploitation details beyond the vendor advisory are limited")} -- score must be justified purely by which factorsPresent/factorsMissing apply (roughly 85-100 High, 50-84 Medium, below 50 Low) -- never assign a score without grounding it in the specific factors listed. reasoning is a one-sentence summary of the same judgment, shown alongside the factor lists.\n' +
   '"aiRiskScoring": {"score": integer 0-100, "priority": "Critical"|"High"|"Medium"|"Low", "reasoning": string} -- build the score by adding: active exploitation +20, ransomware usage +15, public PoC +15, internet-exposed service +15, privilege escalation +10, authentication bypass +15, critical CVSS +10, widely deployed software +10; subtract points if exploitation requires unlikely conditions. Explain which factors applied.\n' +
   "No other text, no markdown formatting, no code fences.";
 
@@ -153,6 +154,16 @@ function safeBusinessRisk(v) {
     requiresExecutiveAttention: safeBoolean(v.requiresExecutiveAttention),
     topActions: safeArray(v.topActions).slice(0, 3),
     whatsMissing: safeNullableString(v.whatsMissing),
+  };
+}
+
+const SHOULD_I_CARE_VERDICTS = new Set(["YES", "NO", "UNKNOWN"]);
+function safeShouldICare(v) {
+  v ??= {};
+  const verdict = typeof v.verdict === "string" ? v.verdict.trim().toUpperCase() : "";
+  return {
+    verdict: SHOULD_I_CARE_VERDICTS.has(verdict) ? verdict : "UNKNOWN",
+    reasoning: safeString(v.reasoning),
   };
 }
 
@@ -404,7 +415,14 @@ function safeOperationalActions(v) {
 
 function safeConfidenceAssessment(v) {
   v ??= {};
-  return { level: safeConfidenceLevel(v.level), reasoning: safeString(v.reasoning) };
+  const n = Number(v.score);
+  return {
+    level: safeConfidenceLevel(v.level),
+    score: Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : null,
+    reasoning: safeString(v.reasoning),
+    factorsPresent: safeArray(v.factorsPresent),
+    factorsMissing: safeArray(v.factorsMissing),
+  };
 }
 
 function safeAiRiskScoring(v) {
@@ -428,6 +446,7 @@ function parseModelReport(text, validTechniqueIds, techniqueNameToId, idToTechni
       executiveHeadline: safeString(parsed.executiveHeadline),
       executiveSummary: safeString(parsed.executiveSummary),
       businessRisk: safeBusinessRisk(parsed.businessRisk),
+      shouldICare: safeShouldICare(parsed.shouldICare),
       technicalAnalysis: safeTechnicalAnalysis(parsed.technicalAnalysis, validTechniqueIds, idToTechniqueName),
       mitreAttack: safeMitreArray(parsed.mitreAttack, validTechniqueIds, techniqueNameToId, idToTechniqueName),
       threatActors: safeThreatActors(parsed.threatActors),
