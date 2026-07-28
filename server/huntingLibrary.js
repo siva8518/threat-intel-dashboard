@@ -51,38 +51,49 @@ function isRealName(name) {
   return Boolean(name) && !GENERIC_ENTITY_NAMES.has(name.trim().toLowerCase());
 }
 
+// AI Summarization's report schema (server/aiThreatSummary.js) no longer
+// asks the model to draft per-platform hunting query syntax (KQL/SPL/etc) --
+// that was replaced with named, testable hunting hypotheses
+// (operationalActions.threatHunter.hypotheses), which are narrative
+// reasoning, not executable query syntax, so they don't belong in a
+// per-platform query library. This library's report-derived contribution is
+// now just the genuinely real, verified public Sigma/YARA rule citations
+// AI Summarization already grounds against this app's own synced detection-
+// rule index (operationalActions.detectionEngineer.existingRulesAvailable,
+// see aiThreatSummary.js#groundExistingRules) -- still real, still per-
+// platform, just sourced from a different field now.
+const EXISTING_RULE_PREFIX_TO_PLATFORM = { SigmaHQ: "sigma", "YARA-Rules": "yara" };
+
 function reportHuntingItems(reports) {
   const items = [];
   for (const report of reports) {
-    const opportunities = report.threatHuntingOpportunities;
-    if (!opportunities) continue;
-    for (const platform of HUNTING_PLATFORMS) {
-      const queries = opportunities[platform] ?? [];
-      queries.forEach((query, index) => {
-        items.push({
-          id: `${report.id}::${platform}::${index}`,
-          platform,
-          platformLabel: PLATFORM_LABELS[platform],
-          query,
-          source: "ai-report",
-          reportId: report.id,
-          articleTitle: report.articleTitle,
-          articleLink: report.articleLink,
-          articleSource: report.articleSource,
-          generatedAt: report.generatedAt,
-          severity: report.severity,
-          cveIds: (report.cves ?? []).map((c) => c.id),
-          // "Not Reported" is a real, valid value for this field elsewhere in
-          // this app (aiThreatSummary.js's own "never invent facts" grounding
-          // uses it as an explicit placeholder when the article names
-          // nothing) -- confirmed live it was leaking through here as if it
-          // were a real malware family, right next to a genuine one like
-          // "Dragonforce Ransomware" on the same badge row.
-          malware: (report.malware ?? []).map((m) => m.family).filter((f) => f && f !== "Not Reported"),
-          threatActors: (report.threatActors ?? []).map((a) => a.group).filter((g) => g && g !== "Not Reported"),
-        });
+    const hits = report.operationalActions?.detectionEngineer?.existingRulesAvailable ?? [];
+    hits.forEach((hit, index) => {
+      const platform = Object.entries(EXISTING_RULE_PREFIX_TO_PLATFORM).find(([prefix]) => hit.startsWith(prefix))?.[1];
+      if (!platform) return; // the model's own narrative ("no known rules yet") text, not a real grounded hit
+      items.push({
+        id: `${report.id}::${platform}::${index}`,
+        platform,
+        platformLabel: PLATFORM_LABELS[platform],
+        query: hit,
+        source: "ai-report",
+        reportId: report.id,
+        articleTitle: report.articleTitle,
+        articleLink: report.articleLink,
+        articleSource: report.articleSource,
+        generatedAt: report.generatedAt,
+        severity: report.severity,
+        cveIds: (report.cves ?? []).map((c) => c.id),
+        // "Not Reported" is a real, valid value for this field elsewhere in
+        // this app (aiThreatSummary.js's own "never invent facts" grounding
+        // uses it as an explicit placeholder when the article names
+        // nothing) -- confirmed live it was leaking through here as if it
+        // were a real malware family, right next to a genuine one like
+        // "Dragonforce Ransomware" on the same badge row.
+        malware: (report.malware ?? []).map((m) => m.family).filter((f) => f && f !== "Not Reported"),
+        threatActors: (report.threatActors ?? []).map((a) => a.group).filter((g) => g && g !== "Not Reported"),
       });
-    }
+    });
   }
   return items;
 }

@@ -13,19 +13,79 @@ import type { AiThreatSummaryReport, Severity } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 import { downloadReportAsPdf, downloadReportAsWord } from "@/lib/reportExport";
 
-// Reports generated before the aiTechnicalSummary field existed (superseding
-// the old flat aiSummarizationBullets) won't have it at all -- falls back to
-// all-empty rather than crashing on report.aiTechnicalSummary.threat etc.
-const EMPTY_TECHNICAL_SUMMARY = {
-  threat: [],
-  attackVector: [],
-  rootCause: [],
-  exploitationDetails: [],
-  technicalFindings: [],
-  securityImplications: [],
-  detectionOpportunities: [],
-  huntingOpportunities: [],
-  immediateActions: [],
+// Reports generated before the v2 schema (businessRisk/technicalAnalysis/
+// operationalActions replacing the old flat section list) won't have these
+// keys at all -- fall back to all-empty rather than crashing on
+// report.businessRisk.businessRisk etc. Old reports simply render these
+// sections as empty/hidden, same "reports are immutable once generated"
+// pattern already used for every prior schema change in this feature.
+const EMPTY_BUSINESS_RISK = {
+  businessRisk: "Not Reported",
+  operationalDisruption: "Not Reported",
+  likelihoodOfExploitation: "Not Reported",
+  impactIfUnpatched: "Not Reported",
+  industriesCommonlyTargeted: [] as string[],
+  regionsCommonlyTargeted: [] as string[],
+  requiresExecutiveAttention: false,
+  topActions: [] as string[],
+  whatsMissing: null as string | null,
+};
+
+const EMPTY_TECHNICAL_ANALYSIS = {
+  whatHappened: "Not Reported",
+  whyItMatters: "Not Reported",
+  whoIsAffected: "Not Reported",
+  exploitationStatus: "Not Reported",
+  attackVector: [] as string[],
+  rootCause: [] as string[],
+  exploitationDetails: [] as string[],
+  technicalFindings: [] as string[],
+  attackChain: "Not Reported",
+  initialAccess: null as string | null,
+  privilegeEscalation: null as string | null,
+  execution: null as string | null,
+  persistence: null as string | null,
+  defenseEvasion: null as string | null,
+  lateralMovement: null as string | null,
+  commandAndControl: null as string | null,
+  dataTheft: null as string | null,
+  ransomwareDeployment: null as string | null,
+  products: [] as string[],
+  versions: [] as string[],
+  operatingSystems: [] as string[],
+  cloudServices: [] as string[],
+  applications: [] as string[],
+  vendorSeverity: "Not Reported",
+  activeExploitation: "Not Reported",
+  overallSocPriority: "Medium" as const,
+};
+
+const EMPTY_OPERATIONAL_ACTIONS = {
+  socAnalyst: { telemetryToCheck: [] as string[], whatToLookFor: "Not Reported", immediateNextStep: "Not Reported" },
+  threatHunter: { hypotheses: [] as Array<{ hypothesis: string; dataSources: string[]; positiveFindingLooksLike: string; falsePositiveNote: string }> },
+  detectionEngineer: {
+    existingRulesAvailable: [] as string[],
+    recommendedAction: "Not Reported",
+    yaraApplicable: null as string | null,
+    newDetectionLogic: [] as string[],
+    logSourcesRequired: [] as string[],
+    expectedFalsePositives: "Not Reported",
+    detectionGaps: [] as string[],
+  },
+  vulnerabilityManagement: {
+    applicable: false,
+    affectedAssetsSummary: "Not Applicable",
+    internetFacing: "Not Applicable",
+    exploitMaturity: "Not Applicable",
+    patchPriority: "Not Applicable",
+    maintenanceWindowRecommendation: "Not Applicable",
+    businessCriticality: "Not Applicable",
+    compensatingControls: [] as string[],
+    knownWorkaround: null as string | null,
+  },
+  incidentResponse: { immediateTriageSteps: [] as string[], containmentActions: [] as string[], recoveryActions: [] as string[] },
+  threatIntelTakeaway: "Not Reported",
+  executiveLeadershipTakeaway: "Not Reported",
 };
 
 function timeAgo(iso: string) {
@@ -187,6 +247,29 @@ function IocRow({ label, values }: { label: string; values: string[] }) {
   );
 }
 
+/** Named threat-hunting hypotheses (operationalActions.threatHunter.hypotheses) -- each is a specific, testable claim, not a generic "hunt for suspicious activity" bullet. */
+function HypothesisList({ hypotheses }: { hypotheses: Array<{ hypothesis: string; dataSources: string[]; positiveFindingLooksLike: string; falsePositiveNote: string }> }) {
+  if (hypotheses.length === 0) return null;
+  return (
+    <Section title="Threat Hunter -- Hypotheses">
+      <div className="space-y-2.5">
+        {hypotheses.map((h, i) => (
+          <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2 text-xs">
+            <div className="font-semibold text-foreground">
+              Hypothesis {i + 1}: {h.hypothesis}
+            </div>
+            <div className="mt-1 space-y-0.5 text-muted">
+              {h.dataSources.length > 0 && <div>Data sources: {h.dataSources.join(", ")}</div>}
+              {h.positiveFindingLooksLike && h.positiveFindingLooksLike !== "Not Reported" && <div>Positive finding looks like: {h.positiveFindingLooksLike}</div>}
+              {h.falsePositiveNote && h.falsePositiveNote !== "Not Reported" && <div>False-positive note: {h.falsePositiveNote}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryReport; expanded: boolean; onToggle: () => void }) {
   const kevCount = report.cves.filter((c) => c.knownExploited).length;
   const totalIocs = report.iocs.ipAddresses.length + report.iocs.domains.length + report.iocs.urls.length + report.iocs.hashes.length + report.iocs.emailAddresses.length;
@@ -256,77 +339,100 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             <p className="text-foreground">{report.executiveSummary}</p>
           </div>
 
-          <KeyValueBlock
-            title="Business Impact"
-            pairs={[
-              ["Business risk", report.businessImpact.businessRisk],
-              ["Operational disruption", report.businessImpact.operationalDisruption],
-              ["Likelihood of exploitation", report.businessImpact.likelihoodOfExploitation],
-              ["Impact if unpatched", report.businessImpact.impactIfUnpatched],
-            ]}
-          />
+          {(() => {
+            const risk = report.businessRisk ?? EMPTY_BUSINESS_RISK;
+            return (
+              <>
+                <KeyValueBlock
+                  title="Business Risk"
+                  pairs={[
+                    ["Business risk", risk.businessRisk],
+                    ["Operational disruption", risk.operationalDisruption],
+                    ["Likelihood of exploitation", risk.likelihoodOfExploitation],
+                    ["Impact if unpatched", risk.impactIfUnpatched],
+                  ]}
+                />
+                {risk.requiresExecutiveAttention && (
+                  <div className="-mt-3">
+                    <Badge variant="critical">Requires executive attention</Badge>
+                  </div>
+                )}
+                <GroupedLists
+                  title="Affected Industries"
+                  groups={[
+                    ["Industries commonly targeted", risk.industriesCommonlyTargeted ?? []],
+                    ["Regions impacted", risk.regionsCommonlyTargeted ?? []],
+                  ]}
+                />
+                <FieldList title="Top Actions" items={risk.topActions ?? []} />
+                {risk.whatsMissing && (
+                  <div className="-mt-3 text-xs text-muted">
+                    <span className="font-semibold text-foreground">What's missing: </span>
+                    {risk.whatsMissing}
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
-          <GroupedLists
-            title="Affected Industries"
-            groups={[
-              ["Industries commonly targeted", report.businessImpact.industriesCommonlyTargeted ?? []],
-              ["Regions impacted", report.businessImpact.regionsCommonlyTargeted ?? []],
-            ]}
-          />
-
-          <GroupedLists
-            title="Affected Products"
-            groups={[
-              ["Products", report.affectedProducts.products],
-              ["Versions", report.affectedProducts.versions],
-              ["Operating systems", report.affectedProducts.operatingSystems],
-              ["Cloud services", report.affectedProducts.cloudServices],
-              ["Applications", report.affectedProducts.applications],
-            ]}
-          />
-
-          <KeyValueBlock
-            title="Threat Overview"
-            pairs={[
-              ["Attack chain", report.threatOverview.attackChain],
-              ["Initial access", report.threatOverview.initialAccess],
-              ["Privilege escalation", report.threatOverview.privilegeEscalation],
-              ["Execution", report.threatOverview.execution],
-              ["Persistence", report.threatOverview.persistence],
-              ["Defense evasion", report.threatOverview.defenseEvasion],
-              ["Lateral movement", report.threatOverview.lateralMovement],
-              ["Command & control", report.threatOverview.commandAndControl],
-              ["Data theft", report.threatOverview.dataTheft],
-              ["Ransomware deployment", report.threatOverview.ransomwareDeployment],
-            ]}
-          />
-
-          <GroupedLists
-            title="Technical Summary"
-            groups={(() => {
-              const summary = report.aiTechnicalSummary ?? EMPTY_TECHNICAL_SUMMARY;
-              return [
-                ["Threat", summary.threat],
-                ["Attack Vector", summary.attackVector],
-                ["Root Cause", summary.rootCause],
-                ["Exploitation Details", summary.exploitationDetails],
-                ["Technical Findings", summary.technicalFindings],
-                ["Security Implications", summary.securityImplications],
-                ["Detection Opportunities", summary.detectionOpportunities],
-                ["Hunting Opportunities", summary.huntingOpportunities],
-                ["Immediate Actions", summary.immediateActions],
-              ] as Array<[string, string[]]>;
-            })()}
-          />
-
-          <KeyValueBlock
-            title="Severity Assessment"
-            pairs={[
-              ["Vendor severity", report.vendorSeverityAssessment.vendorSeverity],
-              ["Active exploitation", report.vendorSeverityAssessment.activeExploitation],
-              ["Overall SOC priority", report.vendorSeverityAssessment.overallSocPriority],
-            ]}
-          />
+          {(() => {
+            const tech = report.technicalAnalysis ?? EMPTY_TECHNICAL_ANALYSIS;
+            return (
+              <>
+                <KeyValueBlock
+                  title="Technical Analysis"
+                  pairs={[
+                    ["What happened", tech.whatHappened],
+                    ["Why it matters", tech.whyItMatters],
+                    ["Who is affected", tech.whoIsAffected],
+                    ["Exploitation status", tech.exploitationStatus],
+                  ]}
+                />
+                <GroupedLists
+                  title="Attack Details"
+                  groups={[
+                    ["Attack vector", tech.attackVector],
+                    ["Root cause", tech.rootCause],
+                    ["Exploitation details", tech.exploitationDetails],
+                    ["Technical findings", tech.technicalFindings],
+                  ]}
+                />
+                <KeyValueBlock
+                  title="Kill Chain"
+                  pairs={[
+                    ["Attack chain", tech.attackChain],
+                    ["Initial access", tech.initialAccess],
+                    ["Privilege escalation", tech.privilegeEscalation],
+                    ["Execution", tech.execution],
+                    ["Persistence", tech.persistence],
+                    ["Defense evasion", tech.defenseEvasion],
+                    ["Lateral movement", tech.lateralMovement],
+                    ["Command & control", tech.commandAndControl],
+                    ["Data theft", tech.dataTheft],
+                    ["Ransomware deployment", tech.ransomwareDeployment],
+                  ]}
+                />
+                <GroupedLists
+                  title="Affected Products"
+                  groups={[
+                    ["Products", tech.products],
+                    ["Versions", tech.versions],
+                    ["Operating systems", tech.operatingSystems],
+                    ["Cloud services", tech.cloudServices],
+                    ["Applications", tech.applications],
+                  ]}
+                />
+                <KeyValueBlock
+                  title="Severity Assessment"
+                  pairs={[
+                    ["Vendor severity", tech.vendorSeverity],
+                    ["Active exploitation", tech.activeExploitation],
+                    ["Overall SOC priority", tech.overallSocPriority],
+                  ]}
+                />
+              </>
+            );
+          })()}
 
           {report.cves.length > 0 && (
             <Section title="CVEs (verified CVSS/EPSS/KEV)">
@@ -420,102 +526,116 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             </Section>
           )}
 
-          <FieldList title="Detection Opportunities" items={report.detectionOpportunities} />
+          {(() => {
+            const actions = report.operationalActions ?? EMPTY_OPERATIONAL_ACTIONS;
+            const vm = actions.vulnerabilityManagement;
+            return (
+              <>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">Operational Actions</h4>
 
-          <GroupedCodeLists
-            title="Threat Hunting Opportunities"
-            groups={[
-              ["Microsoft Defender XDR (KQL)", report.threatHuntingOpportunities.defenderXdrKql],
-              ["Microsoft Sentinel (KQL)", report.threatHuntingOpportunities.sentinelKql],
-              ["Splunk (SPL)", report.threatHuntingOpportunities.splunkSpl],
-              ["Elastic", report.threatHuntingOpportunities.elastic],
-              ["Sigma", report.threatHuntingOpportunities.sigma],
-              ["YARA", report.threatHuntingOpportunities.yara],
-              ["CrowdStrike Falcon", report.threatHuntingOpportunities.crowdstrikeFalcon],
-              ["Carbon Black", report.threatHuntingOpportunities.carbonBlack],
-            ]}
-          />
+                {(actions.socAnalyst.telemetryToCheck.length > 0 || actions.socAnalyst.whatToLookFor !== "Not Reported" || actions.socAnalyst.immediateNextStep !== "Not Reported") && (
+                  <div className="-mt-3">
+                    <h4 className="mb-1 text-xs font-semibold text-foreground">SOC Analyst</h4>
+                    <GroupedCodeLists title="Telemetry to Check" groups={[["Sources", actions.socAnalyst.telemetryToCheck]]} />
+                    <dl className="mt-1.5 space-y-1 text-sm">
+                      {actions.socAnalyst.whatToLookFor !== "Not Reported" && (
+                        <div>
+                          <dt className="inline font-semibold text-foreground">What to look for: </dt>
+                          <dd className="inline text-foreground">{actions.socAnalyst.whatToLookFor}</dd>
+                        </div>
+                      )}
+                      {actions.socAnalyst.immediateNextStep !== "Not Reported" && (
+                        <div>
+                          <dt className="inline font-semibold text-foreground">Immediate next step: </dt>
+                          <dd className="inline text-foreground">{actions.socAnalyst.immediateNextStep}</dd>
+                        </div>
+                      )}
+                    </dl>
+                  </div>
+                )}
 
-          <GroupedLists
-            title="Detection Engineering Opportunities"
-            groups={[
-              ["New analytics", report.detectionEngineeringOpportunities.newAnalytics],
-              ["New correlation rules", report.detectionEngineeringOpportunities.newCorrelationRules],
-              ["New Sigma rules", report.detectionEngineeringOpportunities.newSigmaRules],
-              ["New KQL detections", report.detectionEngineeringOpportunities.newKqlDetections],
-              ["EDR behavioral detections", report.detectionEngineeringOpportunities.edrBehavioralDetections],
-              ["SIEM correlation logic", report.detectionEngineeringOpportunities.siemCorrelationLogic],
-              ["MITRE coverage gaps", report.detectionEngineeringOpportunities.mitreCoverageGaps],
-              ["Telemetry gaps", report.detectionEngineeringOpportunities.telemetryGaps],
-              ["Log source requirements", report.detectionEngineeringOpportunities.logSourceRequirements],
-            ]}
-          />
+                <HypothesisList hypotheses={actions.threatHunter.hypotheses} />
 
-          <GroupedLists
-            title="Incident Response Guidance"
-            groups={[
-              ["Immediate triage steps", report.incidentResponseGuidance.immediateTriageSteps],
-              ["Evidence to collect", report.incidentResponseGuidance.evidenceToCollect],
-              ["Containment actions", report.incidentResponseGuidance.containmentActions],
-              ["Forensic artifacts", report.incidentResponseGuidance.forensicArtifacts],
-              ["Recovery actions", report.incidentResponseGuidance.recoveryActions],
-              ["Validation steps", report.incidentResponseGuidance.validationSteps],
-            ]}
-          />
+                {(actions.detectionEngineer.existingRulesAvailable.length > 0 ||
+                  actions.detectionEngineer.newDetectionLogic.length > 0 ||
+                  actions.detectionEngineer.recommendedAction !== "Not Reported") && (
+                  <div>
+                    <h4 className="mb-1 text-xs font-semibold text-foreground">Detection Engineer</h4>
+                    <GroupedCodeLists
+                      title="Rules"
+                      groups={[
+                        ["Existing rules available", actions.detectionEngineer.existingRulesAvailable],
+                        ["New detection logic to build", actions.detectionEngineer.newDetectionLogic],
+                      ]}
+                    />
+                    <dl className="mt-1.5 space-y-1 text-sm">
+                      {actions.detectionEngineer.recommendedAction !== "Not Reported" && (
+                        <div>
+                          <dt className="inline font-semibold text-foreground">Recommended action: </dt>
+                          <dd className="inline text-foreground">{actions.detectionEngineer.recommendedAction}</dd>
+                        </div>
+                      )}
+                      {actions.detectionEngineer.yaraApplicable && (
+                        <div>
+                          <dt className="inline font-semibold text-foreground">YARA: </dt>
+                          <dd className="inline text-foreground">{actions.detectionEngineer.yaraApplicable}</dd>
+                        </div>
+                      )}
+                      {actions.detectionEngineer.expectedFalsePositives !== "Not Reported" && (
+                        <div>
+                          <dt className="inline font-semibold text-foreground">Expected false positives: </dt>
+                          <dd className="inline text-foreground">{actions.detectionEngineer.expectedFalsePositives}</dd>
+                        </div>
+                      )}
+                    </dl>
+                    <GroupedLists
+                      title="Detection Engineering Notes"
+                      groups={[
+                        ["Log sources required", actions.detectionEngineer.logSourcesRequired],
+                        ["Detection gaps", actions.detectionEngineer.detectionGaps],
+                      ]}
+                    />
+                  </div>
+                )}
 
-          <GroupedLists
-            title="Immediate Recommendations"
-            groups={[
-              ["Critical", report.immediateRecommendations.critical],
-              ["High", report.immediateRecommendations.high],
-              ["Medium", report.immediateRecommendations.medium],
-              ["Low", report.immediateRecommendations.low],
-            ]}
-          />
+                {vm.applicable && (
+                  <KeyValueBlock
+                    title="Vulnerability Management"
+                    pairs={[
+                      ["Affected assets", vm.affectedAssetsSummary],
+                      ["Internet facing", vm.internetFacing],
+                      ["Exploit maturity", vm.exploitMaturity],
+                      ["Patch priority", vm.patchPriority],
+                      ["Maintenance window", vm.maintenanceWindowRecommendation],
+                      ["Business criticality", vm.businessCriticality],
+                      ["Known workaround", vm.knownWorkaround],
+                    ]}
+                  />
+                )}
+                {vm.applicable && <FieldList title="Compensating Controls" items={vm.compensatingControls} />}
 
-          <GroupedLists
-            title="Patch Information"
-            groups={[
-              ["Fixed versions", report.patchInformationNarrative.fixedVersions],
-              ["Temporary mitigations", report.patchInformationNarrative.temporaryMitigations],
-              ["Known workarounds", report.patchInformationNarrative.knownWorkarounds],
-            ]}
-          />
-          {(report.patchInformationNarrative.availability !== "Not Reported" || report.patchInformationNarrative.vendorGuidance) && (
-            <div className="-mt-3 space-y-0.5 text-xs text-muted">
-              {report.patchInformationNarrative.availability !== "Not Reported" && <div>Availability: {report.patchInformationNarrative.availability}</div>}
-              {report.patchInformationNarrative.vendorGuidance && <div>Vendor guidance: {report.patchInformationNarrative.vendorGuidance}</div>}
-            </div>
-          )}
+                <GroupedLists
+                  title="Incident Response"
+                  groups={[
+                    ["Immediate triage steps", actions.incidentResponse.immediateTriageSteps],
+                    ["Containment actions", actions.incidentResponse.containmentActions],
+                    ["Recovery actions", actions.incidentResponse.recoveryActions],
+                  ]}
+                />
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">SOC Analyst Takeaway</h4>
-              <p className="text-foreground">{report.socAnalystTakeaway}</p>
-            </div>
-            <div>
-              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Detection Engineer Takeaway</h4>
-              <p className="text-foreground">{report.detectionEngineerTakeaway}</p>
-            </div>
-            <div>
-              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Threat Hunter Takeaway</h4>
-              <p className="text-foreground">{report.threatHunterTakeaway}</p>
-            </div>
-            <div>
-              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Threat Intel Takeaway</h4>
-              <p className="text-foreground">{report.threatIntelTakeaway}</p>
-            </div>
-            <div>
-              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Leadership Takeaway</h4>
-              <p className="text-foreground">{report.executiveLeadershipTakeaway}</p>
-            </div>
-            {report.cves.length > 0 && report.vulnerabilityManagementTakeaway && report.vulnerabilityManagementTakeaway !== "Not Applicable" && (
-              <div>
-                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Vulnerability Management Takeaway</h4>
-                <p className="text-foreground">{report.vulnerabilityManagementTakeaway}</p>
-              </div>
-            )}
-          </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Threat Intel Takeaway</h4>
+                    <p className="text-foreground">{actions.threatIntelTakeaway}</p>
+                  </div>
+                  <div>
+                    <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Leadership Takeaway</h4>
+                    <p className="text-foreground">{actions.executiveLeadershipTakeaway}</p>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Confidence & Risk Reasoning</h4>

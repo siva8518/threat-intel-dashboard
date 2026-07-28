@@ -41,14 +41,12 @@ function PatchInfoCell({ item }: { item: RemediationQueueItem }) {
   if (!item.patchInfo) {
     return <span className="text-xs text-muted">Not yet analyzed</span>;
   }
-  const { availability, fixedVersions, temporaryMitigations } = item.patchInfo;
+  const { patchPriority, knownWorkaround, affectedAssetsSummary } = item.patchInfo;
   return (
     <div className="max-w-xs text-xs">
-      <p className="font-medium text-foreground">{availability === "Not Reported" ? "Availability not reported" : availability}</p>
-      {fixedVersions.length > 0 && <p className="mt-0.5 text-muted">Fixed in: {fixedVersions.slice(0, 2).join(", ")}</p>}
-      {fixedVersions.length === 0 && temporaryMitigations.length > 0 && (
-        <p className="mt-0.5 text-muted">Mitigation: {temporaryMitigations[0].slice(0, 80)}</p>
-      )}
+      <p className="font-medium text-foreground">{patchPriority === "Not Applicable" ? "Priority not reported" : patchPriority}</p>
+      {knownWorkaround && <p className="mt-0.5 text-muted">Workaround: {knownWorkaround.slice(0, 80)}</p>}
+      {!knownWorkaround && affectedAssetsSummary !== "Not Applicable" && <p className="mt-0.5 text-muted">{affectedAssetsSummary.slice(0, 80)}</p>}
     </div>
   );
 }

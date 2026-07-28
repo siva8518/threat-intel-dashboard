@@ -39,7 +39,7 @@ export interface RemediationQueueItem extends CveRecord {
   status: RemediationStatus;
   note: string | null;
   statusUpdatedAt: string | null;
-  patchInfo: AiThreatSummaryPatchInformation | null;
+  patchInfo: AiThreatSummaryVulnerabilityManagement | null;
 }
 
 export type HuntingQueryPlatform =
@@ -825,29 +825,38 @@ export interface AiThreatSummaryReference {
   url: string;
 }
 
-/** Technical extraction, not an executive summary -- named vulnerability classes, config/trigger names, and mechanisms preserved verbatim from the source article, not abstracted into generic statements. */
-export interface AiThreatSummaryTechnicalSummary {
-  threat: string[];
+/** Business-facing impact -- executive/leadership-consumable, no technical jargon. */
+export interface AiThreatSummaryBusinessRisk {
+  businessRisk: string;
+  operationalDisruption: string;
+  likelihoodOfExploitation: string;
+  impactIfUnpatched: string;
+  industriesCommonlyTargeted: string[];
+  regionsCommonlyTargeted: string[];
+  requiresExecutiveAttention: boolean;
+  /** The single most important 1-3 actions across every team, not a repeat of every recommendation elsewhere. */
+  topActions: string[];
+  /** What a reader would want that this article/data genuinely doesn't provide -- null if nothing notable is missing. */
+  whatsMissing: string | null;
+}
+
+/**
+ * Merges the former threatOverview/aiTechnicalSummary/affectedProducts/
+ * vendorSeverityAssessment sections into one -- driven by an explicit
+ * reasoning chain (what happened / why it matters / who's affected / is
+ * exploitation confirmed) instead of a flat technical dump.
+ */
+export interface AiThreatSummaryTechnicalAnalysis {
+  whatHappened: string;
+  /** Technical/operational significance -- what an attacker gains, the blast radius -- distinct from the business-language executiveSummary. */
+  whyItMatters: string;
+  whoIsAffected: string;
+  /** Confirmed active exploitation / public PoC only / theoretical, with the evidence. */
+  exploitationStatus: string;
   attackVector: string[];
   rootCause: string[];
   exploitationDetails: string[];
   technicalFindings: string[];
-  securityImplications: string[];
-  detectionOpportunities: string[];
-  huntingOpportunities: string[];
-  immediateActions: string[];
-}
-
-export interface AiThreatSummaryBusinessImpact {
-  businessRisk: string;
-  operationalDisruption: string;
-  likelihoodOfExploitation: string;
-  industriesCommonlyTargeted: string[];
-  regionsCommonlyTargeted: string[];
-  impactIfUnpatched: string;
-}
-
-export interface AiThreatSummaryThreatOverview {
   attackChain: string;
   initialAccess: string | null;
   privilegeEscalation: string | null;
@@ -858,17 +867,11 @@ export interface AiThreatSummaryThreatOverview {
   commandAndControl: string | null;
   dataTheft: string | null;
   ransomwareDeployment: string | null;
-}
-
-export interface AiThreatSummaryAffectedProducts {
   products: string[];
   versions: string[];
   operatingSystems: string[];
   cloudServices: string[];
   applications: string[];
-}
-
-export interface AiThreatSummaryVendorSeverityAssessment {
   vendorSeverity: string;
   activeExploitation: string;
   overallSocPriority: "Critical" | "High" | "Medium" | "Low";
@@ -891,53 +894,6 @@ export interface AiThreatSummaryMalware {
   deliveryMechanism: string | null;
 }
 
-export interface AiThreatSummaryHuntingOpportunities {
-  defenderXdrKql: string[];
-  sentinelKql: string[];
-  splunkSpl: string[];
-  elastic: string[];
-  sigma: string[];
-  yara: string[];
-  crowdstrikeFalcon: string[];
-  carbonBlack: string[];
-}
-
-export interface AiThreatSummaryDetectionEngineering {
-  newAnalytics: string[];
-  newCorrelationRules: string[];
-  newSigmaRules: string[];
-  newKqlDetections: string[];
-  edrBehavioralDetections: string[];
-  siemCorrelationLogic: string[];
-  mitreCoverageGaps: string[];
-  telemetryGaps: string[];
-  logSourceRequirements: string[];
-}
-
-export interface AiThreatSummaryIncidentResponse {
-  immediateTriageSteps: string[];
-  evidenceToCollect: string[];
-  containmentActions: string[];
-  forensicArtifacts: string[];
-  recoveryActions: string[];
-  validationSteps: string[];
-}
-
-export interface AiThreatSummaryRecommendations {
-  critical: string[];
-  high: string[];
-  medium: string[];
-  low: string[];
-}
-
-export interface AiThreatSummaryPatchInformation {
-  availability: string;
-  fixedVersions: string[];
-  temporaryMitigations: string[];
-  vendorGuidance: string | null;
-  knownWorkarounds: string[];
-}
-
 export interface AiThreatSummaryConfidence {
   level: "High" | "Medium" | "Low";
   reasoning: string;
@@ -949,14 +905,74 @@ export interface AiThreatSummaryRiskScoring {
   reasoning: string;
 }
 
+/** Platform-specific telemetry for an L1/L2 analyst -- real event IDs/tables, not "monitor logs." */
+export interface AiThreatSummarySocAnalyst {
+  telemetryToCheck: string[];
+  whatToLookFor: string;
+  immediateNextStep: string;
+}
+
+export interface AiThreatSummaryHuntHypothesis {
+  hypothesis: string;
+  dataSources: string[];
+  positiveFindingLooksLike: string;
+  falsePositiveNote: string;
+}
+
+export interface AiThreatSummaryThreatHunter {
+  hypotheses: AiThreatSummaryHuntHypothesis[];
+}
+
+/** Existing-rule-aware detection engineering guidance -- checks Sigma/Elastic/Microsoft coverage before asking for new logic. */
+export interface AiThreatSummaryDetectionEngineer {
+  existingRulesAvailable: string[];
+  recommendedAction: string;
+  yaraApplicable: string | null;
+  newDetectionLogic: string[];
+  logSourcesRequired: string[];
+  expectedFalsePositives: string;
+  detectionGaps: string[];
+}
+
+/** `applicable` is false (all other fields "Not Applicable"/[]) when the article involves no specific CVE. */
+export interface AiThreatSummaryVulnerabilityManagement {
+  applicable: boolean;
+  affectedAssetsSummary: string;
+  internetFacing: string;
+  exploitMaturity: string;
+  patchPriority: string;
+  maintenanceWindowRecommendation: string;
+  businessCriticality: string;
+  compensatingControls: string[];
+  knownWorkaround: string | null;
+}
+
+export interface AiThreatSummaryIncidentResponse {
+  immediateTriageSteps: string[];
+  containmentActions: string[];
+  recoveryActions: string[];
+}
+
+/** Per-team action guidance -- replaces the former flat detection/hunting/IR/recommendation arrays and role-takeaway strings. */
+export interface AiThreatSummaryOperationalActions {
+  socAnalyst: AiThreatSummarySocAnalyst;
+  threatHunter: AiThreatSummaryThreatHunter;
+  detectionEngineer: AiThreatSummaryDetectionEngineer;
+  vulnerabilityManagement: AiThreatSummaryVulnerabilityManagement;
+  incidentResponse: AiThreatSummaryIncidentResponse;
+  threatIntelTakeaway: string;
+  executiveLeadershipTakeaway: string;
+}
+
 /**
  * One enterprise-grade SOC threat intelligence report generated from a
  * single major vendor/CISA advisory article -- see server/aiThreatSummary.js.
- * Facts (severity, cves, iocs) are grounded in this app's own verified
- * extraction/enrichment, never model recall; every other field is the local
- * LLM's own synthesis, including its self-reported confidence/risk scoring.
- * Currently generated only for Critical/High/Medium severity articles --
- * Low is deliberately deferred, not dropped.
+ * Facts (severity, cves, iocs, mitreAttack, threatActors, malware) are
+ * grounded in this app's own verified extraction/enrichment, never model
+ * recall; businessRisk/technicalAnalysis/operationalActions are the local
+ * LLM's own synthesis, driven by an explicit reasoning chain rather than a
+ * flat "summarize this" ask. Currently generated only for Critical/High/
+ * Medium severity articles -- Low is deliberately deferred, not dropped.
  */
 export interface AiThreatSummaryReport {
   id: string;
@@ -969,28 +985,14 @@ export interface AiThreatSummaryReport {
   cves: AiThreatSummaryCve[];
   iocs: AiThreatSummaryIocs;
   references: AiThreatSummaryReference[];
-  aiTechnicalSummary: AiThreatSummaryTechnicalSummary;
   executiveHeadline: string;
   executiveSummary: string;
-  businessImpact: AiThreatSummaryBusinessImpact;
-  threatOverview: AiThreatSummaryThreatOverview;
-  affectedProducts: AiThreatSummaryAffectedProducts;
-  vendorSeverityAssessment: AiThreatSummaryVendorSeverityAssessment;
+  businessRisk: AiThreatSummaryBusinessRisk;
+  technicalAnalysis: AiThreatSummaryTechnicalAnalysis;
   mitreAttack: AiThreatSummaryMitreTechnique[];
   threatActors: AiThreatSummaryActor[];
   malware: AiThreatSummaryMalware[];
-  detectionOpportunities: string[];
-  threatHuntingOpportunities: AiThreatSummaryHuntingOpportunities;
-  detectionEngineeringOpportunities: AiThreatSummaryDetectionEngineering;
-  incidentResponseGuidance: AiThreatSummaryIncidentResponse;
-  immediateRecommendations: AiThreatSummaryRecommendations;
-  patchInformationNarrative: AiThreatSummaryPatchInformation;
+  operationalActions: AiThreatSummaryOperationalActions;
   confidenceAssessment: AiThreatSummaryConfidence;
   aiRiskScoring: AiThreatSummaryRiskScoring;
-  socAnalystTakeaway: string;
-  detectionEngineerTakeaway: string;
-  threatHunterTakeaway: string;
-  threatIntelTakeaway: string;
-  executiveLeadershipTakeaway: string;
-  vulnerabilityManagementTakeaway: string;
 }

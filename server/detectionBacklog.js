@@ -19,16 +19,16 @@
 // (like "no detection exists") it has no way to actually know.
 import { detectionRulesFor } from "./correlate.js";
 
+// AI Summarization's report schema (server/aiThreatSummary.js) collapsed the
+// former 9-category detectionEngineeringOpportunities bucket into a single
+// focused operationalActions.detectionEngineer object, existing-rule-aware
+// rather than a flat "here are 9 kinds of new rules" list -- newDetectionLogic
+// is the concrete "build this" backlog item, detectionGaps and
+// logSourcesRequired are the remaining trackable categories.
 const CATEGORY_LABELS = {
-  newAnalytics: "New Analytics",
-  newCorrelationRules: "New Correlation Rules",
-  newSigmaRules: "New Sigma Rules",
-  newKqlDetections: "New KQL Detections",
-  edrBehavioralDetections: "EDR Behavioral Detections",
-  siemCorrelationLogic: "SIEM Correlation Logic",
-  mitreCoverageGaps: "MITRE Coverage Gaps",
-  telemetryGaps: "Telemetry Gaps",
-  logSourceRequirements: "Log Source Requirements",
+  newDetectionLogic: "New Detection Logic",
+  logSourcesRequired: "Log Sources Required",
+  detectionGaps: "Detection Gaps",
 };
 
 export const DETECTION_BACKLOG_CATEGORIES = Object.keys(CATEGORY_LABELS);
@@ -53,7 +53,7 @@ function isRealName(name) {
 function reportBacklogItems(reports) {
   const items = [];
   for (const report of reports) {
-    const opportunities = report.detectionEngineeringOpportunities;
+    const opportunities = report.operationalActions?.detectionEngineer;
     if (!opportunities) continue;
     for (const category of DETECTION_BACKLOG_CATEGORIES) {
       const entries = opportunities[category] ?? [];

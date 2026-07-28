@@ -23,19 +23,23 @@ export function computeUrgencyScore(cve) {
 
 /**
  * AI Summarization (server/aiThreatSummary.js) already asks the model for
- * patch availability/fixed-versions/workarounds per article -- real detail
- * pulled from the vendor's own advisory text, not something worth
- * re-deriving. Only a fraction of cached CVEs have gone through that
- * pipeline yet, so this is a bonus enrichment when available, not a
- * dependency -- a CVE with no matching report just shows "Not yet
- * analyzed" rather than blocking the queue on AI Summarization's own
- * (deliberately slow, see server/aiThreatSummaryJob.js) cadence.
+ * patch priority/exploit maturity/workarounds per article, structured under
+ * operationalActions.vulnerabilityManagement -- real detail pulled from the
+ * vendor's own advisory text, not something worth re-deriving. Only a
+ * fraction of cached CVEs have gone through that pipeline yet, so this is a
+ * bonus enrichment when available, not a dependency -- a CVE with no
+ * matching report just shows "Not yet analyzed" rather than blocking the
+ * queue on AI Summarization's own (deliberately slow, see
+ * server/aiThreatSummaryJob.js) cadence.
  */
 function buildPatchInfoIndex(aiReports) {
   const byId = new Map();
   for (const report of aiReports) {
     for (const cve of report.cves ?? []) {
-      if (!byId.has(cve.id)) byId.set(cve.id, report.patchInformationNarrative ?? null);
+      if (!byId.has(cve.id)) {
+        const vm = report.operationalActions?.vulnerabilityManagement;
+        byId.set(cve.id, vm?.applicable ? vm : null);
+      }
     }
   }
   return byId;

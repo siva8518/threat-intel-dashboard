@@ -37,13 +37,7 @@ function keyValueSection(title: string, pairs: Array<[string, string | null]>): 
   const shown = pairs.filter(([, v]) => v && v !== "Not Reported");
   if (shown.length === 0) return "";
   const rows = shown.map(([label, value]) => `<p><strong>${esc(label)}:</strong> ${esc(value as string)}</p>`).join("");
-  return `${heading(3, title)}${rows}`;
-}
-
-function listSection(title: string, items: string[]): string {
-  if (items.length === 0) return "";
-  const lis = items.map((item) => `<li>${esc(item)}</li>`).join("");
-  return `${heading(3, title)}<ul>${lis}</ul>`;
+  return `${title ? heading(3, title) : ""}${rows}`;
 }
 
 /** Groups of string[] keyed by a human label -- mirrors AiSummarization.tsx's GroupedLists/GroupedCodeLists, minus the two components' only difference (monospace styling), which doesn't matter for a printed/Word document. */
@@ -53,7 +47,7 @@ function groupedListsSection(title: string, groups: Array<[string, string[]]>): 
   const body = nonEmpty
     .map(([label, items]) => `<p class="group-label"><strong>${esc(label)}</strong></p><ul>${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`)
     .join("");
-  return `${heading(3, title)}${body}`;
+  return `${title ? heading(3, title) : ""}${body}`;
 }
 
 function iocRow(label: string, values: string[]): string {
@@ -72,7 +66,9 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   const namedMalware = report.malware.filter((m) => m.family !== "Not Reported");
   const totalIocs = report.iocs.ipAddresses.length + report.iocs.domains.length + report.iocs.urls.length + report.iocs.hashes.length + report.iocs.emailAddresses.length;
   const kevCount = report.cves.filter((c) => c.knownExploited).length;
-  const summary = report.aiTechnicalSummary;
+  const risk = report.businessRisk;
+  const tech = report.technicalAnalysis;
+  const actions = report.operationalActions;
 
   const parts: string[] = [];
 
@@ -93,68 +89,76 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   if (report.executiveHeadline) parts.push(`<p><strong>${esc(report.executiveHeadline)}</strong></p>`);
   parts.push(paragraph(report.executiveSummary));
 
-  parts.push(
-    keyValueSection("Business Impact", [
-      ["Business risk", report.businessImpact.businessRisk],
-      ["Operational disruption", report.businessImpact.operationalDisruption],
-      ["Likelihood of exploitation", report.businessImpact.likelihoodOfExploitation],
-      ["Impact if unpatched", report.businessImpact.impactIfUnpatched],
-    ]),
-  );
+  if (risk) {
+    parts.push(heading(2, "Business Risk"));
+    if (risk.requiresExecutiveAttention) parts.push(`<p><strong>Requires executive attention</strong></p>`);
+    parts.push(
+      keyValueSection("", [
+        ["Business risk", risk.businessRisk],
+        ["Operational disruption", risk.operationalDisruption],
+        ["Likelihood of exploitation", risk.likelihoodOfExploitation],
+        ["Impact if unpatched", risk.impactIfUnpatched],
+      ]),
+    );
+    parts.push(
+      groupedListsSection("", [
+        ["Industries commonly targeted", risk.industriesCommonlyTargeted ?? []],
+        ["Regions impacted", risk.regionsCommonlyTargeted ?? []],
+        ["Top actions", risk.topActions ?? []],
+      ]),
+    );
+    if (risk.whatsMissing) parts.push(`<p><em>What's missing: ${esc(risk.whatsMissing)}</em></p>`);
+  }
 
-  parts.push(
-    groupedListsSection("Affected Industries", [
-      ["Industries commonly targeted", report.businessImpact.industriesCommonlyTargeted ?? []],
-      ["Regions impacted", report.businessImpact.regionsCommonlyTargeted ?? []],
-    ]),
-  );
-
-  parts.push(
-    groupedListsSection("Affected Products", [
-      ["Products", report.affectedProducts.products],
-      ["Versions", report.affectedProducts.versions],
-      ["Operating systems", report.affectedProducts.operatingSystems],
-      ["Cloud services", report.affectedProducts.cloudServices],
-      ["Applications", report.affectedProducts.applications],
-    ]),
-  );
-
-  parts.push(
-    keyValueSection("Threat Overview", [
-      ["Attack chain", report.threatOverview.attackChain],
-      ["Initial access", report.threatOverview.initialAccess],
-      ["Privilege escalation", report.threatOverview.privilegeEscalation],
-      ["Execution", report.threatOverview.execution],
-      ["Persistence", report.threatOverview.persistence],
-      ["Defense evasion", report.threatOverview.defenseEvasion],
-      ["Lateral movement", report.threatOverview.lateralMovement],
-      ["Command & control", report.threatOverview.commandAndControl],
-      ["Data theft", report.threatOverview.dataTheft],
-      ["Ransomware deployment", report.threatOverview.ransomwareDeployment],
-    ]),
-  );
-
-  parts.push(
-    groupedListsSection("Technical Summary", [
-      ["Threat", summary.threat],
-      ["Attack Vector", summary.attackVector],
-      ["Root Cause", summary.rootCause],
-      ["Exploitation Details", summary.exploitationDetails],
-      ["Technical Findings", summary.technicalFindings],
-      ["Security Implications", summary.securityImplications],
-      ["Detection Opportunities", summary.detectionOpportunities],
-      ["Hunting Opportunities", summary.huntingOpportunities],
-      ["Immediate Actions", summary.immediateActions],
-    ]),
-  );
-
-  parts.push(
-    keyValueSection("Severity Assessment", [
-      ["Vendor severity", report.vendorSeverityAssessment.vendorSeverity],
-      ["Active exploitation", report.vendorSeverityAssessment.activeExploitation],
-      ["Overall SOC priority", report.vendorSeverityAssessment.overallSocPriority],
-    ]),
-  );
+  if (tech) {
+    parts.push(heading(2, "Technical Analysis"));
+    parts.push(
+      keyValueSection("", [
+        ["What happened", tech.whatHappened],
+        ["Why it matters", tech.whyItMatters],
+        ["Who is affected", tech.whoIsAffected],
+        ["Exploitation status", tech.exploitationStatus],
+      ]),
+    );
+    parts.push(
+      groupedListsSection("Attack Details", [
+        ["Attack vector", tech.attackVector],
+        ["Root cause", tech.rootCause],
+        ["Exploitation details", tech.exploitationDetails],
+        ["Technical findings", tech.technicalFindings],
+      ]),
+    );
+    parts.push(
+      keyValueSection("Kill Chain", [
+        ["Attack chain", tech.attackChain],
+        ["Initial access", tech.initialAccess],
+        ["Privilege escalation", tech.privilegeEscalation],
+        ["Execution", tech.execution],
+        ["Persistence", tech.persistence],
+        ["Defense evasion", tech.defenseEvasion],
+        ["Lateral movement", tech.lateralMovement],
+        ["Command & control", tech.commandAndControl],
+        ["Data theft", tech.dataTheft],
+        ["Ransomware deployment", tech.ransomwareDeployment],
+      ]),
+    );
+    parts.push(
+      groupedListsSection("Affected Products", [
+        ["Products", tech.products],
+        ["Versions", tech.versions],
+        ["Operating systems", tech.operatingSystems],
+        ["Cloud services", tech.cloudServices],
+        ["Applications", tech.applications],
+      ]),
+    );
+    parts.push(
+      keyValueSection("Severity Assessment", [
+        ["Vendor severity", tech.vendorSeverity],
+        ["Active exploitation", tech.activeExploitation],
+        ["Overall SOC priority", tech.overallSocPriority],
+      ]),
+    );
+  }
 
   if (report.cves.length > 0) {
     const rows = report.cves
@@ -217,84 +221,89 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     );
   }
 
-  parts.push(listSection("Detection Opportunities", report.detectionOpportunities));
+  if (actions) {
+    parts.push(heading(2, "Operational Actions"));
 
-  parts.push(
-    groupedListsSection("Threat Hunting Opportunities", [
-      ["Microsoft Defender XDR (KQL)", report.threatHuntingOpportunities.defenderXdrKql],
-      ["Microsoft Sentinel (KQL)", report.threatHuntingOpportunities.sentinelKql],
-      ["Splunk (SPL)", report.threatHuntingOpportunities.splunkSpl],
-      ["Elastic", report.threatHuntingOpportunities.elastic],
-      ["Sigma", report.threatHuntingOpportunities.sigma],
-      ["YARA", report.threatHuntingOpportunities.yara],
-      ["CrowdStrike Falcon", report.threatHuntingOpportunities.crowdstrikeFalcon],
-      ["Carbon Black", report.threatHuntingOpportunities.carbonBlack],
-    ]),
-  );
+    const soc = actions.socAnalyst;
+    if (soc.telemetryToCheck.length > 0 || soc.whatToLookFor !== "Not Reported" || soc.immediateNextStep !== "Not Reported") {
+      parts.push(heading(3, "SOC Analyst"));
+      parts.push(groupedListsSection("", [["Telemetry to check", soc.telemetryToCheck]]));
+      parts.push(
+        keyValueSection("", [
+          ["What to look for", soc.whatToLookFor],
+          ["Immediate next step", soc.immediateNextStep],
+        ]),
+      );
+    }
 
-  parts.push(
-    groupedListsSection("Detection Engineering Opportunities", [
-      ["New analytics", report.detectionEngineeringOpportunities.newAnalytics],
-      ["New correlation rules", report.detectionEngineeringOpportunities.newCorrelationRules],
-      ["New Sigma rules", report.detectionEngineeringOpportunities.newSigmaRules],
-      ["New KQL detections", report.detectionEngineeringOpportunities.newKqlDetections],
-      ["EDR behavioral detections", report.detectionEngineeringOpportunities.edrBehavioralDetections],
-      ["SIEM correlation logic", report.detectionEngineeringOpportunities.siemCorrelationLogic],
-      ["MITRE coverage gaps", report.detectionEngineeringOpportunities.mitreCoverageGaps],
-      ["Telemetry gaps", report.detectionEngineeringOpportunities.telemetryGaps],
-      ["Log source requirements", report.detectionEngineeringOpportunities.logSourceRequirements],
-    ]),
-  );
+    if (actions.threatHunter.hypotheses.length > 0) {
+      parts.push(heading(3, "Threat Hunter -- Hypotheses"));
+      const rows = actions.threatHunter.hypotheses
+        .map((h, i) => {
+          const details = [
+            h.dataSources.length > 0 ? `Data sources: ${h.dataSources.join(", ")}` : null,
+            h.positiveFindingLooksLike !== "Not Reported" ? `Positive finding looks like: ${h.positiveFindingLooksLike}` : null,
+            h.falsePositiveNote !== "Not Reported" ? `False-positive note: ${h.falsePositiveNote}` : null,
+          ].filter((x): x is string => Boolean(x));
+          return `<li><strong>Hypothesis ${i + 1}: ${esc(h.hypothesis)}</strong>${details.length > 0 ? `<br/>${details.map(esc).join("<br/>")}` : ""}</li>`;
+        })
+        .join("");
+      parts.push(`<ul>${rows}</ul>`);
+    }
 
-  parts.push(
-    groupedListsSection("Incident Response Guidance", [
-      ["Immediate triage steps", report.incidentResponseGuidance.immediateTriageSteps],
-      ["Evidence to collect", report.incidentResponseGuidance.evidenceToCollect],
-      ["Containment actions", report.incidentResponseGuidance.containmentActions],
-      ["Forensic artifacts", report.incidentResponseGuidance.forensicArtifacts],
-      ["Recovery actions", report.incidentResponseGuidance.recoveryActions],
-      ["Validation steps", report.incidentResponseGuidance.validationSteps],
-    ]),
-  );
+    const de = actions.detectionEngineer;
+    if (de.existingRulesAvailable.length > 0 || de.newDetectionLogic.length > 0 || de.recommendedAction !== "Not Reported") {
+      parts.push(heading(3, "Detection Engineer"));
+      parts.push(
+        groupedListsSection("", [
+          ["Existing rules available", de.existingRulesAvailable],
+          ["New detection logic to build", de.newDetectionLogic],
+        ]),
+      );
+      parts.push(
+        keyValueSection("", [
+          ["Recommended action", de.recommendedAction],
+          ["YARA applicable", de.yaraApplicable],
+          ["Expected false positives", de.expectedFalsePositives],
+        ]),
+      );
+      parts.push(
+        groupedListsSection("", [
+          ["Log sources required", de.logSourcesRequired],
+          ["Detection gaps", de.detectionGaps],
+        ]),
+      );
+    }
 
-  parts.push(
-    groupedListsSection("Immediate Recommendations", [
-      ["Critical", report.immediateRecommendations.critical],
-      ["High", report.immediateRecommendations.high],
-      ["Medium", report.immediateRecommendations.medium],
-      ["Low", report.immediateRecommendations.low],
-    ]),
-  );
+    const vm = actions.vulnerabilityManagement;
+    if (vm.applicable) {
+      parts.push(heading(3, "Vulnerability Management"));
+      parts.push(
+        keyValueSection("", [
+          ["Affected assets", vm.affectedAssetsSummary],
+          ["Internet facing", vm.internetFacing],
+          ["Exploit maturity", vm.exploitMaturity],
+          ["Patch priority", vm.patchPriority],
+          ["Maintenance window", vm.maintenanceWindowRecommendation],
+          ["Business criticality", vm.businessCriticality],
+          ["Known workaround", vm.knownWorkaround],
+        ]),
+      );
+      parts.push(groupedListsSection("", [["Compensating controls", vm.compensatingControls]]));
+    }
 
-  parts.push(
-    groupedListsSection("Patch Information", [
-      ["Fixed versions", report.patchInformationNarrative.fixedVersions],
-      ["Temporary mitigations", report.patchInformationNarrative.temporaryMitigations],
-      ["Known workarounds", report.patchInformationNarrative.knownWorkarounds],
-    ]),
-  );
-  if (report.patchInformationNarrative.availability !== "Not Reported" || report.patchInformationNarrative.vendorGuidance) {
-    const lines = [
-      report.patchInformationNarrative.availability !== "Not Reported" ? `Availability: ${report.patchInformationNarrative.availability}` : null,
-      report.patchInformationNarrative.vendorGuidance ? `Vendor guidance: ${report.patchInformationNarrative.vendorGuidance}` : null,
-    ].filter((x): x is string => Boolean(x));
-    parts.push(lines.map((l) => `<p>${esc(l)}</p>`).join(""));
-  }
+    parts.push(
+      groupedListsSection("Incident Response", [
+        ["Immediate triage steps", actions.incidentResponse.immediateTriageSteps],
+        ["Containment actions", actions.incidentResponse.containmentActions],
+        ["Recovery actions", actions.incidentResponse.recoveryActions],
+      ]),
+    );
 
-  parts.push(heading(2, "Role-Based Takeaways"));
-  parts.push(heading(3, "SOC Analyst"));
-  parts.push(paragraph(report.socAnalystTakeaway));
-  parts.push(heading(3, "Detection Engineer"));
-  parts.push(paragraph(report.detectionEngineerTakeaway));
-  parts.push(heading(3, "Threat Hunter"));
-  parts.push(paragraph(report.threatHunterTakeaway));
-  parts.push(heading(3, "Threat Intel"));
-  parts.push(paragraph(report.threatIntelTakeaway));
-  parts.push(heading(3, "Executive Leadership"));
-  parts.push(paragraph(report.executiveLeadershipTakeaway));
-  if (report.cves.length > 0 && report.vulnerabilityManagementTakeaway && report.vulnerabilityManagementTakeaway !== "Not Applicable") {
-    parts.push(heading(3, "Vulnerability Management"));
-    parts.push(paragraph(report.vulnerabilityManagementTakeaway));
+    parts.push(heading(3, "Threat Intel Takeaway"));
+    parts.push(paragraph(actions.threatIntelTakeaway));
+    parts.push(heading(3, "Executive Leadership Takeaway"));
+    parts.push(paragraph(actions.executiveLeadershipTakeaway));
   }
 
   parts.push(heading(2, "Confidence & Risk Reasoning"));

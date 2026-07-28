@@ -11,49 +11,55 @@
 // parts that genuinely require synthesis: narrative analysis, attack-chain
 // reconstruction, detection/hunting/IR guidance, and its own self-assessed
 // confidence/risk scoring.
+//
+// Report shape (v2): collapsed from ~15 narrative sections down to three --
+// businessRisk, technicalAnalysis, operationalActions -- driven by an
+// explicit reasoning chain (what happened / why it matters / who's affected
+// / is exploitation confirmed) rather than a flat "summarize this" ask, and
+// with operationalActions organized per-team with platform-specific
+// specificity (real event IDs/tables, named hunting hypotheses, existing-
+// rule awareness) instead of generic "monitor logs" advice. Verified/
+// grounded fields (cves, iocs, mitreAttack, threatActors, malware,
+// references) are unchanged -- this redesign only touches the model's own
+// synthesis, not the extraction pipeline.
 import { groqJson } from "./groqClient.js";
 import { extractEntities } from "./githubIntel/extractor.js";
 import { detectionRulesFor } from "./correlate.js";
 import { fetchArticleText } from "./lib/articleText.js";
 
 // Groq's largest generally-available free-tier model -- this report's own
-// schema (25+ sections, several with per-platform hunting-query arrays) is
-// exactly the kind of output a smaller model struggles to fill out reliably
-// (confirmed live earlier with a local 1.5B-parameter model producing mostly
-// "Not Reported"/empty fields) -- so this stays on the strongest free option
-// rather than trading down for speed/quota headroom.
+// schema is exactly the kind of output a smaller model struggles to fill
+// out reliably (confirmed live earlier with a local 1.5B-parameter model
+// producing mostly "Not Reported"/empty fields) -- so this stays on the
+// strongest free option rather than trading down for speed/quota headroom.
 const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || "llama-3.3-70b-versatile";
 
 const SYSTEM_PROMPT =
   "You are a Principal Cyber Threat Intelligence Analyst supporting an enterprise SOC, Detection Engineering, Incident Response, Threat Hunting, and Security Leadership. " +
   "Your objective is NOT to summarize the article -- it is to transform it into operational intelligence a security team can immediately act on. Never copy the article's own wording. Never use vendor marketing language. Never invent IOCs, CVE IDs, or facts not stated or reasonably inferable from the article -- if something isn't reported, say exactly \"Not Reported\" for that field rather than guessing. Clearly keep confirmed information separate from your own inference. " +
-  "This is a TECHNICAL EXTRACTION task, not an executive summary, for every field below except where a field is explicitly marked as business-language. Do not compress or abstract away technical specifics: if the article names a specific vulnerability class, attack technique, configuration setting, trigger, parameter, API, or mechanism, that exact name belongs in your output -- \"attackers abused GitHub Actions\" is not acceptable when the article says \"a pwn request vulnerability via a pull_request_target-triggered workflow, which runs in the context of the base repository with access to repository secrets.\" Preserve every exploitation technique, vulnerable component, attack prerequisite, configuration weakness, security implication, and defensive recommendation the researchers describe. " +
-  "If the article discusses an actively exploited vulnerability, prioritize in this order when allocating detail: (1) Detection, (2) Hunting, (3) Patch guidance, (4) Business impact. " +
+  "Work through this reasoning chain before writing any field, and let it drive the technicalAnalysis section specifically: (1) What happened -- what is the vulnerability/attack, named specifically, not abstracted. (2) Why it matters -- what does an attacker actually gain, what's the blast radius. (3) Who is affected -- which products, environments, or user populations. (4) Is exploitation confirmed -- active exploitation, PoC only, or theoretical, with the evidence for that classification. " +
+  "This is a TECHNICAL EXTRACTION task, not an executive summary, for every field below except where a field is explicitly marked as business-language. Do not compress or abstract away technical specifics: if the article names a specific vulnerability class, attack technique, configuration setting, trigger, parameter, API, or mechanism, that exact name belongs in your output -- \"attackers abused GitHub Actions\" is not acceptable when the article says \"a pwn request vulnerability via a pull_request_target-triggered workflow, which runs in the context of the base repository with access to repository secrets.\" " +
+  "For every piece of detection/hunting/engineering guidance, replace generic advice with the specific telemetry that actually detects this: real Windows Event IDs, Sysmon event IDs, EDR table/schema names (Microsoft Defender for Endpoint advanced hunting tables, CrowdStrike event names, etc.), Splunk sourcetypes/indexes, Sentinel table names, firewall/proxy log fields -- \"monitor logs\" or \"detect unauthorized access\" is not acceptable when a specific, real telemetry source applies. For threat hunting, do not say \"hunt for suspicious activity\" -- state the actual hypothesis a hunter should validate (e.g. \"internet-facing instances of the affected service exposed before the patch date\", \"unexpected admin logins immediately following exploitation\", \"process spawning from the affected web service\"), which data source proves or disproves it, and what a genuine positive looks like versus a benign false positive. For detection engineering, first ask whether Sigma, Elastic, or Microsoft-native rules already exist for this activity (real ones are supplied to you separately when found -- reason about whether those are sufficient or need updating) before asking the model to draft new logic, and note expected false-positive sources and any real detection gaps. " +
+  "Before finalizing, remove duplicated content -- if the same fact or recommendation would appear in two fields, keep it in the one field it belongs in and leave the other field's array/string empty rather than repeating it. Do not pad any list to look complete; an accurate short list beats a padded long one. " +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys (all string fields: use \"Not Reported\" if the article doesn't support an answer; all array fields: use [] if none apply -- never pad with generic filler):\n" +
-  '"aiTechnicalSummary": {"threat": string[], "attackVector": string[], "rootCause": string[], "exploitationDetails": string[], "technicalFindings": string[], "securityImplications": string[], "detectionOpportunities": string[], "huntingOpportunities": string[], "immediateActions": string[]} -- the technical extraction described above, broken into these buckets: threat (what the vulnerability/attack actually is, named specifically); attackVector (the exact entry point/trigger/mechanism an attacker uses, e.g. the specific workflow trigger or API); rootCause (the underlying technical reason the flaw exists, e.g. a specific misconfiguration or design weakness and exactly what it grants); exploitationDetails (how exploitation actually proceeds, step by step, per the article); technicalFindings (other concrete technical facts from the research not covered above); securityImplications (concretely what an attacker gains and the blast radius); detectionOpportunities (a few of the most important concrete monitoring signals -- deeper platform-specific queries still belong in the detectionOpportunities/threatHuntingOpportunities fields further below, don\'t duplicate those here); huntingOpportunities (a few concrete hunting hypotheses/signals, same distinction); immediateActions (concrete, specific mitigations). Every bullet should read like it came from a technical researcher, not a press release -- name the specific thing, don\'t generalize it away.\n' +
   '"executiveHeadline": a single headline (under 12 words) an executive skimming a list of reports would see first, e.g. "Critical WordPress flaw under active exploitation -- patch this week." Grounded only in what the article states, never sensationalized beyond it.\n' +
   '"executiveSummary": 2-4 sentences, written for an executive audience with zero technical jargon, that will be read as-is with no further context -- clear and crisp, and grounded ONLY in what the article/verified data actually supports (never speculate, never invent a detail to sound more complete). It MUST answer, in this order: (1) what this means for the business in concrete terms -- financial, operational, reputational, legal/compliance exposure, stated directly rather than vaguely; (2) what decision or action is being asked of the reader right now (e.g. approve an emergency patch window, allocate remediation budget, authorize customer notification) -- if nothing is currently being asked of leadership, say so explicitly (e.g. "No executive decision is required at this time; the SOC is handling remediation.") rather than omitting it.\n' +
-  '"businessImpact": {"businessRisk": string, "operationalDisruption": string, "likelihoodOfExploitation": string, "industriesCommonlyTargeted": string[], "regionsCommonlyTargeted": string[], "impactIfUnpatched": string} -- regionsCommonlyTargeted: specific countries/regions the article says are impacted, targeted, or where victims/exploitation were observed (e.g. "United States", "EMEA", "APAC"), [] if the article doesn\'t specify geography -- never guess a region the article doesn\'t state.\n' +
-  '"threatOverview": {"attackChain": string (1-2 sentence overview), "initialAccess": string|null, "privilegeEscalation": string|null, "execution": string|null, "persistence": string|null, "defenseEvasion": string|null, "lateralMovement": string|null, "commandAndControl": string|null, "dataTheft": string|null, "ransomwareDeployment": string|null} -- null (not "Not Reported") for any stage not described in the article; do not fabricate a kill chain the article doesn\'t support.\n' +
-  '"affectedProducts": {"products": string[], "versions": string[], "operatingSystems": string[], "cloudServices": string[], "applications": string[]} -- exactly as named in the article.\n' +
-  '"vendorSeverityAssessment": {"vendorSeverity": string, "activeExploitation": string, "overallSocPriority": "Critical"|"High"|"Medium"|"Low"} -- CVSS/EPSS/KEV status is supplied separately from verified data, don\'t restate it here; vendorSeverity is the vendor\'s own stated severity rating (e.g. "Critical" per SonicWall), not your own guess.\n' +
+  '"businessRisk": {"businessRisk": string, "operationalDisruption": string, "likelihoodOfExploitation": string, "impactIfUnpatched": string, "industriesCommonlyTargeted": string[], "regionsCommonlyTargeted": string[], "requiresExecutiveAttention": boolean, "topActions": string[] (the single most important 1-3 actions across every team -- not a repeat of every recommendation elsewhere, just the top priorities), "whatsMissing": string or null (what information a reader would want that this article/data genuinely doesn\'t provide -- null if nothing notable is missing)} -- regionsCommonlyTargeted: specific countries/regions the article says are impacted, targeted, or where victims/exploitation were observed, [] if the article doesn\'t specify geography -- never guess a region the article doesn\'t state.\n' +
+  '"technicalAnalysis": {"whatHappened": string, "whyItMatters": string (technical/operational significance -- what an attacker gains, the blast radius -- distinct from the business-language executiveSummary), "whoIsAffected": string, "exploitationStatus": string (state plainly: confirmed active exploitation / public PoC only / theoretical, with the evidence), "attackVector": string[], "rootCause": string[], "exploitationDetails": string[], "technicalFindings": string[], "attackChain": string (1-2 sentence kill-chain overview), "initialAccess": string|null, "privilegeEscalation": string|null, "execution": string|null, "persistence": string|null, "defenseEvasion": string|null, "lateralMovement": string|null, "commandAndControl": string|null, "dataTheft": string|null, "ransomwareDeployment": string|null, "products": string[], "versions": string[], "operatingSystems": string[], "cloudServices": string[], "applications": string[], "vendorSeverity": string, "activeExploitation": string, "overallSocPriority": "Critical"|"High"|"Medium"|"Low"} -- kill-chain fields: null (not "Not Reported") for any stage not described in the article, do not fabricate a kill chain the article doesn\'t support. affectedProducts fields: exactly as named in the article. vendorSeverity is the vendor\'s own stated rating, not your own guess -- CVSS/EPSS/KEV are supplied separately, don\'t restate them here. Every bullet should read like it came from a technical researcher, not a press release -- name the specific thing, don\'t generalize it away.\n' +
   '"mitreAttack": array of {"technique": string, "techniqueId": string or null, "reason": string (why this technique applies, grounded in what the article describes), "killChainPhase": string} -- techniqueId MUST be copied exactly from the CANDIDATE MITRE ATT&CK TECHNIQUES list in the user message, or null if none genuinely apply. Never invent a technique ID that isn\'t in that list, even if it looks plausible.\n' +
   '"threatActors": array of {"group": string, "aliases": string[], "motivation": string|null, "targetSectors": string[], "geography": string|null, "knownCampaigns": string[]} -- only actors explicitly named in the article.\n' +
   '"malware": array of {"family": string, "capabilities": string[], "persistence": string|null, "payload": string|null, "deliveryMechanism": string|null} -- only malware explicitly named in the article.\n' +
-  '"detectionOpportunities": array of concrete, specific things a defender should monitor (log sources, event IDs, telemetry, behavioral signatures) -- grounded in this specific attack, not a generic checklist.\n' +
-  '"threatHuntingOpportunities": {"defenderXdrKql": string[], "sentinelKql": string[], "splunkSpl": string[], "elastic": string[], "sigma": string[], "yara": string[], "crowdstrikeFalcon": string[], "carbonBlack": string[]} -- realistic hunting logic specific to this attack\'s actual behavior, not generic boilerplate queries; [] for any platform where you can\'t produce something genuinely specific to this attack.\n' +
-  '"detectionEngineeringOpportunities": {"newAnalytics": string[], "newCorrelationRules": string[], "newSigmaRules": string[], "newKqlDetections": string[], "edrBehavioralDetections": string[], "siemCorrelationLogic": string[], "mitreCoverageGaps": string[], "telemetryGaps": string[], "logSourceRequirements": string[]}.\n' +
-  '"incidentResponseGuidance": {"immediateTriageSteps": string[], "evidenceToCollect": string[], "containmentActions": string[], "forensicArtifacts": string[], "recoveryActions": string[], "validationSteps": string[]}.\n' +
-  '"immediateRecommendations": {"critical": string[], "high": string[], "medium": string[], "low": string[]} -- each a concrete action, short-term mitigations and long-term hardening both welcome, sorted into the right priority bucket.\n' +
-  '"patchInformationNarrative": {"availability": string, "fixedVersions": string[], "temporaryMitigations": string[], "vendorGuidance": string|null, "knownWorkarounds": string[]}.\n' +
+  '"operationalActions": {\n' +
+  '  "socAnalyst": {"telemetryToCheck": string[] (real, specific telemetry sources for THIS attack -- e.g. "Windows Event ID 4688 (process creation) for the child process spawned by the web service", "Sysmon Event ID 3 (network connection) for outbound C2 beacons", "Microsoft Defender for Endpoint DeviceProcessEvents / DeviceNetworkEvents advanced hunting tables", "firewall/proxy logs for requests to the vulnerable endpoint path" -- never just "logs" or "EDR telemetry" with no specifics), "whatToLookFor": string (the specific indicator/behavior that confirms this is happening in this environment), "immediateNextStep": string (the concrete next step if the indicator is found)},\n' +
+  '  "threatHunter": {"hypotheses": array of {"hypothesis": string (a specific, testable hunting hypothesis grounded in this attack\'s actual behavior, e.g. "internet-facing instances of the affected service still unpatched", "unexpected administrative logins immediately following the exploitation window", "process spawning from the vulnerable web service"), "dataSources": string[] (what to query to test it), "positiveFindingLooksLike": string, "falsePositiveNote": string (what a benign explanation for the same signal would look like)} -- 2-4 hypotheses, each genuinely distinct, not restatements of each other},\n' +
+  '  "detectionEngineer": {"existingRulesAvailable": string[] (your own knowledge of whether public Sigma/Elastic/Microsoft-native detection rules already cover this activity -- name them if you know of specific ones, otherwise state plainly that none are known to exist yet; real, verified public rule matches are supplied separately and merged in automatically, don\'t restate those), "recommendedAction": string (update an existing rule vs. author a new one, and why), "yaraApplicable": string or null (is YARA a fit here -- e.g. for a dropped payload/webshell -- or null if not applicable to this attack type), "newDetectionLogic": string[] (concrete new detection logic to build, described precisely enough for an engineer to implement -- not vague "add a rule"), "logSourcesRequired": string[], "expectedFalsePositives": string, "detectionGaps": string[] (what this attack could still evade even with the above detections in place)},\n' +
+  '  "vulnerabilityManagement": {"applicable": boolean (false if this article involves no specific CVE -- if false, every other field in this object should be "Not Applicable"/[]), "affectedAssetsSummary": string (affected products/versions and how to identify/scope them in a typical environment), "internetFacing": string, "exploitMaturity": string (weaponized/PoC/theoretical), "patchPriority": string, "maintenanceWindowRecommendation": string, "businessCriticality": string, "compensatingControls": string[] (if patching must be delayed), "knownWorkaround": string or null},\n' +
+  '  "incidentResponse": {"immediateTriageSteps": string[], "containmentActions": string[], "recoveryActions": string[]},\n' +
+  '  "threatIntelTakeaway": string (a detailed paragraph, 3-5 sentences -- attribution and campaign tracking, correlating this activity/actor/malware against existing intelligence holdings, watching for related infrastructure or TTPs reappearing elsewhere, and who internally needs this disseminated),\n' +
+  '  "executiveLeadershipTakeaway": string (under 100 words, the business risk with zero technical jargon)\n' +
+  '}\n' +
   '"confidenceAssessment": {"level": "High"|"Medium"|"Low", "reasoning": string} -- your confidence this report accurately reflects the source article. reasoning MUST explain the specific reason for that level (e.g. "High: the article includes a full technical writeup with confirmed IOCs and a named vendor" or "Medium: the article covers the vulnerability but exploitation details beyond the vendor advisory are limited") -- this reasoning is shown directly to the analyst, so a vague or generic sentence is not acceptable.\n' +
   '"aiRiskScoring": {"score": integer 0-100, "priority": "Critical"|"High"|"Medium"|"Low", "reasoning": string} -- build the score by adding: active exploitation +20, ransomware usage +15, public PoC +15, internet-exposed service +15, privilege escalation +10, authentication bypass +15, critical CVSS +10, widely deployed software +10; subtract points if exploitation requires unlikely conditions. Explain which factors applied.\n' +
-  '"socAnalystTakeaway": a detailed paragraph (3-5 sentences, NOT a single generic sentence) answering "If I am an L1/L2 analyst coming on shift, what should I immediately look for and do?" -- name the specific log sources/telemetry to check, the specific indicators or behaviors that would confirm this is happening in this environment, and the concrete next step if one is found. A new L1/L2 analyst should be able to act on this paragraph alone without reading the rest of the report.\n' +
-  '"detectionEngineerTakeaway": one paragraph -- what detections should be created or improved.\n' +
-  '"threatHunterTakeaway": a detailed paragraph (3-5 sentences, NOT a single generic sentence) -- specific hypotheses to investigate (grounded in this attack\'s actual behavior, not generic), which data sources/tools to query them against, and what a genuine positive finding would look like versus a benign false positive.\n' +
-  '"threatIntelTakeaway": a detailed paragraph (3-5 sentences, NOT a single generic sentence) -- what a CTI/Threat Intelligence team should do with this: attribution and campaign tracking, correlating this activity/actor/malware against existing intelligence holdings, watching for related infrastructure or TTPs reappearing elsewhere, and who internally needs this disseminated.\n' +
-  '"executiveLeadershipTakeaway": under 100 words, the business risk with zero technical jargon.\n' +
-  '"vulnerabilityManagementTakeaway": a detailed paragraph for a Vulnerability Management team/individual -- ONLY if this article involves specific CVEs: patch prioritization guidance grounded in the verified CVSS/EPSS/KEV data supplied to you, a realistic patching timeline given the exploitation status, compensating controls to apply if patching must be delayed, and how to identify/scope affected assets in a typical environment. If no CVE is involved, respond with exactly "Not Applicable".\n' +
   "No other text, no markdown formatting, no code fences.";
 
 function safeArray(value) {
@@ -68,6 +74,10 @@ function safeNullableString(value) {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function safeBoolean(value) {
+  return typeof value === "boolean" ? value : false;
+}
+
 // Matches an optional immediately-adjacent paren pair too, so a mention the
 // model already wrote as "Name (T1234)" doesn't get double-wrapped into
 // "Name (Name (T1234))" -- captured separately so the replacer can tell the
@@ -78,13 +88,13 @@ function safeNullableString(value) {
 const TECHNIQUE_MENTION_PATTERN = /(\()?\b(T\d{4}(?:\.\d{3})?)\b(\))?/gi;
 
 // Same grounding principle as safeMitreArray further down, extended to
-// free-text fields it never touches (aiTechnicalSummary's bullets, threatOverview's
-// kill-chain-stage strings) -- confirmed live the model sometimes leaks a
-// bare technique-ID token into these narrative fields instead of an actual
-// description (e.g. threatOverview.initialAccess coming back as literally
-// "T1689" rather than prose). Real IDs get annotated with their real name
-// for readability; anything that doesn't match the synced catalog is
-// stripped rather than left as an unverifiable claim embedded in prose.
+// free-text fields it never touches (technicalAnalysis's narrative/kill-
+// chain fields) -- confirmed live the model sometimes leaks a bare
+// technique-ID token into these narrative fields instead of an actual
+// description (e.g. initialAccess coming back as literally "T1689" rather
+// than prose). Real IDs get annotated with their real name for readability;
+// anything that doesn't match the synced catalog is stripped rather than
+// left as an unverifiable claim embedded in prose.
 function groundTechniqueMentions(text, validTechniqueIds, idToTechniqueName) {
   if (typeof text !== "string" || !text.trim()) return text;
   const grounded = text.replace(TECHNIQUE_MENTION_PATTERN, (_match, openParen, idPart, closeParen) => {
@@ -109,26 +119,16 @@ function safeNullableGroundedString(value, validTechniqueIds, idToTechniqueName)
   return grounded || null;
 }
 
+function safeGroundedString(value, validTechniqueIds, idToTechniqueName, fallback = "Not Reported") {
+  const str = safeString(value, fallback);
+  if (str === fallback) return str;
+  return groundTechniqueMentions(str, validTechniqueIds, idToTechniqueName) || fallback;
+}
+
 function groundedBullets(values, validTechniqueIds, idToTechniqueName) {
   return safeArray(values)
     .map((v) => groundTechniqueMentions(v, validTechniqueIds, idToTechniqueName))
     .filter((v) => v && v.trim());
-}
-
-function safeAiTechnicalSummary(v, validTechniqueIds, idToTechniqueName) {
-  v ??= {};
-  const ground = (values) => groundedBullets(values, validTechniqueIds, idToTechniqueName);
-  return {
-    threat: ground(v.threat),
-    attackVector: ground(v.attackVector),
-    rootCause: ground(v.rootCause),
-    exploitationDetails: ground(v.exploitationDetails),
-    technicalFindings: ground(v.technicalFindings),
-    securityImplications: ground(v.securityImplications),
-    detectionOpportunities: ground(v.detectionOpportunities),
-    huntingOpportunities: ground(v.huntingOpportunities),
-    immediateActions: ground(v.immediateActions),
-  };
 }
 
 const SOC_PRIORITIES = new Set(["Critical", "High", "Medium", "Low"]);
@@ -141,22 +141,34 @@ function safeConfidenceLevel(value) {
   return CONFIDENCE_LEVELS.has(value) ? value : "Low";
 }
 
-function safeBusinessImpact(v) {
+function safeBusinessRisk(v) {
   v ??= {};
   return {
     businessRisk: safeString(v.businessRisk),
     operationalDisruption: safeString(v.operationalDisruption),
     likelihoodOfExploitation: safeString(v.likelihoodOfExploitation),
+    impactIfUnpatched: safeString(v.impactIfUnpatched),
     industriesCommonlyTargeted: safeArray(v.industriesCommonlyTargeted),
     regionsCommonlyTargeted: safeArray(v.regionsCommonlyTargeted),
-    impactIfUnpatched: safeString(v.impactIfUnpatched),
+    requiresExecutiveAttention: safeBoolean(v.requiresExecutiveAttention),
+    topActions: safeArray(v.topActions).slice(0, 3),
+    whatsMissing: safeNullableString(v.whatsMissing),
   };
 }
 
-function safeThreatOverview(v, validTechniqueIds, idToTechniqueName) {
+function safeTechnicalAnalysis(v, validTechniqueIds, idToTechniqueName) {
   v ??= {};
   const ground = (val) => safeNullableGroundedString(val, validTechniqueIds, idToTechniqueName);
+  const groundBullets = (val) => groundedBullets(val, validTechniqueIds, idToTechniqueName);
   return {
+    whatHappened: safeGroundedString(v.whatHappened, validTechniqueIds, idToTechniqueName),
+    whyItMatters: safeGroundedString(v.whyItMatters, validTechniqueIds, idToTechniqueName),
+    whoIsAffected: safeString(v.whoIsAffected),
+    exploitationStatus: safeGroundedString(v.exploitationStatus, validTechniqueIds, idToTechniqueName),
+    attackVector: groundBullets(v.attackVector),
+    rootCause: groundBullets(v.rootCause),
+    exploitationDetails: groundBullets(v.exploitationDetails),
+    technicalFindings: groundBullets(v.technicalFindings),
     attackChain: safeString(v.attackChain),
     initialAccess: ground(v.initialAccess),
     privilegeEscalation: ground(v.privilegeEscalation),
@@ -167,23 +179,11 @@ function safeThreatOverview(v, validTechniqueIds, idToTechniqueName) {
     commandAndControl: ground(v.commandAndControl),
     dataTheft: ground(v.dataTheft),
     ransomwareDeployment: ground(v.ransomwareDeployment),
-  };
-}
-
-function safeAffectedProducts(v) {
-  v ??= {};
-  return {
     products: safeArray(v.products),
     versions: safeArray(v.versions),
     operatingSystems: safeArray(v.operatingSystems),
     cloudServices: safeArray(v.cloudServices),
     applications: safeArray(v.applications),
-  };
-}
-
-function safeVendorSeverityAssessment(v) {
-  v ??= {};
-  return {
     vendorSeverity: safeString(v.vendorSeverity),
     activeExploitation: safeString(v.activeExploitation),
     overallSocPriority: safePriority(v.overallSocPriority),
@@ -314,32 +314,69 @@ function safeMalware(value) {
     }));
 }
 
-function safeHuntingOpportunities(v) {
+function safeSocAnalyst(v) {
   v ??= {};
   return {
-    defenderXdrKql: safeArray(v.defenderXdrKql),
-    sentinelKql: safeArray(v.sentinelKql),
-    splunkSpl: safeArray(v.splunkSpl),
-    elastic: safeArray(v.elastic),
-    sigma: safeArray(v.sigma),
-    yara: safeArray(v.yara),
-    crowdstrikeFalcon: safeArray(v.crowdstrikeFalcon),
-    carbonBlack: safeArray(v.carbonBlack),
+    telemetryToCheck: safeArray(v.telemetryToCheck),
+    whatToLookFor: safeString(v.whatToLookFor),
+    immediateNextStep: safeString(v.immediateNextStep),
   };
 }
 
-function safeDetectionEngineering(v) {
+function safeThreatHunter(v) {
+  v ??= {};
+  const hypotheses = Array.isArray(v.hypotheses) ? v.hypotheses : [];
+  return {
+    hypotheses: hypotheses
+      .filter((h) => h && typeof h === "object" && typeof h.hypothesis === "string" && h.hypothesis.trim())
+      .map((h) => ({
+        hypothesis: h.hypothesis.trim(),
+        dataSources: safeArray(h.dataSources),
+        positiveFindingLooksLike: safeString(h.positiveFindingLooksLike),
+        falsePositiveNote: safeString(h.falsePositiveNote),
+      })),
+  };
+}
+
+function safeDetectionEngineer(v) {
   v ??= {};
   return {
-    newAnalytics: safeArray(v.newAnalytics),
-    newCorrelationRules: safeArray(v.newCorrelationRules),
-    newSigmaRules: safeArray(v.newSigmaRules),
-    newKqlDetections: safeArray(v.newKqlDetections),
-    edrBehavioralDetections: safeArray(v.edrBehavioralDetections),
-    siemCorrelationLogic: safeArray(v.siemCorrelationLogic),
-    mitreCoverageGaps: safeArray(v.mitreCoverageGaps),
-    telemetryGaps: safeArray(v.telemetryGaps),
-    logSourceRequirements: safeArray(v.logSourceRequirements),
+    existingRulesAvailable: safeArray(v.existingRulesAvailable),
+    recommendedAction: safeString(v.recommendedAction),
+    yaraApplicable: safeNullableString(v.yaraApplicable),
+    newDetectionLogic: safeArray(v.newDetectionLogic),
+    logSourcesRequired: safeArray(v.logSourcesRequired),
+    expectedFalsePositives: safeString(v.expectedFalsePositives),
+    detectionGaps: safeArray(v.detectionGaps),
+  };
+}
+
+function safeVulnerabilityManagement(v) {
+  v ??= {};
+  const applicable = safeBoolean(v.applicable);
+  if (!applicable) {
+    return {
+      applicable: false,
+      affectedAssetsSummary: "Not Applicable",
+      internetFacing: "Not Applicable",
+      exploitMaturity: "Not Applicable",
+      patchPriority: "Not Applicable",
+      maintenanceWindowRecommendation: "Not Applicable",
+      businessCriticality: "Not Applicable",
+      compensatingControls: [],
+      knownWorkaround: null,
+    };
+  }
+  return {
+    applicable: true,
+    affectedAssetsSummary: safeString(v.affectedAssetsSummary),
+    internetFacing: safeString(v.internetFacing),
+    exploitMaturity: safeString(v.exploitMaturity),
+    patchPriority: safeString(v.patchPriority),
+    maintenanceWindowRecommendation: safeString(v.maintenanceWindowRecommendation),
+    businessCriticality: safeString(v.businessCriticality),
+    compensatingControls: safeArray(v.compensatingControls),
+    knownWorkaround: safeNullableString(v.knownWorkaround),
   };
 }
 
@@ -347,32 +384,21 @@ function safeIncidentResponse(v) {
   v ??= {};
   return {
     immediateTriageSteps: safeArray(v.immediateTriageSteps),
-    evidenceToCollect: safeArray(v.evidenceToCollect),
     containmentActions: safeArray(v.containmentActions),
-    forensicArtifacts: safeArray(v.forensicArtifacts),
     recoveryActions: safeArray(v.recoveryActions),
-    validationSteps: safeArray(v.validationSteps),
   };
 }
 
-function safeImmediateRecommendations(v) {
+function safeOperationalActions(v) {
   v ??= {};
   return {
-    critical: safeArray(v.critical),
-    high: safeArray(v.high),
-    medium: safeArray(v.medium),
-    low: safeArray(v.low),
-  };
-}
-
-function safePatchInformation(v) {
-  v ??= {};
-  return {
-    availability: safeString(v.availability),
-    fixedVersions: safeArray(v.fixedVersions),
-    temporaryMitigations: safeArray(v.temporaryMitigations),
-    vendorGuidance: safeNullableString(v.vendorGuidance),
-    knownWorkarounds: safeArray(v.knownWorkarounds),
+    socAnalyst: safeSocAnalyst(v.socAnalyst),
+    threatHunter: safeThreatHunter(v.threatHunter),
+    detectionEngineer: safeDetectionEngineer(v.detectionEngineer),
+    vulnerabilityManagement: safeVulnerabilityManagement(v.vulnerabilityManagement),
+    incidentResponse: safeIncidentResponse(v.incidentResponse),
+    threatIntelTakeaway: safeString(v.threatIntelTakeaway),
+    executiveLeadershipTakeaway: safeString(v.executiveLeadershipTakeaway),
   };
 }
 
@@ -399,30 +425,16 @@ function parseModelReport(text, validTechniqueIds, techniqueNameToId, idToTechni
     const parsed = JSON.parse(text.slice(start, end + 1));
     if (!parsed || typeof parsed !== "object") return null;
     return {
-      aiTechnicalSummary: safeAiTechnicalSummary(parsed.aiTechnicalSummary, validTechniqueIds, idToTechniqueName),
       executiveHeadline: safeString(parsed.executiveHeadline),
       executiveSummary: safeString(parsed.executiveSummary),
-      businessImpact: safeBusinessImpact(parsed.businessImpact),
-      threatOverview: safeThreatOverview(parsed.threatOverview, validTechniqueIds, idToTechniqueName),
-      affectedProducts: safeAffectedProducts(parsed.affectedProducts),
-      vendorSeverityAssessment: safeVendorSeverityAssessment(parsed.vendorSeverityAssessment),
+      businessRisk: safeBusinessRisk(parsed.businessRisk),
+      technicalAnalysis: safeTechnicalAnalysis(parsed.technicalAnalysis, validTechniqueIds, idToTechniqueName),
       mitreAttack: safeMitreArray(parsed.mitreAttack, validTechniqueIds, techniqueNameToId, idToTechniqueName),
       threatActors: safeThreatActors(parsed.threatActors),
       malware: safeMalware(parsed.malware),
-      detectionOpportunities: safeArray(parsed.detectionOpportunities),
-      threatHuntingOpportunities: safeHuntingOpportunities(parsed.threatHuntingOpportunities),
-      detectionEngineeringOpportunities: safeDetectionEngineering(parsed.detectionEngineeringOpportunities),
-      incidentResponseGuidance: safeIncidentResponse(parsed.incidentResponseGuidance),
-      immediateRecommendations: safeImmediateRecommendations(parsed.immediateRecommendations),
-      patchInformationNarrative: safePatchInformation(parsed.patchInformationNarrative),
+      operationalActions: safeOperationalActions(parsed.operationalActions),
       confidenceAssessment: safeConfidenceAssessment(parsed.confidenceAssessment),
       aiRiskScoring: safeAiRiskScoring(parsed.aiRiskScoring),
-      socAnalystTakeaway: safeString(parsed.socAnalystTakeaway),
-      detectionEngineerTakeaway: safeString(parsed.detectionEngineerTakeaway),
-      threatHunterTakeaway: safeString(parsed.threatHunterTakeaway),
-      threatIntelTakeaway: safeString(parsed.threatIntelTakeaway),
-      executiveLeadershipTakeaway: safeString(parsed.executiveLeadershipTakeaway),
-      vulnerabilityManagementTakeaway: safeString(parsed.vulnerabilityManagementTakeaway, "Not Applicable"),
     };
   } catch {
     return null; // model returned malformed JSON -- treat as "couldn't generate," not a guess
@@ -435,10 +447,6 @@ function parseModelReport(text, validTechniqueIds, techniqueNameToId, idToTechni
 // agents, certificates etc. have no reliable extraction path from prose news
 // text, so rather than ask the model to fabricate them (directly violating
 // the "never invent IOCs" rule), those categories are always reported empty.
-// Sigma/YARA/Suricata/Snort are DETECTION CONTENT, not indicators -- those
-// come from the model's own threatHuntingOpportunities/detectionEngineering
-// fields instead, where drafting rule logic from described behavior is
-// legitimate analyst work, not invented evidence.
 const IOC_CATEGORY_BY_TYPE = {
   ipv4: "ipAddresses",
   ipv6: "ipAddresses",
@@ -487,45 +495,41 @@ function buildTechniqueCandidatesBlock(candidates) {
   return `CANDIDATE MITRE ATT&CK TECHNIQUES (techniqueId must be copied exactly from this list, or null if none genuinely apply):\n${lines}`;
 }
 
-// Grounds the Sigma/YARA hunting-query fields the same way the rest of this
-// module grounds CVEs/IOCs/MITRE IDs: cross-references the model's own named
-// malware families/threat actors (not the model's invented rule content)
-// against server/connectors/detectionRules.js's real, synced index of ~4000
-// SigmaHQ/Yara-Rules community rules, via the exact same substring-match
-// helper server/correlate.js already uses elsewhere in this app. Only Sigma
-// and YARA get this treatment -- Sentinel/Defender KQL, Splunk SPL, Elastic,
-// CrowdStrike, and Carbon Black have no equivalent free bulk rule catalog
-// synced anywhere in this app, so there's nothing real to ground those
-// against; they stay the model's own synthesis. Real hits are appended
-// (not swapped in), so a model-drafted query for the same platform isn't lost.
-const MAX_DETECTION_RULE_HITS_PER_PLATFORM = 8;
+// Grounds the detection engineer's "existingRulesAvailable" field the same
+// way the rest of this module grounds CVEs/IOCs/MITRE IDs: cross-references
+// the model's own named malware families/threat actors (not the model's
+// invented rule content) against server/connectors/detectionRules.js's
+// real, synced index of ~4000 SigmaHQ/Yara-Rules community rules, via the
+// exact same substring-match helper server/correlate.js already uses
+// elsewhere in this app. Real hits are appended (not swapped in), so the
+// model's own narrative about rule coverage isn't lost.
+const MAX_DETECTION_RULE_HITS = 8;
 
-function groundHuntingRules(modelReport, ruleIndex) {
+function groundExistingRules(modelReport, ruleIndex) {
   if (!ruleIndex?.length) return modelReport;
 
   const names = [...modelReport.malware.map((m) => m.family), ...modelReport.threatActors.map((a) => a.group)].filter((n) => n && n !== "Not Reported");
 
   const seen = new Set();
-  const sigmaHits = [];
-  const yaraHits = [];
+  const hits = [];
   for (const name of names) {
     for (const hit of detectionRulesFor(name, ruleIndex)) {
       const key = `${hit.label}:${hit.path}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const line = `${hit.label} (public, existing rule): ${hit.path} -- ${hit.url}`;
-      if (hit.label === "SigmaHQ") sigmaHits.push(line);
-      else if (hit.label === "YARA-Rules") yaraHits.push(line);
+      hits.push(`${hit.label} (public, existing rule): ${hit.path} -- ${hit.url}`);
     }
   }
-  if (sigmaHits.length === 0 && yaraHits.length === 0) return modelReport;
+  if (hits.length === 0) return modelReport;
 
   return {
     ...modelReport,
-    threatHuntingOpportunities: {
-      ...modelReport.threatHuntingOpportunities,
-      sigma: [...modelReport.threatHuntingOpportunities.sigma, ...sigmaHits].slice(0, MAX_DETECTION_RULE_HITS_PER_PLATFORM),
-      yara: [...modelReport.threatHuntingOpportunities.yara, ...yaraHits].slice(0, MAX_DETECTION_RULE_HITS_PER_PLATFORM),
+    operationalActions: {
+      ...modelReport.operationalActions,
+      detectionEngineer: {
+        ...modelReport.operationalActions.detectionEngineer,
+        existingRulesAvailable: [...modelReport.operationalActions.detectionEngineer.existingRulesAvailable, ...hits].slice(0, MAX_DETECTION_RULE_HITS),
+      },
     },
   };
 }
@@ -595,7 +599,7 @@ export async function generateThreatSummary(article, grounded) {
   const modelReport = parseModelReport(response.message?.content ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);
   if (!modelReport) return null;
 
-  const groundedReport = groundHuntingRules(modelReport, grounded.detectionRuleIndex);
+  const groundedReport = groundExistingRules(modelReport, grounded.detectionRuleIndex);
 
   return {
     id: article.link,
