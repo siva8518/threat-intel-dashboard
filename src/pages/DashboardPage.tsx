@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, BrainCircuit, Bug, Crosshair, Eye, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
+import { Bot, BrainCircuit, Bug, Crosshair, Eye, Flame, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { TriageConsole } from "@/components/dashboard/TriageConsole";
 import { CveHub } from "@/components/dashboard/CveHub";
@@ -28,6 +28,8 @@ import { ThreatActorIntelligence } from "@/components/dashboard/ThreatActorIntel
 import { CampaignIntelligence } from "@/components/dashboard/CampaignIntelligence";
 import { DarkWebIntelligence } from "@/components/dashboard/DarkWebIntelligence";
 import { AiSummarization } from "@/components/dashboard/AiSummarization";
+import { EmergingThreats } from "@/components/dashboard/EmergingThreats";
+import { EmergingThreatsFeed } from "@/components/dashboard/EmergingThreatsFeed";
 import { Watchlist } from "@/components/dashboard/Watchlist";
 import { CveDetailDrawer } from "@/components/dashboard/CveDetailDrawer";
 import { MalwareDetailDrawer } from "@/components/dashboard/MalwareDetailDrawer";
@@ -49,6 +51,7 @@ const TABS = [
   { id: "campaign-intelligence", label: "Campaign Intelligence", icon: Crosshair },
   { id: "darkweb-intelligence", label: "Dark Web Intelligence", icon: Ghost },
   { id: "ai-summarization", label: "AI Summarization", icon: BrainCircuit },
+  { id: "emerging-threats", label: "Emerging Threats", icon: Flame },
   { id: "hunting-detection", label: "Hunting & Detection", icon: Telescope },
   { id: "news", label: "Security News", icon: Newspaper },
   { id: "watchlist", label: "Watchlist", icon: Eye },
@@ -143,6 +146,7 @@ export function DashboardPage() {
             <div className="space-y-4">
               <DailySummary />
               <CveSeverityDistribution onSelectSeverity={goToCveSeverity} />
+              <EmergingThreatsFeed onOpenTab={() => setActiveTab("emerging-threats")} />
             </div>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -180,6 +184,7 @@ export function DashboardPage() {
       {activeTab === "campaign-intelligence" && <CampaignIntelligence />}
       {activeTab === "darkweb-intelligence" && <DarkWebIntelligence />}
       {activeTab === "ai-summarization" && <AiSummarization />}
+      {activeTab === "emerging-threats" && <EmergingThreats />}
       {activeTab === "hunting-detection" && <HuntingDetectionHub />}
       {activeTab === "news" && <SecurityNews />}
       {activeTab === "watchlist" && <Watchlist />}

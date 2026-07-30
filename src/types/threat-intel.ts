@@ -894,6 +894,33 @@ export interface AiThreatSummaryOperationalImpactAssessment {
   attackerObjectives: string[];
 }
 
+/** Fixed 10-sector catalog -- see INDUSTRY_CATALOG in server/aiThreatSummary.js. Every report has all 10, most "Not Applicable"/"Low" by design; only genuinely-supported sectors are elevated. */
+export type IndustryName =
+  | "Financial Services"
+  | "Consumer"
+  | "Technology, Media & Telecommunications"
+  | "Life Sciences & Health Care"
+  | "Manufacturing"
+  | "Energy & Utilities"
+  | "Government & Public Sector"
+  | "Retail & eCommerce"
+  | "Education"
+  | "Transportation & Logistics";
+
+export type IndustryRelevanceLevel = "Critical" | "High" | "Medium" | "Low" | "Not Applicable";
+
+export interface AiThreatSummaryIndustryRelevance {
+  industry: IndustryName;
+  relevance: IndustryRelevanceLevel;
+  confidence: "High" | "Medium" | "Low";
+  whyAffected: string;
+  potentialImpact: string[];
+  likelyTargetAssets: string[];
+  defensiveFocus: string[];
+  riskScore: number;
+  priority: "Immediate" | "High" | "Normal" | "Low";
+}
+
 /**
  * Merges the former threatOverview/aiTechnicalSummary/affectedProducts/
  * vendorSeverityAssessment sections into one -- driven by an explicit
@@ -1091,10 +1118,69 @@ export interface AiThreatSummaryReport {
   technicalAnalysis: AiThreatSummaryTechnicalAnalysis;
   threatRelevance: AiThreatSummaryThreatRelevance;
   operationalImpact: AiThreatSummaryOperationalImpactAssessment;
+  industryRelevance: AiThreatSummaryIndustryRelevance[];
   mitreAttack: AiThreatSummaryMitreTechnique[];
   threatActors: AiThreatSummaryActor[];
   malware: AiThreatSummaryMalware[];
   operationalActions: AiThreatSummaryOperationalActions;
   confidenceAssessment: AiThreatSummaryConfidence;
   aiRiskScoring: AiThreatSummaryRiskScoring;
+}
+
+// --- Emerging Threats (Threat Priority Score ranking + aggregate industry
+// heatmap across every AI Summarization report) -- see
+// server/emergingThreatsRanking.js. Distinct from the unrelated
+// "emergingThreats" connector (Proofpoint's compromised-IP blocklist). ---
+
+export interface ThreatPriorityScoreFactor {
+  value: number;
+  weight: number;
+  contribution: number;
+}
+
+export interface ThreatPriorityScore {
+  score: number;
+  factors: {
+    /** aiRiskScoring.score when a report exists, otherwise a severity-tier proxy (critical/high/medium/low -> 100/70/40/15) -- see server/emergingThreatsRanking.js. */
+    risk: ThreatPriorityScoreFactor;
+    kev: ThreatPriorityScoreFactor;
+    industryRisk: ThreatPriorityScoreFactor;
+    recency: ThreatPriorityScoreFactor;
+  };
+}
+
+export interface EmergingThreatEntry {
+  id: string;
+  articleTitle: string;
+  articleSource: string;
+  severity: Severity;
+  publishedDate: string;
+  /** null when no AI Summarization report exists yet for this article -- see EmergingThreatEntry.hasReport. */
+  aiRiskPriority: "Critical" | "High" | "Medium" | "Low" | null;
+  /** Cross-referenced directly against the live KEV catalog for every article, not just reported ones. */
+  knownExploited: boolean;
+  /** Whether a full AI Summarization report exists for this article -- most entries won't (see server/emergingThreatsRanking.js), which is expected, not a gap. */
+  hasReport: boolean;
+  topIndustry: { industry: IndustryName; relevance: IndustryRelevanceLevel } | null;
+  threatPriorityScore: ThreatPriorityScore;
+}
+
+export interface AggregateIndustryHeatmapRow {
+  industry: IndustryName;
+  relevance: IndustryRelevanceLevel;
+  confidence: "High" | "Medium" | "Low";
+  riskScore: number;
+  priority: "Immediate" | "High" | "Normal" | "Low";
+  whyAffected: string;
+  potentialImpact: string[];
+  likelyTargetAssets: string[];
+  defensiveFocus: string[];
+  /** How many reports currently flag this sector Critical or High. */
+  activeThreatCount: number;
+  topReport: { id: string; title: string } | null;
+}
+
+export interface EmergingThreatsRanking {
+  entries: EmergingThreatEntry[];
+  industryHeatmap: AggregateIndustryHeatmapRow[];
 }

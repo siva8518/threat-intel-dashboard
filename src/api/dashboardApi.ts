@@ -14,6 +14,7 @@ import type {
   CveSeverityDistribution,
   DetectionBacklogItem,
   DetectionBacklogStatus,
+  EmergingThreatsRanking,
   ExecutiveSummary,
   ExploitIntelligence,
   GeoTargeting,
@@ -121,6 +122,10 @@ export async function fetchDarkWebIntelligence(): Promise<{ entities: DarkWebInt
 
 export async function fetchAiThreatSummaries(): Promise<{ reports: AiThreatSummaryReport[] }> {
   return fetchJson("/api/dashboard/ai-summaries", { source: "Dashboard API" });
+}
+
+export async function fetchEmergingThreatsRanking(): Promise<EmergingThreatsRanking> {
+  return fetchJson("/api/dashboard/emerging-threats-ranking", { source: "Dashboard API" });
 }
 
 export async function fetchWatchlist(): Promise<{ keywords: WatchlistKeyword[] }> {

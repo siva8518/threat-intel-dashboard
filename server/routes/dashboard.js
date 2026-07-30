@@ -47,6 +47,7 @@ import { getAllStatuses as getAllRemediationStatuses, setStatus as setRemediatio
 import { buildRemediationQueue } from "../remediationQueue.js";
 import { buildHuntingQueryLibrary } from "../huntingLibrary.js";
 import { buildDetectionBacklog } from "../detectionBacklog.js";
+import { buildEmergingThreatsRanking, computeAggregateIndustryHeatmap } from "../emergingThreatsRanking.js";
 import {
   getAllStatuses as getAllDetectionBacklogStatuses,
   setStatus as setDetectionBacklogStatus,
@@ -402,6 +403,24 @@ router.get("/dashboard/ai-summaries/:id", (req, res) => {
   const report = getAiThreatSummaryById(decodeURIComponent(req.params.id));
   if (!report) return res.status(404).json({ error: "not found" });
   res.json(report);
+});
+
+// Ranked-by-Threat-Priority-Score feed + aggregate industry heatmap across
+// every AI Summarization report -- see server/emergingThreatsRanking.js.
+// Powers the "Emerging Threats" tab and the Overview widget above it. Not
+// the same "Emerging Threats" as server/connectors/emergingThreats.js
+// (Proofpoint's compromised-IP blocklist) -- distinct feature, distinct data.
+router.get("/dashboard/emerging-threats-ranking", (_req, res) => {
+  const reports = getAllAiThreatSummaries();
+  const kevIds = new Set((cache.getEntry("cisa-kev").data?.entries ?? []).map((e) => e.cveId));
+  res.json({
+    // Ranked from the full tagged news pool (getTaggedNewsCached(), defined
+    // further down this file -- hoisted, so callable here), NOT just
+    // AI Summarization reports -- see server/emergingThreatsRanking.js's own
+    // header comment for why that distinction matters.
+    entries: buildEmergingThreatsRanking(getTaggedNewsCached(), reports, kevIds),
+    industryHeatmap: computeAggregateIndustryHeatmap(reports),
+  });
 });
 
 // --- Hunting Query Library (rolled-up threatHuntingOpportunities across every

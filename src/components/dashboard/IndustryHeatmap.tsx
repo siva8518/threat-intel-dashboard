@@ -1,0 +1,141 @@
+import { Fragment, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import type { AiThreatSummaryIndustryRelevance, IndustryName, IndustryRelevanceLevel } from "@/types/threat-intel";
+
+export const INDUSTRY_EMOJI: Record<IndustryName, string> = {
+  "Financial Services": "🏦",
+  Consumer: "🛍",
+  "Technology, Media & Telecommunications": "💻",
+  "Life Sciences & Health Care": "🏥",
+  Manufacturing: "🏭",
+  "Energy & Utilities": "⚡",
+  "Government & Public Sector": "🏛",
+  "Retail & eCommerce": "🛒",
+  Education: "🎓",
+  "Transportation & Logistics": "🚚",
+};
+
+const RELEVANCE_BADGE_VARIANT: Record<IndustryRelevanceLevel, "critical" | "high" | "medium" | "low" | "muted"> = {
+  Critical: "critical",
+  High: "high",
+  Medium: "medium",
+  Low: "low",
+  "Not Applicable": "muted",
+};
+
+const RELEVANCE_DOT: Record<IndustryRelevanceLevel, string> = {
+  Critical: "🔴",
+  High: "🟠",
+  Medium: "🟡",
+  Low: "🟢",
+  "Not Applicable": "⚪",
+};
+
+export const RELEVANCE_RANK: Record<IndustryRelevanceLevel, number> = { Critical: 4, High: 3, Medium: 2, Low: 1, "Not Applicable": 0 };
+
+export interface IndustryHeatmapRow extends AiThreatSummaryIndustryRelevance {
+  /** Extra context shown next to the industry name in aggregate views (e.g. "3 active reports"). */
+  subtitle?: string;
+}
+
+/**
+ * Shared industry-relevance heatmap table -- used both per-report (AI
+ * Summarization's own 10-sector assessment, see server/aiThreatSummary.js's
+ * INDUSTRY_CATALOG) and aggregated across all reports (the Emerging Threats
+ * tab). Rows sort by relevance severity so genuinely elevated sectors surface
+ * first -- most rows are "Not Applicable"/"Low" by design (see the grounding
+ * rule in the prompt: only 1-3 sectors should ever be Critical/High for a
+ * typical article), so this is deliberately compact by default with detail
+ * behind a click, not ten walls of text.
+ */
+export function IndustryHeatmap({ rows }: { rows: IndustryHeatmapRow[] }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const sorted = [...rows].sort((a, b) => RELEVANCE_RANK[b.relevance] - RELEVANCE_RANK[a.relevance] || b.riskScore - a.riskScore);
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[560px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-muted">
+            <th className="py-1.5 pr-3 font-semibold">Industry</th>
+            <th className="py-1.5 pr-3 font-semibold">Relevance</th>
+            <th className="py-1.5 pr-3 font-semibold">Risk</th>
+            <th className="py-1.5 font-semibold">Priority</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((row) => {
+            const isOpen = expanded === row.industry;
+            const applicable = row.relevance !== "Not Applicable";
+            return (
+              <Fragment key={row.industry}>
+                <tr
+                  onClick={() => applicable && setExpanded(isOpen ? null : row.industry)}
+                  className={cn("border-b border-white/[0.05]", applicable && "cursor-pointer hover:bg-white/[0.02]")}
+                >
+                  <td className="py-2 pr-3 text-foreground">
+                    <span className="mr-1.5" aria-hidden="true">
+                      {INDUSTRY_EMOJI[row.industry]}
+                    </span>
+                    {row.industry}
+                    {row.subtitle && <span className="ml-1.5 text-xs text-muted">{row.subtitle}</span>}
+                  </td>
+                  <td className="py-2 pr-3">
+                    <Badge variant={RELEVANCE_BADGE_VARIANT[row.relevance]}>
+                      <span aria-hidden="true">{RELEVANCE_DOT[row.relevance]}</span> {row.relevance}
+                    </Badge>
+                  </td>
+                  <td className="py-2 pr-3 tabular-nums text-foreground">{row.riskScore}/10</td>
+                  <td className="py-2 text-muted">{row.priority}</td>
+                </tr>
+                {isOpen && applicable && (
+                  <tr className="border-b border-white/[0.05] bg-white/[0.02]">
+                    <td colSpan={4} className="px-2 py-3 text-xs">
+                      <p className="mb-2 text-foreground">
+                        <span className="font-semibold">Why: </span>
+                        {row.whyAffected} <span className="text-muted">(confidence: {row.confidence})</span>
+                      </p>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        {row.potentialImpact.length > 0 && (
+                          <div>
+                            <p className="mb-1 font-semibold text-foreground">Potential Impact</p>
+                            <ul className="list-disc space-y-0.5 pl-4 text-muted">
+                              {row.potentialImpact.map((x, i) => (
+                                <li key={i}>{x}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {row.likelyTargetAssets.length > 0 && (
+                          <div>
+                            <p className="mb-1 font-semibold text-foreground">Likely Target Assets</p>
+                            <ul className="list-disc space-y-0.5 pl-4 text-muted">
+                              {row.likelyTargetAssets.map((x, i) => (
+                                <li key={i}>{x}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {row.defensiveFocus.length > 0 && (
+                          <div>
+                            <p className="mb-1 font-semibold text-foreground">Defensive Focus</p>
+                            <ul className="list-disc space-y-0.5 pl-4 text-muted">
+                              {row.defensiveFocus.map((x, i) => (
+                                <li key={i}>{x}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}

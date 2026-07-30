@@ -8,8 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { SeverityBadge } from "./SeverityBadge";
 import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
+import { IndustryHeatmap } from "./IndustryHeatmap";
 import { useAiThreatSummaries } from "@/hooks/useAiThreatSummaries";
-import type { AiThreatSummaryReport, Severity } from "@/types/threat-intel";
+import type { AiThreatSummaryIndustryRelevance, AiThreatSummaryReport, IndustryName, Severity } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 import { downloadReportAsPdf, downloadReportAsWord } from "@/lib/reportExport";
 
@@ -84,6 +85,34 @@ const EMPTY_OPERATIONAL_IMPACT = {
   evasionTechniques: [] as string[],
   attackerObjectives: [] as string[],
 };
+
+// Mirrors INDUSTRY_CATALOG in server/aiThreatSummary.js -- no shared client/
+// server code layer in this app, so kept in sync manually (same precedent as
+// MAJOR_VENDOR_SOURCES's own mirrored copy in SecurityNews.tsx).
+const INDUSTRY_CATALOG: IndustryName[] = [
+  "Financial Services",
+  "Consumer",
+  "Technology, Media & Telecommunications",
+  "Life Sciences & Health Care",
+  "Manufacturing",
+  "Energy & Utilities",
+  "Government & Public Sector",
+  "Retail & eCommerce",
+  "Education",
+  "Transportation & Logistics",
+];
+
+const EMPTY_INDUSTRY_RELEVANCE: AiThreatSummaryIndustryRelevance[] = INDUSTRY_CATALOG.map((industry) => ({
+  industry,
+  relevance: "Not Applicable",
+  confidence: "Low",
+  whyAffected: "Not Applicable",
+  potentialImpact: [],
+  likelyTargetAssets: [],
+  defensiveFocus: [],
+  riskScore: 0,
+  priority: "Low",
+}));
 
 const EMPTY_BEHAVIORAL_INDICATORS = {
   networkBehaviors: [] as string[],
@@ -666,6 +695,10 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               </>
             );
           })()}
+
+          <Section title="Industry Relevance">
+            <IndustryHeatmap rows={report.industryRelevance ?? EMPTY_INDUSTRY_RELEVANCE} />
+          </Section>
 
           {report.cves.length > 0 && (
             <Section title="CVEs (verified CVSS/EPSS/KEV)">

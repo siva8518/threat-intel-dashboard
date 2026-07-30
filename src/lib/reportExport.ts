@@ -221,6 +221,30 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     );
   }
 
+  if (report.industryRelevance?.length > 0) {
+    parts.push(heading(2, "Industry Relevance"));
+    const rows = report.industryRelevance
+      .map((r) => `<li><strong>${esc(r.industry)}</strong> -- ${esc(r.relevance)} (risk ${r.riskScore}/10, priority ${esc(r.priority)})</li>`)
+      .join("");
+    parts.push(`<ul>${rows}</ul>`);
+    // Full narrative detail only for sectors actually flagged elevated --
+    // mirrors the UI's collapsed-by-default table (see IndustryHeatmap.tsx)
+    // so a report that's Not Applicable/Low for 9 of 10 sectors doesn't pad
+    // the exported document with nine "Not Applicable" paragraphs.
+    for (const r of report.industryRelevance) {
+      if (r.relevance === "Not Applicable" || r.relevance === "Low") continue;
+      parts.push(heading(3, `${r.industry} (${r.relevance})`));
+      parts.push(paragraph(`${r.whyAffected} (confidence: ${r.confidence})`));
+      parts.push(
+        groupedListsSection("", [
+          ["Potential impact", r.potentialImpact],
+          ["Likely target assets", r.likelyTargetAssets],
+          ["Defensive focus", r.defensiveFocus],
+        ]),
+      );
+    }
+  }
+
   if (report.cves.length > 0) {
     const rows = report.cves
       .map(
