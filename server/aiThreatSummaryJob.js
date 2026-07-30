@@ -1,16 +1,24 @@
-// Drains the news pool through generateThreatSummary() -- scoped to major
-// vendor/security-firm threat research and CISA advisories only (see
-// MAJOR_VENDOR_SOURCES in server/connectors/newsFeeds.js), matching this
-// feature's actual ask: SOC-grade reports on vendor/CERT-grade advisories,
-// not the full ~200-source journalism/aggregator firehose. The full
+// Drains the news pool through generateThreatSummary() -- the full combined
+// ~200-source pool (server/connectors/newsFeeds.js), the same one Daily
+// Summary's "Top News" reads from (see BreakingNewsStrip.tsx), not just
+// major-vendor/CISA sources. Previously restricted to MAJOR_VENDOR_SOURCES +
+// CISA only; widened because that restriction meant an article surfaced in
+// Daily Summary from any other source (BleepingComputer, The Hacker News,
+// Krebs, any national CERT, etc.) could never get an AI report at all, not
+// just delayed -- a permanent gap between what the dashboard flagged as
+// breaking and what AI Summarization actually covered. isMajorVendorOrCisa()
+// below is kept as a secondary sort tie-break (see buildBatch), not a filter,
+// so vendor/CERT-grade advisories still get first crack at each cycle's
+// limited slots -- widening eligibility doesn't mean giving up on quality
+// prioritization, just removing the hard exclusion. The full
 // enterprise-report schema (25+ sections, several with per-platform hunting-
 // query arrays) is far heavier to generate than the 5-category combined
 // extraction (server/combinedExtractionJob.js), so this runs one article at
-// a time on a slow cadence -- generating for the wrong scope or too
-// aggressively would repeat the exact "recomputing something expensive too
-// often" mistake already found and fixed in this app (see the news-tagging
-// cache fix in server/routes/dashboard.js). Also scoped to RECENCY_WINDOW_MS
-// below -- this used to strictly drain an ever-growing historical backlog by
+// a time on a slow cadence -- generating too aggressively would repeat the
+// exact "recomputing something expensive too often" mistake already found
+// and fixed in this app (see the news-tagging cache fix in
+// server/routes/dashboard.js). Also scoped to RECENCY_WINDOW_MS below --
+// this used to strictly drain an ever-growing historical backlog by
 // severity, which on a slow CPU-only local model meant it was always
 // working through old ground instead of keeping current. Restricting to
 // freshly-published advisories means the job's job is now "keep up with
@@ -88,7 +96,10 @@ const SEVERITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 // regardless of how deep the Critical/High backlog runs.
 const RESERVED_SLOTS = { MEDIUM: 1, LOW: 1 };
 
-function isEligibleSource(source) {
+// Tie-break only now, not a filter (see the top-of-file comment) -- still
+// used to prefer vendor/CERT-grade advisories within the same severity tier
+// when building each cycle's batch below.
+function isMajorVendorOrCisa(source) {
   return MAJOR_VENDOR_SOURCES.has(source) || source.startsWith("CISA");
 }
 
@@ -196,7 +207,7 @@ async function runCycle() {
   if (!cache.getEntry("news").data) throw new NewsCacheNotReadyError("News cache has not synced yet");
 
   const newsItems = cache.getEntry("news").data?.items ?? [];
-  const candidates = newsItems.filter((item) => isEligibleSource(item.source) && isRecent(item.publishedDate) && !isArticleProcessed(item.link));
+  const candidates = newsItems.filter((item) => isRecent(item.publishedDate) && !isArticleProcessed(item.link));
   if (candidates.length === 0) throw new NoEligibleCandidatesError("No eligible candidates in this check");
 
   const attackData = cache.getEntry("attack").data;
@@ -239,6 +250,11 @@ async function runCycle() {
     .sort((a, b) => {
       const rankDiff = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
       if (rankDiff !== 0) return rankDiff;
+      // Vendor/CERT-grade sources still go first within the same severity
+      // tier -- widening eligibility to the full source pool (see top-of-
+      // file comment) shouldn't mean giving up this quality priority.
+      const vendorDiff = Number(isMajorVendorOrCisa(b.source)) - Number(isMajorVendorOrCisa(a.source));
+      if (vendorDiff !== 0) return vendorDiff;
       return new Date(b.publishedDate) - new Date(a.publishedDate);
     });
   const batch = buildBatch(eligible);
