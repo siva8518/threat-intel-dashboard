@@ -401,7 +401,7 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
       ]),
     );
 
-    parts.push(heading(3, "Threat Intel Takeaway"));
+    parts.push(heading(3, "Intelligence Takeaway"));
     parts.push(paragraph(actions.threatIntelTakeaway));
     parts.push(heading(3, "Executive Leadership Takeaway"));
     parts.push(paragraph(actions.executiveLeadershipTakeaway));

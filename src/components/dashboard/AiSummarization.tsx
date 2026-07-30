@@ -915,7 +915,7 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
-                    <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Threat Intel Takeaway</h4>
+                    <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Intelligence Takeaway</h4>
                     <p className="text-foreground">{actions.threatIntelTakeaway}</p>
                   </div>
                   <div>
