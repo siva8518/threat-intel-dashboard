@@ -1179,6 +1179,8 @@ export interface AggregateIndustryHeatmapRow {
   activeThreatCount: number;
   /** The article that drove this sector's current relevance/risk -- may or may not have a full AI Summarization report (see AggregateIndustryHeatmapRow.confidence: "Low" means keyword-derived, not AI-assessed). */
   topArticle: { id: string; title: string } | null;
+  /** Every Critical/High article behind activeThreatCount, most-severe/most-recent first, capped at 20 -- lets a user verify the count instead of just trusting a number. activeThreatCount stays the true total even once this list is capped. */
+  contributingArticles: { id: string; title: string; source: string; relevance: IndustryRelevanceLevel; publishedDate: string }[];
 }
 
 export interface EmergingThreatsRanking {

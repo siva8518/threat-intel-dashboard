@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export interface ChartDatum {
@@ -58,14 +59,40 @@ const CATEGORY_AXIS_STYLE = { fill: "#eef0fa", fontSize: 11, fontFamily: "JetBra
  * (and no value label, since LabelList positions off the bar's own geometry)
  * ever appeared. Disabling the animation renders the final bar geometry
  * immediately instead of animating from a zero-size starting frame.
+ *
+ * `gradientTo` is optional -- pass it to fade the bar from `hue` (base) to
+ * this second color along its length instead of a flat fill, for a chart
+ * that wants more visual weight than the shared flat-hue default (e.g. an
+ * urgency-themed feed). Omit it and every bar renders as plain `hue`, same
+ * as before this prop existed.
  */
-export function RankedBarChart({ data, hue, orientation = "horizontal" }: { data: ChartDatum[]; hue: string; orientation?: "horizontal" | "vertical" }) {
+export function RankedBarChart({
+  data,
+  hue,
+  gradientTo,
+  orientation = "horizontal",
+}: {
+  data: ChartDatum[];
+  hue: string;
+  gradientTo?: string;
+  orientation?: "horizontal" | "vertical";
+}) {
   const clickable = data.some((d) => d.onOpen);
+  const gradientId = useId();
+  const fill = gradientTo ? `url(#${gradientId})` : hue;
 
   if (orientation === "vertical") {
     return (
       <ResponsiveContainer width="100%" height={240}>
         <BarChart data={data} margin={{ top: 20, right: 8, bottom: 24, left: 8 }}>
+          {gradientTo && (
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="1" x2="0" y2="0">
+                <stop offset="0%" stopColor={hue} />
+                <stop offset="100%" stopColor={gradientTo} />
+              </linearGradient>
+            </defs>
+          )}
           <CartesianGrid vertical={false} stroke="#232841" />
           <XAxis
             dataKey="name"
@@ -82,7 +109,7 @@ export function RankedBarChart({ data, hue, orientation = "horizontal" }: { data
           <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
           <Bar
             dataKey="count"
-            fill={hue}
+            fill={fill}
             radius={[4, 4, 0, 0]}
             maxBarSize={36}
             isAnimationActive={false}
@@ -99,13 +126,21 @@ export function RankedBarChart({ data, hue, orientation = "horizontal" }: { data
   return (
     <ResponsiveContainer width="100%" height={Math.max(160, data.length * 30)}>
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 32, bottom: 4, left: 4 }}>
+        {gradientTo && (
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor={hue} />
+              <stop offset="100%" stopColor={gradientTo} />
+            </linearGradient>
+          </defs>
+        )}
         <CartesianGrid horizontal={false} stroke="#232841" />
         <XAxis type="number" allowDecimals={false} stroke="#8d93ac" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
         <YAxis type="category" dataKey="name" stroke="#8d93ac" tick={CATEGORY_AXIS_STYLE} axisLine={false} tickLine={false} width={yAxisWidth(data)} />
         <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
         <Bar
           dataKey="count"
-          fill={hue}
+          fill={fill}
           radius={[0, 4, 4, 0]}
           maxBarSize={18}
           isAnimationActive={false}

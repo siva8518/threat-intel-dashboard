@@ -26,6 +26,7 @@ const RECENCY_FULL_WINDOW_MS = 24 * 60 * 60 * 1000; // full recency credit for a
 const RECENCY_ZERO_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // linearly decays to zero credit by 7 days old
 const POOL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // how far back the ranked pool reaches at all -- matches this app's existing "last 30 days" convention (see CveSeverityDistribution)
 const MAX_ENTRIES = 150; // cap the response payload -- the pool itself can run past a thousand recent items across ~200 sources
+const MAX_CONTRIBUTING_ARTICLES = 20; // cap per-industry article list shown in the heatmap's expanded detail -- activeThreatCount stays the true total even once a sector's list is capped
 
 // A tagged news item has no numeric risk score of its own (see
 // server/newsCorrelation.js#computeSeverity, a 4-tier classification) --
@@ -141,13 +142,25 @@ const RELEVANCE_RANK = { Critical: 4, High: 3, Medium: 2, Low: 1, "Not Applicabl
 const SEVERITY_TO_RELEVANCE = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
 const RELEVANCE_TO_PRIORITY = { Critical: "Immediate", High: "High", Medium: "Normal", Low: "Low" };
 
-/** Case-insensitive substring match against a title -- see server/data/industry-map-10.json. Same "curated list, not NLP" convention as matchIndustries() in server/newsCorrelation.js, just scoped to this feature's own 10-sector taxonomy. */
+// Leading-word-boundary regex per keyword, not a plain substring match -- a
+// plain `.includes("factory")` matched inside "Artifactory" (JFrog's
+// product), misfiling unrelated DevOps stories as Manufacturing. Only the
+// *start* of the keyword is boundary-anchored (not the end), so this still
+// catches plurals/possessives the old substring match relied on ("telecom"
+// still matches inside "telecommunications") while refusing to match a
+// keyword embedded mid-word like "factory" inside "artifactory".
+const INDUSTRY_KEYWORD_PATTERNS = Object.entries(industryKeywords10)
+  .filter(([industry]) => !industry.startsWith("_"))
+  .map(([industry, keywords]) => [
+    industry,
+    keywords.map((k) => new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")),
+  ]);
+
+/** Case-insensitive, leading-word-boundary match against a title -- see server/data/industry-map-10.json. Same "curated list, not NLP" convention as matchIndustries() in server/newsCorrelation.js, just scoped to this feature's own 10-sector taxonomy. */
 function matchIndustries10(title) {
-  const lower = title.toLowerCase();
   const hits = [];
-  for (const [industry, keywords] of Object.entries(industryKeywords10)) {
-    if (industry.startsWith("_")) continue;
-    if (keywords.some((k) => lower.includes(k))) hits.push(industry);
+  for (const [industry, patterns] of INDUSTRY_KEYWORD_PATTERNS) {
+    if (patterns.some((re) => re.test(title))) hits.push(industry);
   }
   return hits;
 }
@@ -165,7 +178,10 @@ function matchIndustries10(title) {
  */
 export function computeAggregateIndustryHeatmap(taggedNewsItems, reports) {
   const byIndustry = new Map(
-    INDUSTRY_CATALOG.map((industry) => [industry, { industry, relevance: "Not Applicable", confidence: "Low", riskScore: 0, priority: "Low", whyAffected: "Not Applicable", potentialImpact: [], likelyTargetAssets: [], defensiveFocus: [], activeThreatCount: 0, topArticle: null }]),
+    INDUSTRY_CATALOG.map((industry) => [
+      industry,
+      { industry, relevance: "Not Applicable", confidence: "Low", riskScore: 0, priority: "Low", whyAffected: "Not Applicable", potentialImpact: [], likelyTargetAssets: [], defensiveFocus: [], activeThreatCount: 0, topArticle: null, contributingArticles: [] },
+    ]),
   );
   const reportsByLink = new Map(reports.map((r) => [r.id, r]));
   const now = Date.now();
@@ -188,7 +204,10 @@ export function computeAggregateIndustryHeatmap(taggedNewsItems, reports) {
       const candidateRelevance = useReportRow ? reportRow.relevance : keywordRelevance;
       const candidateRiskScore = useReportRow ? reportRow.riskScore : keywordRiskScore;
 
-      if (candidateRelevance === "Critical" || candidateRelevance === "High") agg.activeThreatCount += 1;
+      if (candidateRelevance === "Critical" || candidateRelevance === "High") {
+        agg.activeThreatCount += 1;
+        agg.contributingArticles.push({ id: item.link, title: item.title, source: item.source, relevance: candidateRelevance, publishedDate: item.publishedDate });
+      }
 
       const isWorse = RELEVANCE_RANK[candidateRelevance] > RELEVANCE_RANK[agg.relevance] || (RELEVANCE_RANK[candidateRelevance] === RELEVANCE_RANK[agg.relevance] && candidateRiskScore > agg.riskScore);
       if (!isWorse) continue;
@@ -216,5 +235,10 @@ export function computeAggregateIndustryHeatmap(taggedNewsItems, reports) {
     }
   }
 
-  return [...byIndustry.values()];
+  return [...byIndustry.values()].map((agg) => ({
+    ...agg,
+    contributingArticles: agg.contributingArticles
+      .sort((a, b) => RELEVANCE_RANK[b.relevance] - RELEVANCE_RANK[a.relevance] || new Date(b.publishedDate) - new Date(a.publishedDate))
+      .slice(0, MAX_CONTRIBUTING_ARTICLES),
+  }));
 }

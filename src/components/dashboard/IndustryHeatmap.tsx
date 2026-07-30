@@ -1,4 +1,5 @@
 import { Fragment, useState } from "react";
+import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { AiThreatSummaryIndustryRelevance, IndustryName, IndustryRelevanceLevel } from "@/types/threat-intel";
@@ -37,6 +38,16 @@ export const RELEVANCE_RANK: Record<IndustryRelevanceLevel, number> = { Critical
 export interface IndustryHeatmapRow extends AiThreatSummaryIndustryRelevance {
   /** Extra context shown next to the industry name in aggregate views (e.g. "3 active reports"). */
   subtitle?: string;
+  /** Aggregate views only -- the Critical/High articles backing activeThreatCount, so a user can verify the claim instead of just trusting a number. */
+  contributingArticles?: { id: string; title: string; source: string; relevance: IndustryRelevanceLevel; publishedDate: string }[];
+}
+
+function timeAgo(iso: string) {
+  const ms = Date.now() - new Date(iso).getTime();
+  const hours = Math.floor(ms / (60 * 60 * 1000));
+  if (hours < 1) return "just now";
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 /**
@@ -128,6 +139,36 @@ export function IndustryHeatmap({ rows }: { rows: IndustryHeatmapRow[] }) {
                           </div>
                         )}
                       </div>
+                      {row.contributingArticles && row.contributingArticles.length > 0 && (
+                        <div className="mt-3 border-t border-white/[0.05] pt-2.5">
+                          <p className="mb-1.5 font-semibold text-foreground">
+                            Source articles behind this sector's rating
+                            {row.subtitle && <span className="ml-1 font-normal text-muted">{row.subtitle}</span>}
+                          </p>
+                          <ul className="space-y-1">
+                            {row.contributingArticles.map((a) => (
+                              <li key={a.id}>
+                                <a
+                                  href={a.id}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="flex items-center gap-1.5 text-muted transition-colors hover:text-foreground"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <Badge variant={RELEVANCE_BADGE_VARIANT[a.relevance]} className="shrink-0">
+                                    {a.relevance}
+                                  </Badge>
+                                  <span className="truncate">{a.title}</span>
+                                  <span className="shrink-0 text-[11px]">
+                                    ({a.source} &middot; {timeAgo(a.publishedDate)})
+                                  </span>
+                                  <ExternalLink className="h-3 w-3 shrink-0" />
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )}

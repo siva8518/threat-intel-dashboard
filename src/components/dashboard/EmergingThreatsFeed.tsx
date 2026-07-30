@@ -5,7 +5,7 @@ import { ErrorState, EmptyState } from "./ErrorState";
 import { RankedBarChart } from "./RankedBarChart";
 import { useEmergingThreatsRanking } from "@/hooks/useEmergingThreatsRanking";
 
-const TOP_N = 15;
+const TOP_N = 10;
 
 function truncateTitle(title: string) {
   return title.length > 28 ? `${title.slice(0, 27)}…` : title;
@@ -44,7 +44,8 @@ export function EmergingThreatsFeed({ onOpenTab }: { onOpenTab: () => void }) {
           <EmptyState message="No recent articles in the news pool yet -- this feed fills in as sources sync." />
         ) : (
           <RankedBarChart
-            hue="#fbbf24"
+            hue="#f7913d"
+            gradientTo="#fb3f5e"
             data={entries.map((e) => ({
               name: truncateTitle(e.articleTitle),
               count: e.threatPriorityScore.score,
