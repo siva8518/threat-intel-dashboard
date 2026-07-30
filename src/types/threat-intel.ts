@@ -870,6 +870,31 @@ export interface AiThreatSummaryExposureAssessment {
 }
 
 /**
+ * Analyst-audience narrative (why this matters operationally / how attackers
+ * may use it / enterprise impact / why defenders should care), distinct from
+ * executiveSummary's business-audience framing -- 2-4 paragraphs, separated
+ * by blank lines in the raw string.
+ */
+export type AiThreatSummaryIntelligenceAssessment = string;
+
+/** Who/where/how this threat targets -- mitreTactics is derived from the grounded mitreAttack array, never model-authored (see server/aiThreatSummary.js#safeThreatRelevance). */
+export interface AiThreatSummaryThreatRelevance {
+  industriesAtRisk: string[];
+  technologiesTargeted: string[];
+  geographicFocus: string[];
+  victimProfile: string;
+  initialAccessVector: string;
+  mitreTactics: string[];
+}
+
+export interface AiThreatSummaryOperationalImpactAssessment {
+  businessImpact: string;
+  detectionChallenges: string[];
+  evasionTechniques: string[];
+  attackerObjectives: string[];
+}
+
+/**
  * Merges the former threatOverview/aiTechnicalSummary/affectedProducts/
  * vendorSeverityAssessment sections into one -- driven by an explicit
  * reasoning chain (what happened / why it matters / who's affected / is
@@ -960,8 +985,21 @@ export interface AiThreatSummaryHuntHypothesis {
   falsePositiveNote: string;
 }
 
+/** Concrete, hunt-actionable behavioral signatures grouped by category -- empty categories mean this threat genuinely has no behavior there, not an omission. */
+export interface AiThreatSummaryBehavioralIndicators {
+  networkBehaviors: string[];
+  processBehaviors: string[];
+  authenticationAnomalies: string[];
+  dnsActivity: string[];
+  powershellActivity: string[];
+  scheduledTasks: string[];
+  registryModifications: string[];
+  persistenceIndicators: string[];
+}
+
 export interface AiThreatSummaryThreatHunter {
   hypotheses: AiThreatSummaryHuntHypothesis[];
+  behavioralIndicators: AiThreatSummaryBehavioralIndicators;
 }
 
 /** Existing-rule-aware detection engineering guidance -- checks Sigma/Elastic/Microsoft coverage before asking for new logic. */
@@ -972,7 +1010,23 @@ export interface AiThreatSummaryDetectionEngineer {
   newDetectionLogic: string[];
   logSourcesRequired: string[];
   expectedFalsePositives: string;
+  /** Blind spots -- what this attack could still evade even with the above detections in place. */
   detectionGaps: string[];
+  /** How this threat would concretely show up in telemetry/logs/alerts in a typical enterprise environment. */
+  likelyManifestation: string;
+  /** Underlying attacker behaviors that are inherently detectable regardless of any specific rule -- distinct from newDetectionLogic's rule-building tasks. */
+  behavioralDetectionOpportunities: string[];
+}
+
+/** Platform-specific guidance assuming Microsoft Defender XDR, Microsoft Sentinel, and Defender for Office 365 unless the article states otherwise. */
+export interface AiThreatSummaryPlatformRecommendations {
+  logSourcesToReview: string[];
+  microsoftDefenderRecommendations: string[];
+  microsoftSentinelRecommendations: string[];
+  firewallDnsRecommendations: string[];
+  emailSecurityRecommendations: string[];
+  identityMonitoringRecommendations: string[];
+  edrRecommendations: string[];
 }
 
 /** `applicable` is false (all other fields "Not Applicable"/[]) when the article involves no specific CVE. */
@@ -998,6 +1052,7 @@ export interface AiThreatSummaryIncidentResponse {
 export interface AiThreatSummaryOperationalActions {
   socAnalyst: AiThreatSummarySocAnalyst;
   recommendedActions: AiThreatSummaryRecommendedAction[];
+  platformRecommendations: AiThreatSummaryPlatformRecommendations;
   threatHunter: AiThreatSummaryThreatHunter;
   detectionEngineer: AiThreatSummaryDetectionEngineer;
   vulnerabilityManagement: AiThreatSummaryVulnerabilityManagement;
@@ -1029,10 +1084,13 @@ export interface AiThreatSummaryReport {
   references: AiThreatSummaryReference[];
   executiveHeadline: string;
   executiveSummary: string;
+  intelligenceAssessment: AiThreatSummaryIntelligenceAssessment;
   businessRisk: AiThreatSummaryBusinessRisk;
   shouldICare: AiThreatSummaryShouldICare;
   exposureAssessment: AiThreatSummaryExposureAssessment;
   technicalAnalysis: AiThreatSummaryTechnicalAnalysis;
+  threatRelevance: AiThreatSummaryThreatRelevance;
+  operationalImpact: AiThreatSummaryOperationalImpactAssessment;
   mitreAttack: AiThreatSummaryMitreTechnique[];
   threatActors: AiThreatSummaryActor[];
   malware: AiThreatSummaryMalware[];

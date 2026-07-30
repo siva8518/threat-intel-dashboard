@@ -69,10 +69,51 @@ const EMPTY_EXPOSURE_ASSESSMENT = {
   notAffectedGuidance: "Not Applicable",
 };
 
+const EMPTY_THREAT_RELEVANCE = {
+  industriesAtRisk: [] as string[],
+  technologiesTargeted: [] as string[],
+  geographicFocus: [] as string[],
+  victimProfile: "Not Reported",
+  initialAccessVector: "Not Reported",
+  mitreTactics: [] as string[],
+};
+
+const EMPTY_OPERATIONAL_IMPACT = {
+  businessImpact: "Not Reported",
+  detectionChallenges: [] as string[],
+  evasionTechniques: [] as string[],
+  attackerObjectives: [] as string[],
+};
+
+const EMPTY_BEHAVIORAL_INDICATORS = {
+  networkBehaviors: [] as string[],
+  processBehaviors: [] as string[],
+  authenticationAnomalies: [] as string[],
+  dnsActivity: [] as string[],
+  powershellActivity: [] as string[],
+  scheduledTasks: [] as string[],
+  registryModifications: [] as string[],
+  persistenceIndicators: [] as string[],
+};
+
+const EMPTY_PLATFORM_RECOMMENDATIONS = {
+  logSourcesToReview: [] as string[],
+  microsoftDefenderRecommendations: [] as string[],
+  microsoftSentinelRecommendations: [] as string[],
+  firewallDnsRecommendations: [] as string[],
+  emailSecurityRecommendations: [] as string[],
+  identityMonitoringRecommendations: [] as string[],
+  edrRecommendations: [] as string[],
+};
+
 const EMPTY_OPERATIONAL_ACTIONS = {
   socAnalyst: { telemetryToCheck: [] as string[], whatToLookFor: "Not Reported", immediateNextStep: "Not Reported" },
   recommendedActions: [] as Array<{ action: string; applicable: boolean; details: string }>,
-  threatHunter: { hypotheses: [] as Array<{ hypothesis: string; dataSources: string[]; positiveFindingLooksLike: string; falsePositiveNote: string }> },
+  platformRecommendations: EMPTY_PLATFORM_RECOMMENDATIONS,
+  threatHunter: {
+    hypotheses: [] as Array<{ hypothesis: string; dataSources: string[]; positiveFindingLooksLike: string; falsePositiveNote: string }>,
+    behavioralIndicators: EMPTY_BEHAVIORAL_INDICATORS,
+  },
   detectionEngineer: {
     existingRulesAvailable: [] as string[],
     recommendedAction: "Not Reported",
@@ -81,6 +122,8 @@ const EMPTY_OPERATIONAL_ACTIONS = {
     logSourcesRequired: [] as string[],
     expectedFalsePositives: "Not Reported",
     detectionGaps: [] as string[],
+    likelyManifestation: "Not Reported",
+    behavioralDetectionOpportunities: [] as string[],
   },
   vulnerabilityManagement: {
     applicable: false,
@@ -460,6 +503,17 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             <p className="text-foreground">{report.executiveSummary}</p>
           </div>
 
+          {report.intelligenceAssessment && report.intelligenceAssessment !== "Not Reported" && (
+            <div>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Intelligence Assessment</h4>
+              <div className="space-y-2 text-foreground">
+                {report.intelligenceAssessment.split(/\n{2,}/).map((paragraph, i) => (
+                  <p key={i}>{paragraph}</p>
+                ))}
+              </div>
+            </div>
+          )}
+
           {report.shouldICare && (
             <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
               <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Should I Care?</h4>
@@ -566,6 +620,53 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             );
           })()}
 
+          {(() => {
+            const relevance = report.threatRelevance ?? EMPTY_THREAT_RELEVANCE;
+            return (
+              <>
+                <KeyValueBlock
+                  title="Threat Relevance"
+                  pairs={[
+                    ["Victim profile", relevance.victimProfile],
+                    ["Initial access vector", relevance.initialAccessVector],
+                  ]}
+                />
+                <GroupedLists
+                  title=""
+                  groups={[
+                    ["Industries at risk", relevance.industriesAtRisk],
+                    ["Technologies targeted", relevance.technologiesTargeted],
+                    ["Geographic focus", relevance.geographicFocus],
+                    ["MITRE tactics", relevance.mitreTactics],
+                  ]}
+                />
+              </>
+            );
+          })()}
+
+          {(() => {
+            const impact = report.operationalImpact ?? EMPTY_OPERATIONAL_IMPACT;
+            return (
+              <>
+                <KeyValueBlock
+                  title="Operational Impact"
+                  pairs={[
+                    ["Business impact", impact.businessImpact],
+                    ["Risk level", report.aiRiskScoring.priority],
+                  ]}
+                />
+                <GroupedLists
+                  title=""
+                  groups={[
+                    ["Detection challenges", impact.detectionChallenges],
+                    ["Evasion techniques", impact.evasionTechniques],
+                    ["Attacker objectives", impact.attackerObjectives],
+                  ]}
+                />
+              </>
+            );
+          })()}
+
           {report.cves.length > 0 && (
             <Section title="CVEs (verified CVSS/EPSS/KEV)">
               <div className="space-y-1.5">
@@ -661,6 +762,15 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
           {(() => {
             const actions = report.operationalActions ?? EMPTY_OPERATIONAL_ACTIONS;
             const vm = actions.vulnerabilityManagement;
+            // actions itself can predate this specific nested field even when
+            // operationalActions as a whole exists (reports generated between
+            // the "always-visible sections" round and this one) -- fall back
+            // per-field, not just at the top level, same immutable-report
+            // convention as everywhere else in this file.
+            const platformRecs = actions.platformRecommendations ?? EMPTY_PLATFORM_RECOMMENDATIONS;
+            const behavioralIndicators = actions.threatHunter.behavioralIndicators ?? EMPTY_BEHAVIORAL_INDICATORS;
+            const likelyManifestation = actions.detectionEngineer.likelyManifestation ?? "Not Reported";
+            const behavioralDetectionOpportunities = actions.detectionEngineer.behavioralDetectionOpportunities ?? [];
             return (
               <>
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">Operational Actions</h4>
@@ -690,16 +800,54 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                 </div>
 
                 <div>
+                  <h4 className="mb-1 text-xs font-semibold text-foreground">Platform Recommendations</h4>
+                  <GroupedLists
+                    title=""
+                    groups={[
+                      ["Log sources to review", platformRecs.logSourcesToReview],
+                      ["Microsoft Defender XDR", platformRecs.microsoftDefenderRecommendations],
+                      ["Microsoft Sentinel", platformRecs.microsoftSentinelRecommendations],
+                      ["Firewall / DNS", platformRecs.firewallDnsRecommendations],
+                      ["Email security (Defender for Office 365)", platformRecs.emailSecurityRecommendations],
+                      ["Identity monitoring", platformRecs.identityMonitoringRecommendations],
+                      ["EDR", platformRecs.edrRecommendations],
+                    ]}
+                  />
+                  {Object.values(platformRecs).every((list) => list.length === 0) && (
+                    <p className="text-xs text-muted">Platform recommendations: Not Reported</p>
+                  )}
+                </div>
+
+                <div>
                   <h4 className="mb-1 text-xs font-semibold text-foreground">Threat Hunter</h4>
                   {actions.threatHunter.hypotheses.length > 0 ? (
                     <HypothesisList hypotheses={actions.threatHunter.hypotheses} />
                   ) : (
                     <p className="text-xs text-muted">No specific hunting hypotheses reported for this article.</p>
                   )}
+                  <GroupedLists
+                    title="Behavioral Hunting Indicators"
+                    groups={[
+                      ["Network behaviors", behavioralIndicators.networkBehaviors],
+                      ["Process behaviors", behavioralIndicators.processBehaviors],
+                      ["Authentication anomalies", behavioralIndicators.authenticationAnomalies],
+                      ["DNS activity", behavioralIndicators.dnsActivity],
+                      ["PowerShell activity", behavioralIndicators.powershellActivity],
+                      ["Scheduled tasks", behavioralIndicators.scheduledTasks],
+                      ["Registry modifications", behavioralIndicators.registryModifications],
+                      ["Persistence indicators", behavioralIndicators.persistenceIndicators],
+                    ]}
+                  />
                 </div>
 
                 <div>
                   <h4 className="mb-1 text-xs font-semibold text-foreground">Detection Engineer</h4>
+                  <dl className="space-y-1 text-sm">
+                    <div>
+                      <dt className="inline font-semibold text-foreground">Likely manifestation: </dt>
+                      <dd className="inline text-foreground">{likelyManifestation}</dd>
+                    </div>
+                  </dl>
                   <GroupedCodeLists
                     title="Rules"
                     groups={[
@@ -727,8 +875,9 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                   <GroupedLists
                     title="Detection Engineering Notes"
                     groups={[
+                      ["Behavioral detection opportunities", behavioralDetectionOpportunities],
                       ["Log sources required", actions.detectionEngineer.logSourcesRequired],
-                      ["Detection gaps", actions.detectionEngineer.detectionGaps],
+                      ["Detection gaps / blind spots", actions.detectionEngineer.detectionGaps],
                     ]}
                   />
                 </div>

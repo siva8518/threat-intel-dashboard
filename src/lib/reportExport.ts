@@ -89,6 +89,11 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   if (report.executiveHeadline) parts.push(`<p><strong>${esc(report.executiveHeadline)}</strong></p>`);
   parts.push(paragraph(report.executiveSummary));
 
+  if (report.intelligenceAssessment && report.intelligenceAssessment !== "Not Reported") {
+    parts.push(heading(2, "Intelligence Assessment"));
+    parts.push(report.intelligenceAssessment.split(/\n{2,}/).map((p) => paragraph(p)).join(""));
+  }
+
   if (report.shouldICare) {
     parts.push(heading(2, "Should I Care?"));
     parts.push(paragraph(`${report.shouldICare.verdict}. ${report.shouldICare.reasoning}`));
@@ -179,6 +184,43 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     );
   }
 
+  if (report.threatRelevance) {
+    const relevance = report.threatRelevance;
+    parts.push(heading(2, "Threat Relevance"));
+    parts.push(
+      keyValueSection("", [
+        ["Victim profile", relevance.victimProfile],
+        ["Initial access vector", relevance.initialAccessVector],
+      ]),
+    );
+    parts.push(
+      groupedListsSection("", [
+        ["Industries at risk", relevance.industriesAtRisk],
+        ["Technologies targeted", relevance.technologiesTargeted],
+        ["Geographic focus", relevance.geographicFocus],
+        ["MITRE tactics", relevance.mitreTactics],
+      ]),
+    );
+  }
+
+  if (report.operationalImpact) {
+    const impact = report.operationalImpact;
+    parts.push(heading(2, "Operational Impact"));
+    parts.push(
+      keyValueSection("", [
+        ["Business impact", impact.businessImpact],
+        ["Risk level", report.aiRiskScoring.priority],
+      ]),
+    );
+    parts.push(
+      groupedListsSection("", [
+        ["Detection challenges", impact.detectionChallenges],
+        ["Evasion techniques", impact.evasionTechniques],
+        ["Attacker objectives", impact.attackerObjectives],
+      ]),
+    );
+  }
+
   if (report.cves.length > 0) {
     const rows = report.cves
       .map(
@@ -262,6 +304,23 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     parts.push(paragraph(`What to look for: ${soc.whatToLookFor}`));
     parts.push(paragraph(`Immediate next step: ${soc.immediateNextStep}`));
 
+    const plat = actions.platformRecommendations;
+    if (plat) {
+      parts.push(heading(3, "Platform Recommendations"));
+      parts.push(
+        groupedListsSection("", [
+          ["Log sources to review", plat.logSourcesToReview],
+          ["Microsoft Defender XDR", plat.microsoftDefenderRecommendations],
+          ["Microsoft Sentinel", plat.microsoftSentinelRecommendations],
+          ["Firewall / DNS", plat.firewallDnsRecommendations],
+          ["Email security (Defender for Office 365)", plat.emailSecurityRecommendations],
+          ["Identity monitoring", plat.identityMonitoringRecommendations],
+          ["EDR", plat.edrRecommendations],
+        ]),
+      );
+      if (Object.values(plat).every((list) => list.length === 0)) parts.push(paragraph("Platform recommendations: Not Reported"));
+    }
+
     parts.push(heading(3, "Threat Hunter"));
     if (actions.threatHunter.hypotheses.length > 0) {
       const rows = actions.threatHunter.hypotheses
@@ -278,9 +337,25 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     } else {
       parts.push(paragraph("No specific hunting hypotheses reported for this article."));
     }
+    if (actions.threatHunter.behavioralIndicators) {
+      const bi = actions.threatHunter.behavioralIndicators;
+      parts.push(
+        groupedListsSection("Behavioral Hunting Indicators", [
+          ["Network behaviors", bi.networkBehaviors],
+          ["Process behaviors", bi.processBehaviors],
+          ["Authentication anomalies", bi.authenticationAnomalies],
+          ["DNS activity", bi.dnsActivity],
+          ["PowerShell activity", bi.powershellActivity],
+          ["Scheduled tasks", bi.scheduledTasks],
+          ["Registry modifications", bi.registryModifications],
+          ["Persistence indicators", bi.persistenceIndicators],
+        ]),
+      );
+    }
 
     const de = actions.detectionEngineer;
     parts.push(heading(3, "Detection Engineer"));
+    if (de.likelyManifestation) parts.push(paragraph(`Likely manifestation: ${de.likelyManifestation}`));
     parts.push(
       groupedListsSection("", [
         ["Existing rules available", de.existingRulesAvailable],
@@ -293,8 +368,9 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     parts.push(paragraph(`Expected false positives: ${de.expectedFalsePositives}`));
     parts.push(
       groupedListsSection("", [
+        ["Behavioral detection opportunities", de.behavioralDetectionOpportunities ?? []],
         ["Log sources required", de.logSourcesRequired],
-        ["Detection gaps", de.detectionGaps],
+        ["Detection gaps / blind spots", de.detectionGaps],
       ]),
     );
 
