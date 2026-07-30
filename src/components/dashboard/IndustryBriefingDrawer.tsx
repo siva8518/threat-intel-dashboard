@@ -1,4 +1,4 @@
-import { ExternalLink, Flame, ShieldAlert, Skull, Target, TrendingUp, Wrench } from "lucide-react";
+import { Bug, Crosshair, ExternalLink, Flame, ShieldAlert, Skull, Target, TrendingUp, Wrench } from "lucide-react";
 import { DetailDrawer, DrawerSection } from "./DetailDrawer";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -7,6 +7,12 @@ import type { IndustryBriefing, IndustryBriefingArticleRef, IndustryName } from 
 
 const LEVEL_VARIANT: Record<string, "critical" | "high" | "medium" | "low"> = {
   Critical: "critical",
+  High: "high",
+  Medium: "medium",
+  Low: "low",
+};
+
+const CONFIDENCE_VARIANT: Record<string, "high" | "medium" | "low"> = {
   High: "high",
   Medium: "medium",
   Low: "low",
@@ -112,6 +118,89 @@ export function IndustryBriefingDrawer({ industry, data, isPending, error, onClo
             )}
           </DrawerSection>
 
+          <DrawerSection title="Most Common ATT&CK Techniques" icon={<Crosshair className="h-4 w-4" />}>
+            {data.tacticsSummary.length > 0 && (
+              <div className="mb-2.5 flex flex-wrap gap-1.5">
+                {data.tacticsSummary.map((s) => (
+                  <Badge key={s.tactic} variant="muted">
+                    {s.tactic} <span className="ml-1 tabular-nums text-foreground">{s.techniqueCount}</span>
+                  </Badge>
+                ))}
+              </div>
+            )}
+            {data.topAttackTechniques.length === 0 ? (
+              <p className="text-xs text-muted">No specific MITRE ATT&amp;CK technique could be grounded against this sector's coverage.</p>
+            ) : (
+              <div className="space-y-3">
+                {data.topAttackTechniques.map((t, i) => (
+                  <div key={t.techniqueId ?? `${t.techniqueName}-${i}`} className="rounded-lg border border-white/10 bg-white/[0.03] p-3 text-xs">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-semibold text-foreground">{t.techniqueName}</span>
+                      {t.techniqueId && <span className="font-mono text-muted">{t.techniqueId}</span>}
+                      {t.tactic && (
+                        <Badge variant="muted" className="normal-case">
+                          {t.tactic}
+                        </Badge>
+                      )}
+                      <Badge variant={LEVEL_VARIANT[t.detectionPriority] ?? "medium"}>{t.detectionPriority} priority</Badge>
+                    </div>
+                    <p className="mt-1.5 text-muted">
+                      <span className="font-medium text-foreground">Why attackers use it: </span>
+                      {t.whyUsed}
+                    </p>
+                    <p className="mt-1 text-muted">
+                      <span className="font-medium text-foreground">Example scenario: </span>
+                      {t.exampleScenario}
+                    </p>
+                    <SourceLinks articles={t.sourceArticles} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </DrawerSection>
+
+          <DrawerSection title="Malware Families Targeting This Industry" icon={<Bug className="h-4 w-4" />}>
+            {data.malwareFamilies.length === 0 ? (
+              <p className="text-xs text-muted">No specific malware family was named in the available coverage for this sector.</p>
+            ) : (
+              <div className="space-y-3">
+                {data.malwareFamilies.map((m) => (
+                  <div key={m.name} className="rounded-lg border border-white/10 bg-white/[0.03] p-3 text-xs">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-semibold text-foreground">{m.name}</span>
+                      <Badge variant="cyan">{m.type}</Badge>
+                      <Badge variant={LEVEL_VARIANT[m.severity] ?? "medium"}>{m.severity}</Badge>
+                      <span className="text-muted">{TREND_LABEL[m.trend]}</span>
+                    </div>
+                    <dl className="mt-1.5 space-y-1 text-muted">
+                      <div>
+                        <dt className="inline font-medium text-foreground">Primary purpose: </dt>
+                        <dd className="inline">{m.primaryPurpose}</dd>
+                      </div>
+                      <div>
+                        <dt className="inline font-medium text-foreground">Initial infection: </dt>
+                        <dd className="inline">{m.initialInfectionMethod}</dd>
+                      </div>
+                      <div>
+                        <dt className="inline font-medium text-foreground">Persistence: </dt>
+                        <dd className="inline">{m.persistenceMechanism}</dd>
+                      </div>
+                      <div>
+                        <dt className="inline font-medium text-foreground">Common payload: </dt>
+                        <dd className="inline">{m.commonPayload}</dd>
+                      </div>
+                      <div>
+                        <dt className="inline font-medium text-foreground">Typical victims: </dt>
+                        <dd className="inline">{m.typicalVictims}</dd>
+                      </div>
+                    </dl>
+                    <SourceLinks articles={m.sourceArticles} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </DrawerSection>
+
           <DrawerSection title="Active Threat Actors" icon={<Skull className="h-4 w-4" />}>
             {data.activeThreatActors.length === 0 ? (
               <p className="text-xs text-muted">No specific actor was named in the available coverage for this sector.</p>
@@ -119,7 +208,11 @@ export function IndustryBriefingDrawer({ industry, data, isPending, error, onClo
               <div className="space-y-3">
                 {data.activeThreatActors.map((a) => (
                   <div key={a.actor} className="rounded-lg border border-white/10 bg-white/[0.03] p-3 text-xs">
-                    <span className="font-semibold text-foreground">{a.actor}</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-semibold text-foreground">{a.actor}</span>
+                      {a.country && <Badge variant="muted">{a.country}</Badge>}
+                      <Badge variant={CONFIDENCE_VARIANT[a.confidence] ?? "medium"}>{a.confidence} confidence</Badge>
+                    </div>
                     <dl className="mt-1.5 space-y-1 text-muted">
                       <div>
                         <dt className="inline font-medium text-foreground">Motivation: </dt>

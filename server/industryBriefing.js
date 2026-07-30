@@ -36,7 +36,28 @@ const POOL_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 const RECENT_HALF_MS = POOL_WINDOW_MS / 2;
 const MAX_GROUNDING_ARTICLES = 50; // keeps the prompt a manageable size
 const MAX_REFERENCES = 25;
+const MAX_TECHNIQUE_CANDIDATES = 40; // keyword-scored slice of the full ~600-technique ATT&CK catalog handed to the model, same purpose as aiThreatSummary.js's own candidate list
 const SEVERITY_RANK = { critical: 3, high: 2, medium: 1, low: 0 };
+
+// server/connectors/attack.js derives each technique's tactic from STIX
+// kill_chain_phases (e.g. "command-and-control" -> "command and control"
+// after the dash replace) -- mapped to the canonical Enterprise ATT&CK
+// tactic names for display. Order here is kill-chain order, used as the
+// tie-break when tacticsSummary ranks by observed count.
+const TACTIC_DISPLAY = new Map([
+  ["initial access", "Initial Access"],
+  ["execution", "Execution"],
+  ["persistence", "Persistence"],
+  ["privilege escalation", "Privilege Escalation"],
+  ["defense evasion", "Defense Evasion"],
+  ["credential access", "Credential Access"],
+  ["discovery", "Discovery"],
+  ["lateral movement", "Lateral Movement"],
+  ["collection", "Collection"],
+  ["command and control", "Command & Control"],
+  ["exfiltration", "Exfiltration"],
+  ["impact", "Impact"],
+]);
 
 export class InsufficientCoverageError extends Error {
   constructor(industry) {
@@ -87,6 +108,33 @@ export function poolForIndustry(industry, taggedNewsItems, reports, kevIds) {
     .slice(0, MAX_GROUNDING_ARTICLES);
 }
 
+// Keyword-overlap scoring against this app's own synced MITRE ATT&CK catalog
+// (server/connectors/attack.js), same philosophy as aiThreatSummary.js's
+// selectCandidateTechniques -- scored against every article's title in the
+// pool combined (an industry briefing spans many articles, not one), so the
+// model gets a short, plausible, real-ID candidate list instead of free-
+// associating from ~600 techniques' worth of training memory.
+function selectCandidateTechniques(pool, techniques) {
+  const words = new Set(pool.map((a) => a.title.toLowerCase()).join(" ").match(/[a-z0-9]{4,}/g) ?? []);
+  if (words.size === 0 || !techniques.length) return [];
+  const scored = [];
+  for (const t of techniques) {
+    const nameWords = t.name.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
+    const score = nameWords.filter((w) => words.has(w)).length;
+    if (score > 0) scored.push({ t, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, MAX_TECHNIQUE_CANDIDATES).map((s) => s.t);
+}
+
+function buildTechniqueCandidatesBlock(candidates) {
+  if (candidates.length === 0) {
+    return "CANDIDATE MITRE ATT&CK TECHNIQUES: none pre-matched this industry's coverage. Set techniqueId to null for every entry in topAttackTechniques unless certain of a real, well-known technique ID -- never invent one.";
+  }
+  const lines = candidates.map((t) => `${t.id} -- ${t.name} (${t.tactic})`).join("\n");
+  return `CANDIDATE MITRE ATT&CK TECHNIQUES (techniqueId in topAttackTechniques must be copied exactly from this list, or null if none genuinely apply):\n${lines}`;
+}
+
 function buildGroundingTable(pool) {
   return pool
     .map((a, i) => {
@@ -108,8 +156,10 @@ const SYSTEM_PROMPT =
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
   '"executiveSummary": string, 3-5 short paragraphs separated by \\n\\n, a concise overview of the current threat landscape for this industry grounded in the table.\n' +
   '"topEmergingThreats": array of 5-10 {"name": string, "whyEmerging": string, "activityLevel": "Critical"|"High"|"Medium", "sourceArticleIds": int[]} -- distinct named threats/vulnerabilities/campaigns, each genuinely supported by the table, ranked most significant first. Do not include "firstObserved"/"activeExploitation"/"trend" -- those are computed separately from your citations.\n' +
-  '"activeThreatActors": array of {"actor": string (must be an actor name that literally appears in the table\'s actor list), "motivation": string, "typicalTargets": string, "recentCampaigns": string, "ttps": string, "sourceArticleIds": int[]} -- [] if the table names no actors for this industry, do not invent one.\n' +
+  '"activeThreatActors": array of {"actor": string (must be an actor name that literally appears in the table\'s actor list), "country": string or null (only if this actor\'s national attribution is well-established and widely reported -- null if unattributed or uncertain, never guess), "confidence": "High"|"Medium"|"Low" (your confidence in this actor genuinely targeting this sector, based on how directly the table supports it), "motivation": string, "typicalTargets": string, "recentCampaigns": string, "ttps": string, "sourceArticleIds": int[]} -- [] if the table names no actors for this industry, do not invent one.\n' +
   '"emergingAttackTechniques": array of {"technique": string (e.g. "AI-assisted phishing", "ClickFix", "Cloud identity attacks", "Supply chain attacks" -- only ones genuinely evidenced by the table or a well-known category-level pattern relevant to this industry), "whyIncreasing": string, "sourceArticleIds": int[]}.\n' +
+  '"topAttackTechniques": array of 5-10 {"techniqueId": string or null, "techniqueName": string, "whyUsed": string (why attackers use this technique against this sector specifically), "exampleScenario": string (a concrete example attack scenario using this technique against this sector, grounded in the table or a well-established pattern), "detectionPriority": "Critical"|"High"|"Medium", "sourceArticleIds": int[]} -- techniqueId MUST be copied exactly from the CANDIDATE MITRE ATT&CK TECHNIQUES list in the user message, or null if none genuinely apply; never invent an ID. Rank most prevalent/significant first. This is distinct from emergingAttackTechniques above -- that field is broad technique CATEGORIES/trends, this field is specific, real, ID-mapped MITRE ATT&CK techniques.\n' +
+  '"malwareFamilies": array of {"name": string (must be a malware family name that literally appears in the table\'s malware list), "type": string (one of "Ransomware", "Loader", "Banking Trojan", "Stealer", "RAT", "Botnet", "Wiper", "Backdoor", or another concise type if none fit), "primaryPurpose": string, "initialInfectionMethod": string, "persistenceMechanism": string, "commonPayload": string, "typicalVictims": string, "severity": "Critical"|"High"|"Medium"|"Low", "sourceArticleIds": int[]} -- [] if the table names no malware for this industry, do not invent one. Do not include "trend" -- computed separately from your citations.\n' +
   '"commonTargets": string[] (4-8 specific assets/technologies this industry\'s attackers are shown targeting in the table, e.g. "Microsoft 365", "OT/ICS Systems", "Payment Systems" -- ground in the table, not a generic checklist).\n' +
   '"vulnerabilityTrendsCommentary": string, 2-3 sentences of narrative synthesis over the table\'s own CVE/KEV entries (which are listed separately and verified programmatically -- do not restate the raw CVE IDs here, comment on the pattern: frequently-affected vendors/products, internet-facing exposure, exploit maturity).\n' +
   '"industryRiskAssessment": {"currentThreatLevel": "Critical"|"High"|"Medium"|"Low", "mostLikelyAttackScenarios": string[] (2-4), "highestBusinessRisks": string[] (2-4), "technologiesRequiringAttention": string[] (2-5)}.\n' +
@@ -126,6 +176,12 @@ function safeStringArray(value, max = 10) {
 }
 
 const RELEVANCE_LEVELS = new Set(["Critical", "High", "Medium", "Low"]);
+const CONFIDENCE_LEVELS = new Set(["High", "Medium", "Low"]);
+const DETECTION_PRIORITY_LEVELS = new Set(["Critical", "High", "Medium"]);
+
+function safeNullableString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
 
 /** Validates sourceArticleIds against the real 1-indexed grounding table -- drops any number the model invented, returns the real pool entries (not just indices) so callers never re-look-up. */
 function groundedArticles(sourceArticleIds, pool) {
@@ -181,12 +237,76 @@ function safeActiveThreatActors(value, pool) {
     .slice(0, 10)
     .map((t) => ({
       actor: t.actor.trim(),
+      country: safeNullableString(t.country),
+      confidence: CONFIDENCE_LEVELS.has(t.confidence) ? t.confidence : "Medium",
       motivation: safeString(t.motivation, "Not stated in available reporting"),
       typicalTargets: safeString(t.typicalTargets, "Not stated in available reporting"),
       recentCampaigns: safeString(t.recentCampaigns, "Not stated in available reporting"),
       ttps: safeString(t.ttps, "Not stated in available reporting"),
       sourceArticles: groundedArticles(t.sourceArticleIds, pool).map(toArticleRef),
     }));
+}
+
+/** techniqueId validated against the real synced ATT&CK catalog (validTechniqueIds), never trusted from the model -- an invented/near-miss ID is dropped to null rather than shown as real. */
+function safeTopAttackTechniques(value, pool, validTechniqueIds, idToTechnique) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 10).map((t) => {
+    const techniqueId = typeof t?.techniqueId === "string" && validTechniqueIds.has(t.techniqueId.toUpperCase()) ? t.techniqueId.toUpperCase() : null;
+    const catalogEntry = techniqueId ? idToTechnique.get(techniqueId) : null;
+    return {
+      techniqueId,
+      // Prefer the catalog's own real name when we have a validated ID, over trusting the model's own transcription of it.
+      techniqueName: catalogEntry?.name ?? safeString(t?.techniqueName, "Unnamed technique"),
+      tactic: catalogEntry ? (TACTIC_DISPLAY.get(catalogEntry.tactic) ?? catalogEntry.tactic) : null,
+      whyUsed: safeString(t?.whyUsed),
+      exampleScenario: safeString(t?.exampleScenario),
+      detectionPriority: DETECTION_PRIORITY_LEVELS.has(t?.detectionPriority) ? t.detectionPriority : "Medium",
+      sourceArticles: groundedArticles(t?.sourceArticleIds, pool).map(toArticleRef),
+    };
+  });
+}
+
+/**
+ * Deterministically derived from the already-validated topAttackTechniques'
+ * own real `tactic` field -- never separately asked of the model, since
+ * every technique already carries its real tactic from the synced ATT&CK
+ * catalog. Ranked by how many of the briefing's own techniques touch each
+ * tactic, tie-broken by kill-chain order (TACTIC_DISPLAY's insertion order).
+ */
+function computeTacticsSummary(topAttackTechniques) {
+  const counts = new Map();
+  for (const t of topAttackTechniques) {
+    if (!t.tactic) continue;
+    counts.set(t.tactic, (counts.get(t.tactic) ?? 0) + 1);
+  }
+  const order = [...TACTIC_DISPLAY.values()];
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || order.indexOf(a[0]) - order.indexOf(b[0]))
+    .map(([tactic, techniqueCount]) => ({ tactic, techniqueCount }));
+}
+
+/** name validated against the pool's own tagged malware list -- an invented family name is dropped rather than shown as real. */
+function safeMalwareFamilies(value, pool) {
+  if (!Array.isArray(value)) return [];
+  const knownMalware = new Set(pool.flatMap((a) => a.malware.map((n) => n.toLowerCase())));
+  return value
+    .filter((m) => typeof m?.name === "string" && knownMalware.has(m.name.toLowerCase()))
+    .slice(0, 10)
+    .map((m) => {
+      const sources = groundedArticles(m.sourceArticleIds, pool);
+      return {
+        name: m.name.trim(),
+        type: safeString(m.type, "Malware"),
+        primaryPurpose: safeString(m.primaryPurpose, "Not stated in available reporting"),
+        initialInfectionMethod: safeString(m.initialInfectionMethod, "Not stated in available reporting"),
+        persistenceMechanism: safeString(m.persistenceMechanism, "Not stated in available reporting"),
+        commonPayload: safeString(m.commonPayload, "Not stated in available reporting"),
+        typicalVictims: safeString(m.typicalVictims, "Not stated in available reporting"),
+        severity: RELEVANCE_LEVELS.has(m.severity) ? m.severity : "Medium",
+        trend: computeTrend(sources),
+        sourceArticles: sources.map(toArticleRef),
+      };
+    });
 }
 
 function safeAttackTechniques(value, pool) {
@@ -224,17 +344,23 @@ function vulnerabilityTrendsFromPool(pool) {
 
 /**
  * @param {string} industry - must be one of INDUSTRY_CATALOG
- * @param {{taggedNewsItems: Array, reports: Array, kevIds: Set<string>}} sources
+ * @param {{taggedNewsItems: Array, reports: Array, kevIds: Set<string>, attackTechniques?: Array}} sources
+ * @param {Array} [sources.attackTechniques] - this app's synced MITRE ATT&CK technique catalog, {id, name, tactic}[] (see server/connectors/attack.js) -- optional; topAttackTechniques/tacticsSummary come back empty without it rather than erroring.
  */
-export async function generateIndustryBriefing(industry, { taggedNewsItems, reports, kevIds }) {
+export async function generateIndustryBriefing(industry, { taggedNewsItems, reports, kevIds, attackTechniques = [] }) {
   if (!INDUSTRY_CATALOG.includes(industry)) throw new Error(`Unknown industry: ${industry}`);
 
   const pool = poolForIndustry(industry, taggedNewsItems, reports, kevIds);
   if (pool.length < 3) throw new InsufficientCoverageError(industry);
 
+  const candidateTechniques = selectCandidateTechniques(pool, attackTechniques);
+  const validTechniqueIds = new Set(attackTechniques.map((t) => t.id));
+  const idToTechnique = new Map(attackTechniques.map((t) => [t.id, t]));
+
   const groundingTable = buildGroundingTable(pool);
   const userMessage =
     `Industry: ${industry}\n\nSOURCE ARTICLE TABLE (cite by #):\n${groundingTable}\n\n` +
+    `${buildTechniqueCandidatesBlock(candidateTechniques)}\n\n` +
     `Generate the briefing JSON for this industry using ONLY what this table (and well-established category-level patterns) supports.`;
 
   let parsed;
@@ -253,6 +379,8 @@ export async function generateIndustryBriefing(industry, { taggedNewsItems, repo
     throw new GroqUnavailableError(`failed to parse briefing response (${error.message})`);
   }
 
+  const topAttackTechniques = safeTopAttackTechniques(parsed.topAttackTechniques, pool, validTechniqueIds, idToTechnique);
+
   return {
     industry,
     generatedAt: new Date().toISOString(),
@@ -262,6 +390,9 @@ export async function generateIndustryBriefing(industry, { taggedNewsItems, repo
     topEmergingThreats: safeTopEmergingThreats(parsed.topEmergingThreats, pool),
     activeThreatActors: safeActiveThreatActors(parsed.activeThreatActors, pool),
     emergingAttackTechniques: safeAttackTechniques(parsed.emergingAttackTechniques, pool),
+    topAttackTechniques,
+    tacticsSummary: computeTacticsSummary(topAttackTechniques),
+    malwareFamilies: safeMalwareFamilies(parsed.malwareFamilies, pool),
     commonTargets: safeStringArray(parsed.commonTargets, 8),
     vulnerabilityTrends: { ...vulnerabilityTrendsFromPool(pool), commentary: safeString(parsed.vulnerabilityTrendsCommentary) },
     industryRiskAssessment: safeRiskAssessment(parsed.industryRiskAssessment),

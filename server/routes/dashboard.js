@@ -442,9 +442,10 @@ router.get("/dashboard/industry-briefing", async (req, res) => {
   const reports = getAllAiThreatSummaries();
   const kevIds = new Set((cache.getEntry("cisa-kev").data?.entries ?? []).map((e) => e.cveId));
   const taggedNews = getTaggedNewsCached();
+  const attackTechniques = cache.getEntry("attack").data?.techniques ?? [];
 
   try {
-    const briefing = await generateIndustryBriefing(industry, { taggedNewsItems: taggedNews, reports, kevIds });
+    const briefing = await generateIndustryBriefing(industry, { taggedNewsItems: taggedNews, reports, kevIds, attackTechniques });
     res.json(briefing);
   } catch (error) {
     if (error instanceof InsufficientCoverageError) return res.status(422).json({ error: error.message });

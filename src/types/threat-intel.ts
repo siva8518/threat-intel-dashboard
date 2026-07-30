@@ -1210,6 +1210,9 @@ export interface IndustryBriefingThreat {
 
 export interface IndustryBriefingActor {
   actor: string;
+  /** Only set when this actor's national attribution is well-established and widely reported -- null if unattributed/uncertain, never guessed. */
+  country: string | null;
+  confidence: "High" | "Medium" | "Low";
   motivation: string;
   typicalTargets: string;
   recentCampaigns: string;
@@ -1223,6 +1226,37 @@ export interface IndustryBriefingTechnique {
   sourceArticles: IndustryBriefingArticleRef[];
 }
 
+/** A specific, ID-mapped MITRE ATT&CK technique -- distinct from IndustryBriefingTechnique above (broad category trends, no real ID required). techniqueId/techniqueName/tactic are validated against this app's own synced ATT&CK catalog, never trusted from the model. */
+export interface IndustryBriefingAttackTechnique {
+  techniqueId: string | null;
+  techniqueName: string;
+  tactic: string | null;
+  whyUsed: string;
+  exampleScenario: string;
+  detectionPriority: "Critical" | "High" | "Medium";
+  sourceArticles: IndustryBriefingArticleRef[];
+}
+
+/** Deterministically tallied from the briefing's own topAttackTechniques -- never separately asked of the model. */
+export interface IndustryBriefingTacticSummary {
+  tactic: string;
+  techniqueCount: number;
+}
+
+export interface IndustryBriefingMalwareFamily {
+  /** Must literally appear in the grounding pool's own tagged malware names -- an invented family name is dropped before this ever reaches the client. */
+  name: string;
+  type: string;
+  primaryPurpose: string;
+  initialInfectionMethod: string;
+  persistenceMechanism: string;
+  commonPayload: string;
+  typicalVictims: string;
+  severity: "Critical" | "High" | "Medium" | "Low";
+  trend: "Increasing" | "Stable" | "Declining";
+  sourceArticles: IndustryBriefingArticleRef[];
+}
+
 export interface IndustryBriefing {
   industry: IndustryName;
   generatedAt: string;
@@ -1233,6 +1267,9 @@ export interface IndustryBriefing {
   topEmergingThreats: IndustryBriefingThreat[];
   activeThreatActors: IndustryBriefingActor[];
   emergingAttackTechniques: IndustryBriefingTechnique[];
+  topAttackTechniques: IndustryBriefingAttackTechnique[];
+  tacticsSummary: IndustryBriefingTacticSummary[];
+  malwareFamilies: IndustryBriefingMalwareFamily[];
   commonTargets: string[];
   vulnerabilityTrends: {
     /** Real CVE IDs cross-referenced against the live KEV catalog -- never model-authored. */
