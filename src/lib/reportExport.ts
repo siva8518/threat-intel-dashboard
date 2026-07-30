@@ -24,7 +24,7 @@ function safeFilename(title: string): string {
   );
 }
 
-function heading(level: 1 | 2 | 3, text: string): string {
+function heading(level: 1 | 2 | 3 | 4, text: string): string {
   return `<h${level}>${esc(text)}</h${level}>`;
 }
 
@@ -92,6 +92,20 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   if (report.shouldICare) {
     parts.push(heading(2, "Should I Care?"));
     parts.push(paragraph(`${report.shouldICare.verdict}. ${report.shouldICare.reasoning}`));
+  }
+
+  // Static rendering of the interactive widget shown in the AI Summarization
+  // tab (AiSummarization.tsx's ExposureAssessment) -- no Yes/No/Unsure state
+  // in a static document, so both guidance branches are printed together
+  // for the reader to apply themselves once they've checked their version.
+  if (report.exposureAssessment?.applicable) {
+    const exp = report.exposureAssessment;
+    parts.push(heading(2, "Exposure Assessment"));
+    parts.push(paragraph(`Do you have ${exp.product}?`));
+    parts.push(paragraph(`How to check your version: ${exp.howToCheckVersion}`));
+    parts.push(paragraph(`Affected versions (per this article): ${exp.affectedVersions}`));
+    parts.push(paragraph(`If your version is listed above: ${exp.affectedGuidance}`));
+    parts.push(paragraph(`If it isn't: ${exp.notAffectedGuidance}`));
   }
 
   if (risk) {
@@ -237,6 +251,12 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     // content was thin read as "this data doesn't exist" rather than
     // "nothing applicable for this article."
     parts.push(heading(3, "SOC Analyst"));
+    if (actions.recommendedActions?.length > 0) {
+      const rows = actions.recommendedActions
+        .map((a) => `<li>${a.applicable ? "&check;" : "&ndash;"} <strong>${esc(a.action)}</strong>${a.applicable ? ` -- ${esc(a.details)}` : ""}</li>`)
+        .join("");
+      parts.push(`${heading(4, "Recommended Actions")}<ul>${rows}</ul>`);
+    }
     parts.push(groupedListsSection("", [["Telemetry to check", soc.telemetryToCheck]]));
     if (soc.telemetryToCheck.length === 0) parts.push(paragraph("Telemetry to check: Not Reported"));
     parts.push(paragraph(`What to look for: ${soc.whatToLookFor}`));
@@ -335,6 +355,7 @@ const SHARED_STYLES = `
   h1 { font-size: 20pt; margin-bottom: 4px; }
   h2 { font-size: 15pt; margin-top: 24px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
   h3 { font-size: 12pt; margin-top: 16px; margin-bottom: 4px; }
+  h4 { font-size: 10.5pt; margin-top: 10px; margin-bottom: 2px; }
   p.meta { color: #555; font-size: 10pt; margin: 2px 0; }
   p.group-label { margin-bottom: 2px; }
   ul { margin-top: 4px; }

@@ -854,6 +854,22 @@ export interface AiThreatSummaryShouldICare {
 }
 
 /**
+ * A self-service exposure check the reader runs against their own
+ * environment (this app has no visibility into what's actually installed) --
+ * `applicable` is false (all other fields "Not Applicable") for threat-actor/
+ * malware-only or non-product news where there's nothing to check a version
+ * against.
+ */
+export interface AiThreatSummaryExposureAssessment {
+  applicable: boolean;
+  product: string;
+  howToCheckVersion: string;
+  affectedVersions: string;
+  affectedGuidance: string;
+  notAffectedGuidance: string;
+}
+
+/**
  * Merges the former threatOverview/aiTechnicalSummary/affectedProducts/
  * vendorSeverityAssessment sections into one -- driven by an explicit
  * reasoning chain (what happened / why it matters / who's affected / is
@@ -930,6 +946,13 @@ export interface AiThreatSummarySocAnalyst {
   immediateNextStep: string;
 }
 
+/** One row of the fixed 7-action checklist -- see RECOMMENDED_ACTION_CATALOG in server/aiThreatSummary.js. */
+export interface AiThreatSummaryRecommendedAction {
+  action: "Block Firewall" | "Block DNS" | "Add to Defender IOC" | "Create Sentinel Analytic Rule" | "Hunt in MDE" | "Search Proxy Logs" | "Search Email Gateway";
+  applicable: boolean;
+  details: string;
+}
+
 export interface AiThreatSummaryHuntHypothesis {
   hypothesis: string;
   dataSources: string[];
@@ -974,6 +997,7 @@ export interface AiThreatSummaryIncidentResponse {
 /** Per-team action guidance -- replaces the former flat detection/hunting/IR/recommendation arrays and role-takeaway strings. */
 export interface AiThreatSummaryOperationalActions {
   socAnalyst: AiThreatSummarySocAnalyst;
+  recommendedActions: AiThreatSummaryRecommendedAction[];
   threatHunter: AiThreatSummaryThreatHunter;
   detectionEngineer: AiThreatSummaryDetectionEngineer;
   vulnerabilityManagement: AiThreatSummaryVulnerabilityManagement;
@@ -1007,6 +1031,7 @@ export interface AiThreatSummaryReport {
   executiveSummary: string;
   businessRisk: AiThreatSummaryBusinessRisk;
   shouldICare: AiThreatSummaryShouldICare;
+  exposureAssessment: AiThreatSummaryExposureAssessment;
   technicalAnalysis: AiThreatSummaryTechnicalAnalysis;
   mitreAttack: AiThreatSummaryMitreTechnique[];
   threatActors: AiThreatSummaryActor[];

@@ -46,12 +46,14 @@ const SYSTEM_PROMPT =
   '"executiveSummary": 2-4 sentences, written for an executive audience with zero technical jargon, that will be read as-is with no further context -- clear and crisp, and grounded ONLY in what the article/verified data actually supports (never speculate, never invent a detail to sound more complete). It MUST answer, in this order: (1) what this means for the business in concrete terms -- financial, operational, reputational, legal/compliance exposure, stated directly rather than vaguely; (2) what decision or action is being asked of the reader right now (e.g. approve an emergency patch window, allocate remediation budget, authorize customer notification) -- if nothing is currently being asked of leadership, say so explicitly (e.g. "No executive decision is required at this time; the SOC is handling remediation.") rather than omitting it.\n' +
   '"businessRisk": {"businessRisk": string, "operationalDisruption": string, "likelihoodOfExploitation": string, "impactIfUnpatched": string, "industriesCommonlyTargeted": string[], "regionsCommonlyTargeted": string[], "requiresExecutiveAttention": boolean, "topActions": string[] (the single most important 1-3 actions across every team -- not a repeat of every recommendation elsewhere, just the top priorities), "whatsMissing": string or null (what information a reader would want that this article/data genuinely doesn\'t provide -- null if nothing notable is missing)} -- regionsCommonlyTargeted: specific countries/regions the article says are impacted, targeted, or where victims/exploitation were observed, [] if the article doesn\'t specify geography -- never guess a region the article doesn\'t state.\n' +
   '"shouldICare": {"verdict": "YES"|"NO"|"UNKNOWN", "reasoning": string} -- this app has no knowledge of the specific reader\'s own environment, so answer as a conditional decision aid, not a personalized verdict: "YES" if the affected technology is so broadly deployed or the exploitation so indiscriminate that almost any reader should assume it applies to them (e.g. a mass-exploited, widely-used product/library, or active internet-wide scanning); "NO" if the described risk is narrow, theoretical, vendor-internal, or otherwise not something a typical reader needs to act on (e.g. an AI research announcement, a already-patched issue with no current relevance); "UNKNOWN" (the common case for a specific-product vulnerability) with reasoning that tells the reader exactly what to check, e.g. "YES if you run Fortinet FortiOS or Arista VeloCloud Orchestrator; otherwise this specific advisory does not apply to you directly." Ground the verdict only in what the article states about affected products/scope -- never guess at a reader\'s stack.\n' +
+  '"exposureAssessment": {"applicable": boolean (true only when the article describes a risk tied to a specific, nameable product/software a reader could check for -- false for threat-actor/malware-only, research, or non-product news, in which case every other field here is "Not Applicable"), "product": string (the single most relevant product/software a reader should check for, exactly as named in the article, e.g. "Microsoft Exchange Server", "FortiOS", "Ivanti Connect Secure"), "howToCheckVersion": string (a concrete, specific command or UI path a reader can run right now to find their installed version, e.g. "Exchange Management Shell: Get-ExchangeServer | ft Name, AdminDisplayVersion" or "Help > About" -- generic advice like "check your version" is not acceptable), "affectedVersions": string (exactly what the article/advisory states is affected, e.g. "Exchange Server 2019 before CU15, 2016 before CU24"), "affectedGuidance": string (what to do if the reader confirms they are on an affected version -- concrete and prioritized, e.g. "Patch immediately to the fixed build; this is under active exploitation"), "notAffectedGuidance": string (what to do if the reader confirms they are on a version NOT listed as affected, e.g. "No immediate action required; continue routine patch cadence")} -- this is a self-service exposure check the reader runs against their own environment (this app has no visibility into what the reader actually has installed) -- supply the check itself, never guess whether the reader personally has this product or which version they run.\n' +
   '"technicalAnalysis": {"whatHappened": string, "whyItMatters": string (technical/operational significance -- what an attacker gains, the blast radius -- distinct from the business-language executiveSummary), "whoIsAffected": string, "exploitationStatus": string (state plainly: confirmed active exploitation / public PoC only / theoretical, with the evidence), "attackVector": string[], "rootCause": string[], "exploitationDetails": string[], "technicalFindings": string[], "attackChain": string (1-2 sentence kill-chain overview), "initialAccess": string|null, "privilegeEscalation": string|null, "execution": string|null, "persistence": string|null, "defenseEvasion": string|null, "lateralMovement": string|null, "commandAndControl": string|null, "dataTheft": string|null, "ransomwareDeployment": string|null, "products": string[], "versions": string[], "operatingSystems": string[], "cloudServices": string[], "applications": string[], "vendorSeverity": string, "activeExploitation": string, "overallSocPriority": "Critical"|"High"|"Medium"|"Low"} -- kill-chain fields: null (not "Not Reported") for any stage not described in the article, do not fabricate a kill chain the article doesn\'t support. affectedProducts fields: exactly as named in the article. vendorSeverity is the vendor\'s own stated rating, not your own guess -- CVSS/EPSS/KEV are supplied separately, don\'t restate them here. Every bullet should read like it came from a technical researcher, not a press release -- name the specific thing, don\'t generalize it away.\n' +
   '"mitreAttack": array of {"technique": string, "techniqueId": string or null, "reason": string (why this technique applies, grounded in what the article describes), "killChainPhase": string} -- techniqueId MUST be copied exactly from the CANDIDATE MITRE ATT&CK TECHNIQUES list in the user message, or null if none genuinely apply. Never invent a technique ID that isn\'t in that list, even if it looks plausible.\n' +
   '"threatActors": array of {"group": string, "aliases": string[], "motivation": string|null, "targetSectors": string[], "geography": string|null, "knownCampaigns": string[]} -- only actors explicitly named in the article.\n' +
   '"malware": array of {"family": string, "capabilities": string[], "persistence": string|null, "payload": string|null, "deliveryMechanism": string|null} -- only malware explicitly named in the article.\n' +
   '"operationalActions": {\n' +
   '  "socAnalyst": {"telemetryToCheck": string[] (real, specific telemetry sources for THIS attack -- e.g. "Windows Event ID 4688 (process creation) for the child process spawned by the web service", "Sysmon Event ID 3 (network connection) for outbound C2 beacons", "Microsoft Defender for Endpoint DeviceProcessEvents / DeviceNetworkEvents advanced hunting tables", "firewall/proxy logs for requests to the vulnerable endpoint path" -- never just "logs" or "EDR telemetry" with no specifics), "whatToLookFor": string (the specific indicator/behavior that confirms this is happening in this environment), "immediateNextStep": string (the concrete next step if the indicator is found)},\n' +
+  '  "recommendedActions": array of EXACTLY these 7 entries, one each, in this exact order and with these exact "action" strings -- "Block Firewall", "Block DNS", "Add to Defender IOC", "Create Sentinel Analytic Rule", "Hunt in MDE", "Search Proxy Logs", "Search Email Gateway" -- each shaped {"action": string (copied exactly from the list above), "applicable": boolean (true only if THIS article/data genuinely supports taking that specific action -- e.g. "Block Firewall" is only true if there are IP-based indicators worth blocking, "Search Email Gateway" is only true if the delivery mechanism described is phishing/email-based, "Create Sentinel Analytic Rule" is only true if there is a genuinely new, specific detection opportunity here, not for every report), "details": string (if applicable: the concrete thing to do -- which specific IPs/domains/hashes, which query, which technique, phrased as an instruction a Tier-1 analyst can execute immediately; if not applicable: "Not Applicable")} -- do not mark more than 2-3 as applicable unless the article genuinely supports it; a mostly-not-applicable checklist for a low-signal article is correct, not incomplete.\n' +
   '  "threatHunter": {"hypotheses": array of {"hypothesis": string (a specific, testable hunting hypothesis grounded in this attack\'s actual behavior, e.g. "internet-facing instances of the affected service still unpatched", "unexpected administrative logins immediately following the exploitation window", "process spawning from the vulnerable web service"), "dataSources": string[] (what to query to test it), "positiveFindingLooksLike": string, "falsePositiveNote": string (what a benign explanation for the same signal would look like)} -- 2-4 hypotheses, each genuinely distinct, not restatements of each other},\n' +
   '  "detectionEngineer": {"existingRulesAvailable": string[] (your own knowledge of whether public Sigma/Elastic/Microsoft-native detection rules already cover this activity -- name them if you know of specific ones, otherwise state plainly that none are known to exist yet; real, verified public rule matches are supplied separately and merged in automatically, don\'t restate those), "recommendedAction": string (update an existing rule vs. author a new one, and why), "yaraApplicable": string or null (is YARA a fit here -- e.g. for a dropped payload/webshell -- or null if not applicable to this attack type), "newDetectionLogic": string[] (concrete new detection logic to build, described precisely enough for an engineer to implement -- not vague "add a rule"), "logSourcesRequired": string[], "expectedFalsePositives": string, "detectionGaps": string[] (what this attack could still evade even with the above detections in place)},\n' +
   '  "vulnerabilityManagement": {"applicable": boolean (false if this article involves no specific CVE -- if false, every other field in this object should be "Not Applicable"/[]), "affectedAssetsSummary": string (affected products/versions and how to identify/scope them in a typical environment), "internetFacing": string, "exploitMaturity": string (weaponized/PoC/theoretical), "patchPriority": string, "maintenanceWindowRecommendation": string, "businessCriticality": string, "compensatingControls": string[] (if patching must be delayed), "knownWorkaround": string or null},\n' +
@@ -334,6 +336,40 @@ function safeSocAnalyst(v) {
   };
 }
 
+// Fixed catalog, not model-defined -- lets the UI render a stable checklist
+// (same 7 rows every time) and lets groundRecommendedActions below upgrade
+// specific rows using objectively-extracted IOCs rather than trusting the
+// model's own judgment for the ones this app can actually verify.
+const RECOMMENDED_ACTION_CATALOG = [
+  "Block Firewall",
+  "Block DNS",
+  "Add to Defender IOC",
+  "Create Sentinel Analytic Rule",
+  "Hunt in MDE",
+  "Search Proxy Logs",
+  "Search Email Gateway",
+];
+
+function safeRecommendedActions(v) {
+  const byAction = new Map();
+  if (Array.isArray(v)) {
+    for (const entry of v) {
+      if (entry && typeof entry === "object" && typeof entry.action === "string") {
+        byAction.set(entry.action.trim(), entry);
+      }
+    }
+  }
+  return RECOMMENDED_ACTION_CATALOG.map((action) => {
+    const entry = byAction.get(action);
+    const applicable = entry ? safeBoolean(entry.applicable) : false;
+    return {
+      action,
+      applicable,
+      details: applicable ? safeString(entry?.details) : "Not Applicable",
+    };
+  });
+}
+
 function safeThreatHunter(v) {
   v ??= {};
   const hypotheses = Array.isArray(v.hypotheses) ? v.hypotheses : [];
@@ -404,6 +440,7 @@ function safeOperationalActions(v) {
   v ??= {};
   return {
     socAnalyst: safeSocAnalyst(v.socAnalyst),
+    recommendedActions: safeRecommendedActions(v.recommendedActions),
     threatHunter: safeThreatHunter(v.threatHunter),
     detectionEngineer: safeDetectionEngineer(v.detectionEngineer),
     vulnerabilityManagement: safeVulnerabilityManagement(v.vulnerabilityManagement),
@@ -422,6 +459,29 @@ function safeConfidenceAssessment(v) {
     reasoning: safeString(v.reasoning),
     factorsPresent: safeArray(v.factorsPresent),
     factorsMissing: safeArray(v.factorsMissing),
+  };
+}
+
+function safeExposureAssessment(v) {
+  v ??= {};
+  const applicable = safeBoolean(v.applicable);
+  if (!applicable) {
+    return {
+      applicable: false,
+      product: "Not Applicable",
+      howToCheckVersion: "Not Applicable",
+      affectedVersions: "Not Applicable",
+      affectedGuidance: "Not Applicable",
+      notAffectedGuidance: "Not Applicable",
+    };
+  }
+  return {
+    applicable: true,
+    product: safeString(v.product),
+    howToCheckVersion: safeString(v.howToCheckVersion),
+    affectedVersions: safeString(v.affectedVersions),
+    affectedGuidance: safeString(v.affectedGuidance),
+    notAffectedGuidance: safeString(v.notAffectedGuidance),
   };
 }
 
@@ -447,6 +507,7 @@ function parseModelReport(text, validTechniqueIds, techniqueNameToId, idToTechni
       executiveSummary: safeString(parsed.executiveSummary),
       businessRisk: safeBusinessRisk(parsed.businessRisk),
       shouldICare: safeShouldICare(parsed.shouldICare),
+      exposureAssessment: safeExposureAssessment(parsed.exposureAssessment),
       technicalAnalysis: safeTechnicalAnalysis(parsed.technicalAnalysis, validTechniqueIds, idToTechniqueName),
       mitreAttack: safeMitreArray(parsed.mitreAttack, validTechniqueIds, techniqueNameToId, idToTechniqueName),
       threatActors: safeThreatActors(parsed.threatActors),
@@ -553,6 +614,39 @@ function groundExistingRules(modelReport, ruleIndex) {
   };
 }
 
+// Same hybrid-grounding principle as groundExistingRules above, applied to
+// the 3 recommendedActions rows this app can verify objectively from its own
+// IOC extraction rather than trust the model's judgment call on: only ever
+// upgrades false -> true (with real, synthesized details listing the actual
+// extracted indicators), never overrides a model-reasoned true or the
+// judgment-only rows ("Create Sentinel Analytic Rule", "Hunt in MDE",
+// "Search Email Gateway") that require synthesis this app can't verify.
+function groundRecommendedActions(modelReport, iocs) {
+  const ipAddresses = iocs.ipAddresses ?? [];
+  const domains = iocs.domains ?? [];
+  const urls = iocs.urls ?? [];
+  const hashes = iocs.hashes ?? [];
+  const anyIocCount = ipAddresses.length + domains.length + urls.length + hashes.length + (iocs.emailAddresses?.length ?? 0);
+
+  const upgrades = {
+    "Block Firewall": ipAddresses.length > 0 && { details: `Block the following IP address(es) at the perimeter firewall: ${ipAddresses.join(", ")}` },
+    "Block DNS": domains.length > 0 && { details: `Sinkhole/block the following domain(s) at the DNS resolver: ${domains.join(", ")}` },
+    "Add to Defender IOC": anyIocCount > 0 && { details: "Add the extracted indicators (IPs/domains/URLs/hashes above) to Microsoft Defender's custom indicator list." },
+    "Search Proxy Logs": domains.length + urls.length > 0 && { details: `Search proxy logs for requests to: ${[...domains, ...urls].join(", ")}` },
+  };
+
+  const recommendedActions = modelReport.operationalActions.recommendedActions.map((entry) => {
+    const upgrade = upgrades[entry.action];
+    if (upgrade && !entry.applicable) return { ...entry, applicable: true, details: upgrade.details };
+    return entry;
+  });
+
+  return {
+    ...modelReport,
+    operationalActions: { ...modelReport.operationalActions, recommendedActions },
+  };
+}
+
 /**
  * @param {object} article - {title, summary, link, source, publishedDate}
  * @param {object} grounded - already-verified per-article facts from server/newsCorrelation.js#tagNewsItems
@@ -618,7 +712,7 @@ export async function generateThreatSummary(article, grounded) {
   const modelReport = parseModelReport(response.message?.content ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);
   if (!modelReport) return null;
 
-  const groundedReport = groundExistingRules(modelReport, grounded.detectionRuleIndex);
+  const groundedReport = groundRecommendedActions(groundExistingRules(modelReport, grounded.detectionRuleIndex), iocs);
 
   return {
     id: article.link,

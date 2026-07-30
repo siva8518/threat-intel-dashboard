@@ -60,8 +60,18 @@ const EMPTY_TECHNICAL_ANALYSIS = {
   overallSocPriority: "Medium" as const,
 };
 
+const EMPTY_EXPOSURE_ASSESSMENT = {
+  applicable: false,
+  product: "Not Applicable",
+  howToCheckVersion: "Not Applicable",
+  affectedVersions: "Not Applicable",
+  affectedGuidance: "Not Applicable",
+  notAffectedGuidance: "Not Applicable",
+};
+
 const EMPTY_OPERATIONAL_ACTIONS = {
   socAnalyst: { telemetryToCheck: [] as string[], whatToLookFor: "Not Reported", immediateNextStep: "Not Reported" },
+  recommendedActions: [] as Array<{ action: string; applicable: boolean; details: string }>,
   threatHunter: { hypotheses: [] as Array<{ hypothesis: string; dataSources: string[]; positiveFindingLooksLike: string; falsePositiveNote: string }> },
   detectionEngineer: {
     existingRulesAvailable: [] as string[],
@@ -247,6 +257,109 @@ function IocRow({ label, values }: { label: string; values: string[] }) {
   );
 }
 
+/**
+ * Concrete SOC response actions for this specific article -- a fixed 7-item
+ * catalog (Block Firewall/DNS, Add to Defender IOC, Create Sentinel
+ * Analytic Rule, Hunt in MDE, Search Proxy Logs/Email Gateway), each marked
+ * applicable/not by the model and, for the IOC-dependent rows, re-verified
+ * server-side against the actual extracted indicators (server/
+ * aiThreatSummary.js#groundRecommendedActions) rather than trusted outright.
+ * Replaces vague "monitor for malicious activity" advice with a checklist a
+ * Tier-1 analyst can act on immediately.
+ */
+function RecommendedActionsChecklist({ actions }: { actions: Array<{ action: string; applicable: boolean; details: string }> }) {
+  if (actions.length === 0) return null;
+  return (
+    <Section title="Recommended Actions">
+      <ul className="space-y-1.5">
+        {actions.map((a, i) => (
+          <li key={i} className={cn("rounded-lg border px-2.5 py-1.5 text-xs", a.applicable ? "border-low/30 bg-low/5" : "border-white/[0.06] bg-white/[0.02]")}>
+            <div className={cn("flex items-center gap-1.5 font-semibold", a.applicable ? "text-low" : "text-muted")}>
+              <span aria-hidden="true">{a.applicable ? "✓" : "–"}</span>
+              <span className={a.applicable ? "text-foreground" : "text-muted"}>{a.action}</span>
+            </div>
+            {a.applicable && <p className="mt-0.5 pl-4 text-foreground">{a.details}</p>}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+type ExposureAnswer = "yes" | "no" | "unsure";
+
+/**
+ * A self-service exposure check the reader runs against their own
+ * environment -- "Do you have {product}?" -> optional version note -> the
+ * model's own affected-version description plus both branches of guidance.
+ * Deliberately does NOT try to auto-determine whether a typed version is
+ * "affected" (arbitrary vendor versioning schemes -- Exchange CUs, FortiOS
+ * builds -- can't be reliably compared with a generic heuristic without
+ * risking exactly the kind of fabricated confidence this report's grounding
+ * rules exist to prevent); it guides the reader to the real answer instead
+ * of pretending to compute it.
+ */
+function ExposureAssessment({ exposure }: { exposure: typeof EMPTY_EXPOSURE_ASSESSMENT }) {
+  const [answer, setAnswer] = useState<ExposureAnswer | null>(null);
+  if (!exposure.applicable) return null;
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+      <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Exposure Assessment</h4>
+      <p className="text-sm text-foreground">
+        Do you have <span className="font-semibold">{exposure.product}</span>?
+      </p>
+      <div className="mt-2 flex gap-1.5">
+        {(["yes", "no", "unsure"] as const).map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => setAnswer(opt)}
+            className={cn(
+              "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+              answer === opt ? "border-primary bg-gradient-primary text-white" : "border-white/10 bg-white/[0.03] text-muted hover:text-foreground",
+            )}
+          >
+            {opt === "yes" ? "Yes" : opt === "no" ? "No" : "Not Sure"}
+          </button>
+        ))}
+      </div>
+
+      {answer === "no" && (
+        <div className="mt-2.5 rounded-md border border-low/30 bg-low/5 px-2.5 py-2 text-xs">
+          <span className="font-semibold text-low">Not applicable to you. </span>
+          <span className="text-foreground">{exposure.notAffectedGuidance}</span>
+        </div>
+      )}
+
+      {(answer === "yes" || answer === "unsure") && (
+        <div className="mt-2.5 space-y-2 text-xs">
+          <div>
+            <span className="font-semibold text-foreground">How to check your version: </span>
+            <span className="text-muted">{exposure.howToCheckVersion}</span>
+          </div>
+          <div>
+            <span className="font-semibold text-foreground">Affected versions (per this article): </span>
+            <span className="text-muted">{exposure.affectedVersions}</span>
+          </div>
+          {answer === "yes" && (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="rounded-md border border-critical/30 bg-critical/5 px-2.5 py-2">
+                <div className="font-semibold text-critical">If your version is listed above</div>
+                <div className="mt-0.5 text-foreground">{exposure.affectedGuidance}</div>
+              </div>
+              <div className="rounded-md border border-low/30 bg-low/5 px-2.5 py-2">
+                <div className="font-semibold text-low">If it isn't</div>
+                <div className="mt-0.5 text-foreground">{exposure.notAffectedGuidance}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Named threat-hunting hypotheses (operationalActions.threatHunter.hypotheses) -- each is a specific, testable claim, not a generic "hunt for suspicious activity" bullet. */
 function HypothesisList({ hypotheses }: { hypotheses: Array<{ hypothesis: string; dataSources: string[]; positiveFindingLooksLike: string; falsePositiveNote: string }> }) {
   if (hypotheses.length === 0) return null;
@@ -355,6 +468,8 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               </p>
             </div>
           )}
+
+          <ExposureAssessment exposure={report.exposureAssessment ?? EMPTY_EXPOSURE_ASSESSMENT} />
 
           {(() => {
             const risk = report.businessRisk ?? EMPTY_BUSINESS_RISK;
@@ -559,6 +674,7 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                     Detection Engineer section, just a sparse one. */}
                 <div className="-mt-3">
                   <h4 className="mb-1 text-xs font-semibold text-foreground">SOC Analyst</h4>
+                  <RecommendedActionsChecklist actions={actions.recommendedActions} />
                   <GroupedCodeLists title="Telemetry to Check" groups={[["Sources", actions.socAnalyst.telemetryToCheck]]} />
                   {actions.socAnalyst.telemetryToCheck.length === 0 && <p className="text-xs text-muted">Telemetry to check: Not Reported</p>}
                   <dl className="mt-1.5 space-y-1 text-sm">
