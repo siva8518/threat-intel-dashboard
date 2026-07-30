@@ -33,11 +33,22 @@ async function request(url: string, options: RequestOptions): Promise<Response> 
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     if (!response.ok) {
-      throw new ApiError(
-        `${source} responded with ${response.status} ${response.statusText}`,
-        source,
-        response.status,
-      );
+      // This app's own routes respond to a handled failure (bad input,
+      // insufficient data to proceed, an upstream outage) with a JSON body
+      // shaped {error: string} -- e.g. industry-briefing's 422 "Not enough
+      // recent source coverage for X". Without reading it, every one of
+      // those specific, useful messages was discarded in favor of a generic
+      // "responded with 422 Unprocessable Entity", regardless of route.
+      // Falls back to the generic message for non-JSON bodies (a raw 502
+      // from a proxy, an HTML error page) or a body with no `error` field.
+      let detail: string | undefined;
+      try {
+        const body = await response.clone().json();
+        if (typeof body?.error === "string") detail = body.error;
+      } catch {
+        // not JSON -- fall through to the generic message below
+      }
+      throw new ApiError(detail ?? `${source} responded with ${response.status} ${response.statusText}`, source, response.status);
     }
     return response;
   } catch (error) {
