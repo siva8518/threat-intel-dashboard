@@ -413,13 +413,16 @@ router.get("/dashboard/ai-summaries/:id", (req, res) => {
 router.get("/dashboard/emerging-threats-ranking", (_req, res) => {
   const reports = getAllAiThreatSummaries();
   const kevIds = new Set((cache.getEntry("cisa-kev").data?.entries ?? []).map((e) => e.cveId));
+  // Ranked from the full tagged news pool (getTaggedNewsCached(), defined
+  // further down this file -- hoisted, so callable here), NOT just
+  // AI Summarization reports -- see server/emergingThreatsRanking.js's own
+  // header comment for why that distinction matters. Same pool feeds both
+  // the ranked list and the industry heatmap, so the heatmap is never
+  // empty waiting on report coverage either.
+  const taggedNews = getTaggedNewsCached();
   res.json({
-    // Ranked from the full tagged news pool (getTaggedNewsCached(), defined
-    // further down this file -- hoisted, so callable here), NOT just
-    // AI Summarization reports -- see server/emergingThreatsRanking.js's own
-    // header comment for why that distinction matters.
-    entries: buildEmergingThreatsRanking(getTaggedNewsCached(), reports, kevIds),
-    industryHeatmap: computeAggregateIndustryHeatmap(reports),
+    entries: buildEmergingThreatsRanking(taggedNews, reports, kevIds),
+    industryHeatmap: computeAggregateIndustryHeatmap(taggedNews, reports),
   });
 });
 

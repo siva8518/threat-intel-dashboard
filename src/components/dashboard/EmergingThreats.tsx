@@ -95,13 +95,14 @@ function ThreatRow({ entry }: { entry: EmergingThreatEntry }) {
  * (risk tier + KEV status + peak per-industry risk + recency -- see
  * server/emergingThreatsRanking.js, and hover a score for the exact
  * breakdown, same pattern as the Overview tab's Critical Threat Level tile),
- * plus the aggregate industry heatmap rolled up across every AI Summarization
- * report's own per-sector assessment. Deliberately NOT limited to articles
- * with a full AI report -- that pipeline only covers a small daily slice of
- * the pool, so entries here are enriched with report data (a sharper risk
- * score, an industry badge, an "AI Report" tag) when one exists, but every
- * recent article is rankable regardless. Reached from the Overview tab's
- * "Emerging Threats Feed" widget.
+ * plus the aggregate industry heatmap rolled up across the same pool
+ * (keyword-matched per article, see server/data/industry-map-10.json).
+ * Neither view is limited to articles with a full AI report -- that pipeline
+ * only covers a small daily slice of the pool, so entries/rows here are
+ * enriched with report data (a sharper risk score, an industry badge, an
+ * "AI Report" tag, the fuller why/impact/assets/defensive-focus assessment)
+ * when one exists, but every recent article is rankable/countable regardless.
+ * Reached from the Overview tab's "Emerging Threats Feed" widget.
  */
 export function EmergingThreats() {
   const { data, isLoading, isError, error } = useEmergingThreatsRanking();
@@ -115,8 +116,8 @@ export function EmergingThreats() {
             Industry Heatmap
           </CardTitle>
           <p className="mt-1 text-xs text-muted">
-            The worst relevance/risk seen for each sector across every AI Summarization report currently on file -- not just one article's view. Click a row for the
-            full assessment.
+            The worst relevance/risk seen for each sector across the last 30 days of news, keyword-matched from every source (not just AI Summarization reports) --
+            enriched with a full AI assessment where one exists. Click a row for the detail.
           </p>
         </CardHeader>
         <CardContent>

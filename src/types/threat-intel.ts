@@ -1175,9 +1175,10 @@ export interface AggregateIndustryHeatmapRow {
   potentialImpact: string[];
   likelyTargetAssets: string[];
   defensiveFocus: string[];
-  /** How many reports currently flag this sector Critical or High. */
+  /** How many recent articles currently flag this sector Critical or High. */
   activeThreatCount: number;
-  topReport: { id: string; title: string } | null;
+  /** The article that drove this sector's current relevance/risk -- may or may not have a full AI Summarization report (see AggregateIndustryHeatmapRow.confidence: "Low" means keyword-derived, not AI-assessed). */
+  topArticle: { id: string; title: string } | null;
 }
 
 export interface EmergingThreatsRanking {

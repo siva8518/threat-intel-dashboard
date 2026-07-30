@@ -19,6 +19,7 @@
 // to avoid any confusion between the two -- this module never touches that
 // connector or its cache entry.
 import { INDUSTRY_CATALOG } from "./aiThreatSummary.js";
+import industryKeywords10 from "./data/industry-map-10.json" with { type: "json" };
 
 const WEIGHTS = { risk: 0.4, kev: 0.15, industryRisk: 0.25, recency: 0.2 };
 const RECENCY_FULL_WINDOW_MS = 24 * 60 * 60 * 1000; // full recency credit for anything published in the last 24h
@@ -32,6 +33,22 @@ const MAX_ENTRIES = 150; // cap the response payload -- the pool itself can run 
 // uses, so a report-backed and non-report-backed article are comparable on
 // the same axis rather than two incompatible scales.
 const SEVERITY_BASE_SCORE = { critical: 100, high: 70, medium: 40, low: 15 };
+
+// computeSeverity() in server/newsCorrelation.js can only reach "critical"
+// via a CVE tied to KEV/high-EPSS -- a named ransomware group or threat
+// actor campaign with no CVE mention structurally tops out at "medium"/
+// "high" there, which would silently shut every malware/actor-driven
+// article out of the top of this ranking even when it's just as urgent as
+// a KEV vulnerability. This floor (not an override -- Math.max keeps
+// whatever's higher) gives named actor/malware activity a score competitive
+// with CVE/KEV content instead of being structurally capped below it.
+function actorMalwareFloor(item) {
+  const hasActor = (item.tags?.actors?.length ?? 0) > 0;
+  const hasMalware = (item.tags?.malware?.length ?? 0) > 0;
+  if (hasActor && hasMalware) return 85; // a named campaign attributed to both an actor and a malware family -- strong signal
+  if (hasActor || hasMalware) return 65;
+  return 0;
+}
 
 function recencyScore(publishedDate) {
   const age = Date.now() - new Date(publishedDate).getTime();
@@ -60,7 +77,8 @@ function isKevMatch(item, report, kevIds) {
 
 /** @returns {{score: number, factors: Record<string, {value: number, weight: number, contribution: number}>}} */
 export function computeThreatPriorityScore(item, report, kevIds) {
-  const risk = report?.aiRiskScoring?.score ?? SEVERITY_BASE_SCORE[item.severity] ?? SEVERITY_BASE_SCORE.low;
+  const baseRisk = report?.aiRiskScoring?.score ?? SEVERITY_BASE_SCORE[item.severity] ?? SEVERITY_BASE_SCORE.low;
+  const risk = Math.max(baseRisk, actorMalwareFloor(item));
   const kev = isKevMatch(item, report, kevIds);
   const industryRisk = maxIndustryRisk(report) * 10; // 0-10 -> 0-100
   const recency = recencyScore(item.publishedDate);
@@ -120,39 +138,81 @@ export function buildEmergingThreatsRanking(taggedNewsItems, reports, kevIds) {
 }
 
 const RELEVANCE_RANK = { Critical: 4, High: 3, Medium: 2, Low: 1, "Not Applicable": 0 };
+const SEVERITY_TO_RELEVANCE = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
+const RELEVANCE_TO_PRIORITY = { Critical: "Immediate", High: "High", Medium: "Normal", Low: "Low" };
+
+/** Case-insensitive substring match against a title -- see server/data/industry-map-10.json. Same "curated list, not NLP" convention as matchIndustries() in server/newsCorrelation.js, just scoped to this feature's own 10-sector taxonomy. */
+function matchIndustries10(title) {
+  const lower = title.toLowerCase();
+  const hits = [];
+  for (const [industry, keywords] of Object.entries(industryKeywords10)) {
+    if (industry.startsWith("_")) continue;
+    if (keywords.some((k) => lower.includes(k))) hits.push(industry);
+  }
+  return hits;
+}
 
 /**
- * Rolls up every AI Summarization report's own per-industry assessment into
- * one heatmap: for each of the 10 sectors, the worst (highest-relevance,
- * tie-broken by highest-risk) hit seen across all reports, plus how many
- * reports currently flag it Critical/High. Industry-relevance detail is
- * AI-generated (there's no cheap keyword equivalent for the richer
- * why/impact/assets/defensive-focus fields), so unlike the ranked list above
- * this genuinely can only draw from reports -- it stays a smaller, slower-
- * growing picture than the ranked feed, by nature of what it's built from.
+ * For each of the 10 sectors, the worst (highest-relevance, tie-broken by
+ * highest-risk) hit seen across the full recent news pool -- keyword-matched
+ * against each article's title and scored from its own tagged severity, the
+ * same cheap signal already used for "Industries Targeted" on Overview
+ * (server/newsCorrelation.js#matchIndustries), not gated on AI Summarization
+ * coverage. When a report DOES exist for a matching article and rates that
+ * sector at least as relevant, its richer why/impact/assets/defensive-focus
+ * assessment is used instead of the keyword-derived stand-in -- enrichment,
+ * same "bonus signal, never a requirement" pattern as the ranked feed above.
  */
-export function computeAggregateIndustryHeatmap(reports) {
+export function computeAggregateIndustryHeatmap(taggedNewsItems, reports) {
   const byIndustry = new Map(
-    INDUSTRY_CATALOG.map((industry) => [industry, { industry, relevance: "Not Applicable", confidence: "Low", riskScore: 0, priority: "Low", whyAffected: "Not Applicable", potentialImpact: [], likelyTargetAssets: [], defensiveFocus: [], activeThreatCount: 0, topReport: null }]),
+    INDUSTRY_CATALOG.map((industry) => [industry, { industry, relevance: "Not Applicable", confidence: "Low", riskScore: 0, priority: "Low", whyAffected: "Not Applicable", potentialImpact: [], likelyTargetAssets: [], defensiveFocus: [], activeThreatCount: 0, topArticle: null }]),
   );
+  const reportsByLink = new Map(reports.map((r) => [r.id, r]));
+  const now = Date.now();
 
-  for (const report of reports) {
-    for (const row of report.industryRelevance ?? []) {
-      const agg = byIndustry.get(row.industry);
+  for (const item of taggedNewsItems) {
+    if (now - new Date(item.publishedDate).getTime() > POOL_WINDOW_MS) continue;
+    const matchedIndustries = matchIndustries10(item.title);
+    if (matchedIndustries.length === 0) continue;
+
+    const keywordRelevance = SEVERITY_TO_RELEVANCE[item.severity] ?? "Low";
+    const keywordRiskScore = Math.round((SEVERITY_BASE_SCORE[item.severity] ?? SEVERITY_BASE_SCORE.low) / 10);
+    const report = reportsByLink.get(item.link);
+
+    for (const industry of matchedIndustries) {
+      const agg = byIndustry.get(industry);
       if (!agg) continue;
-      if (row.relevance === "Critical" || row.relevance === "High") agg.activeThreatCount += 1;
-      const isWorse = RELEVANCE_RANK[row.relevance] > RELEVANCE_RANK[agg.relevance] || (RELEVANCE_RANK[row.relevance] === RELEVANCE_RANK[agg.relevance] && row.riskScore > agg.riskScore);
-      if (isWorse) {
-        agg.relevance = row.relevance;
-        agg.confidence = row.confidence;
-        agg.riskScore = row.riskScore;
-        agg.priority = row.priority;
-        agg.whyAffected = row.whyAffected;
-        agg.potentialImpact = row.potentialImpact;
-        agg.likelyTargetAssets = row.likelyTargetAssets;
-        agg.defensiveFocus = row.defensiveFocus;
-        agg.topReport = { id: report.id, title: report.articleTitle };
+
+      const reportRow = report?.industryRelevance?.find((r) => r.industry === industry);
+      const useReportRow = reportRow && RELEVANCE_RANK[reportRow.relevance] >= RELEVANCE_RANK[keywordRelevance];
+      const candidateRelevance = useReportRow ? reportRow.relevance : keywordRelevance;
+      const candidateRiskScore = useReportRow ? reportRow.riskScore : keywordRiskScore;
+
+      if (candidateRelevance === "Critical" || candidateRelevance === "High") agg.activeThreatCount += 1;
+
+      const isWorse = RELEVANCE_RANK[candidateRelevance] > RELEVANCE_RANK[agg.relevance] || (RELEVANCE_RANK[candidateRelevance] === RELEVANCE_RANK[agg.relevance] && candidateRiskScore > agg.riskScore);
+      if (!isWorse) continue;
+
+      if (useReportRow) {
+        agg.relevance = reportRow.relevance;
+        agg.confidence = reportRow.confidence;
+        agg.riskScore = reportRow.riskScore;
+        agg.priority = reportRow.priority;
+        agg.whyAffected = reportRow.whyAffected;
+        agg.potentialImpact = reportRow.potentialImpact;
+        agg.likelyTargetAssets = reportRow.likelyTargetAssets;
+        agg.defensiveFocus = reportRow.defensiveFocus;
+      } else {
+        agg.relevance = keywordRelevance;
+        agg.confidence = "Low"; // keyword-derived, not an AI assessment
+        agg.riskScore = keywordRiskScore;
+        agg.priority = RELEVANCE_TO_PRIORITY[keywordRelevance];
+        agg.whyAffected = `Derived from recent news coverage matching this sector's keywords (not yet AI-assessed) -- e.g. "${item.title}"`;
+        agg.potentialImpact = [];
+        agg.likelyTargetAssets = [];
+        agg.defensiveFocus = [];
       }
+      agg.topArticle = { id: item.link, title: item.title };
     }
   }
 
