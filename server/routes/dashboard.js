@@ -48,6 +48,9 @@ import { buildRemediationQueue } from "../remediationQueue.js";
 import { buildHuntingQueryLibrary } from "../huntingLibrary.js";
 import { buildDetectionBacklog } from "../detectionBacklog.js";
 import { buildEmergingThreatsRanking, computeAggregateIndustryHeatmap } from "../emergingThreatsRanking.js";
+import { generateIndustryBriefing, InsufficientCoverageError } from "../industryBriefing.js";
+import { GroqUnavailableError } from "../groqClient.js";
+import { INDUSTRY_CATALOG } from "../aiThreatSummary.js";
 import {
   getAllStatuses as getAllDetectionBacklogStatuses,
   setStatus as setDetectionBacklogStatus,
@@ -424,6 +427,30 @@ router.get("/dashboard/emerging-threats-ranking", (_req, res) => {
     entries: buildEmergingThreatsRanking(taggedNews, reports, kevIds),
     industryHeatmap: computeAggregateIndustryHeatmap(taggedNews, reports),
   });
+});
+
+// On-demand deep-dive briefing for one industry, triggered from an Industry
+// Heatmap row -- see server/industryBriefing.js for the grounding/citation
+// discipline. Generated live per request (not scheduled/cached), since most
+// of the 10 sectors won't be viewed in a given session.
+router.get("/dashboard/industry-briefing", async (req, res) => {
+  const industry = String(req.query.industry ?? "");
+  if (!INDUSTRY_CATALOG.includes(industry)) {
+    return res.status(400).json({ error: `industry must be one of: ${INDUSTRY_CATALOG.join(", ")}` });
+  }
+
+  const reports = getAllAiThreatSummaries();
+  const kevIds = new Set((cache.getEntry("cisa-kev").data?.entries ?? []).map((e) => e.cveId));
+  const taggedNews = getTaggedNewsCached();
+
+  try {
+    const briefing = await generateIndustryBriefing(industry, { taggedNewsItems: taggedNews, reports, kevIds });
+    res.json(briefing);
+  } catch (error) {
+    if (error instanceof InsufficientCoverageError) return res.status(422).json({ error: error.message });
+    if (error instanceof GroqUnavailableError) return res.status(503).json({ error: error.message });
+    res.status(502).json({ error: error.message });
+  }
 });
 
 // --- Hunting Query Library (rolled-up threatHuntingOpportunities across every

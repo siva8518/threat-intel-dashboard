@@ -156,8 +156,8 @@ const INDUSTRY_KEYWORD_PATTERNS = Object.entries(industryKeywords10)
     keywords.map((k) => new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")),
   ]);
 
-/** Case-insensitive, leading-word-boundary match against a title -- see server/data/industry-map-10.json. Same "curated list, not NLP" convention as matchIndustries() in server/newsCorrelation.js, just scoped to this feature's own 10-sector taxonomy. */
-function matchIndustries10(title) {
+/** Case-insensitive, leading-word-boundary match against a title -- see server/data/industry-map-10.json. Same "curated list, not NLP" convention as matchIndustries() in server/newsCorrelation.js, just scoped to this feature's own 10-sector taxonomy. Exported for reuse by server/industryBriefing.js so it doesn't duplicate the keyword-map loading/matching logic. */
+export function matchIndustries10(title) {
   const hits = [];
   for (const [industry, patterns] of INDUSTRY_KEYWORD_PATTERNS) {
     if (patterns.some((re) => re.test(title))) hits.push(industry);

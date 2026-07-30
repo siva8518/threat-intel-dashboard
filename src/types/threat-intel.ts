@@ -1187,3 +1187,67 @@ export interface EmergingThreatsRanking {
   entries: EmergingThreatEntry[];
   industryHeatmap: AggregateIndustryHeatmapRow[];
 }
+
+/** An article reference within an IndustryBriefing -- always a real article from the grounding pool, never model-authored (see server/industryBriefing.js). */
+export interface IndustryBriefingArticleRef {
+  id: string;
+  title: string;
+  source: string;
+  publishedDate: string;
+}
+
+export interface IndustryBriefingThreat {
+  name: string;
+  whyEmerging: string;
+  activityLevel: "Critical" | "High" | "Medium";
+  /** Earliest publishedDate among this threat's own sourceArticles -- computed from real data, not model-authored. */
+  firstObserved: string | null;
+  /** True only if at least one of this threat's sourceArticles is cross-referenced against the live KEV catalog -- never a model claim. */
+  activeExploitation: boolean;
+  trend: "Increasing" | "Stable" | "Declining";
+  sourceArticles: IndustryBriefingArticleRef[];
+}
+
+export interface IndustryBriefingActor {
+  actor: string;
+  motivation: string;
+  typicalTargets: string;
+  recentCampaigns: string;
+  ttps: string;
+  sourceArticles: IndustryBriefingArticleRef[];
+}
+
+export interface IndustryBriefingTechnique {
+  technique: string;
+  whyIncreasing: string;
+  sourceArticles: IndustryBriefingArticleRef[];
+}
+
+export interface IndustryBriefing {
+  industry: IndustryName;
+  generatedAt: string;
+  /** How many real articles fed this briefing -- see server/industryBriefing.js#poolForIndustry. */
+  articleCount: number;
+  dateRangeDays: number;
+  executiveSummary: string;
+  topEmergingThreats: IndustryBriefingThreat[];
+  activeThreatActors: IndustryBriefingActor[];
+  emergingAttackTechniques: IndustryBriefingTechnique[];
+  commonTargets: string[];
+  vulnerabilityTrends: {
+    /** Real CVE IDs cross-referenced against the live KEV catalog -- never model-authored. */
+    kevEntries: { cveId: string; articleTitle: string; articleId: string }[];
+    totalUniqueCves: number;
+    commentary: string;
+  };
+  industryRiskAssessment: {
+    currentThreatLevel: "Critical" | "High" | "Medium" | "Low";
+    mostLikelyAttackScenarios: string[];
+    highestBusinessRisks: string[];
+    technologiesRequiringAttention: string[];
+  };
+  recommendedDefensivePriorities: string[];
+  threatIntelOutlook: string;
+  /** Built directly from the real grounding article pool, never model-authored -- "citing CISA" only happens when the underlying article really is from a CISA feed. */
+  references: IndustryBriefingArticleRef[];
+}

@@ -22,6 +22,8 @@ import type {
   GithubRepoDetail,
   GithubRepoSummary,
   HuntingQueryItem,
+  IndustryBriefing,
+  IndustryName,
   IocRecord,
   IocSearchIndicatorType,
   IocSearchResult,
@@ -126,6 +128,10 @@ export async function fetchAiThreatSummaries(): Promise<{ reports: AiThreatSumma
 
 export async function fetchEmergingThreatsRanking(): Promise<EmergingThreatsRanking> {
   return fetchJson("/api/dashboard/emerging-threats-ranking", { source: "Dashboard API" });
+}
+
+export async function fetchIndustryBriefing(industry: IndustryName): Promise<IndustryBriefing> {
+  return fetchJson(`/api/dashboard/industry-briefing?industry=${encodeURIComponent(industry)}`, { source: "Dashboard API" });
 }
 
 export async function fetchWatchlist(): Promise<{ keywords: WatchlistKeyword[] }> {

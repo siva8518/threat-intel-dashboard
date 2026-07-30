@@ -1,5 +1,5 @@
 import { Fragment, useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { AiThreatSummaryIndustryRelevance, IndustryName, IndustryRelevanceLevel } from "@/types/threat-intel";
@@ -60,7 +60,7 @@ function timeAgo(iso: string) {
  * typical article), so this is deliberately compact by default with detail
  * behind a click, not ten walls of text.
  */
-export function IndustryHeatmap({ rows }: { rows: IndustryHeatmapRow[] }) {
+export function IndustryHeatmap({ rows, onGenerateBriefing }: { rows: IndustryHeatmapRow[]; onGenerateBriefing?: (industry: IndustryName) => void }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const sorted = [...rows].sort((a, b) => RELEVANCE_RANK[b.relevance] - RELEVANCE_RANK[a.relevance] || b.riskScore - a.riskScore);
 
@@ -168,6 +168,19 @@ export function IndustryHeatmap({ rows }: { rows: IndustryHeatmapRow[] }) {
                             ))}
                           </ul>
                         </div>
+                      )}
+                      {onGenerateBriefing && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onGenerateBriefing(row.industry);
+                          }}
+                          className="mt-3 flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                          Generate Full Briefing
+                        </button>
                       )}
                     </td>
                   </tr>

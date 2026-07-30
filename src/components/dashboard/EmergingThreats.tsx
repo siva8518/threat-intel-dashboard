@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ExternalLink, Flame, ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -5,8 +6,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { SeverityBadge } from "./SeverityBadge";
 import { IndustryHeatmap, INDUSTRY_EMOJI } from "./IndustryHeatmap";
+import { IndustryBriefingDrawer } from "./IndustryBriefingDrawer";
 import { useEmergingThreatsRanking } from "@/hooks/useEmergingThreatsRanking";
-import type { EmergingThreatEntry, IndustryRelevanceLevel } from "@/types/threat-intel";
+import { useIndustryBriefing } from "@/hooks/useIndustryBriefing";
+import type { EmergingThreatEntry, IndustryName, IndustryRelevanceLevel } from "@/types/threat-intel";
 
 const PRIORITY_VARIANT: Record<string, "critical" | "high" | "medium" | "low"> = {
   Critical: "critical",
@@ -106,6 +109,13 @@ function ThreatRow({ entry }: { entry: EmergingThreatEntry }) {
  */
 export function EmergingThreats() {
   const { data, isLoading, isError, error } = useEmergingThreatsRanking();
+  const [briefingIndustry, setBriefingIndustry] = useState<IndustryName | null>(null);
+  const briefing = useIndustryBriefing();
+
+  function openBriefing(industry: IndustryName) {
+    setBriefingIndustry(industry);
+    briefing.mutate(industry);
+  }
 
   return (
     <div className="space-y-4">
@@ -117,7 +127,7 @@ export function EmergingThreats() {
           </CardTitle>
           <p className="mt-1 text-xs text-muted">
             The worst relevance/risk seen for each sector across the last 30 days of news, keyword-matched from every source (not just AI Summarization reports) --
-            enriched with a full AI assessment where one exists. Click a row for the detail.
+            enriched with a full AI assessment where one exists. Click a row for the detail, then "Generate Full Briefing" for a deep-dive intelligence report on that sector.
           </p>
         </CardHeader>
         <CardContent>
@@ -131,10 +141,22 @@ export function EmergingThreats() {
                 ...row,
                 subtitle: row.activeThreatCount > 0 ? `(${row.activeThreatCount} active)` : undefined,
               }))}
+              onGenerateBriefing={openBriefing}
             />
           )}
         </CardContent>
       </Card>
+
+      <IndustryBriefingDrawer
+        industry={briefingIndustry}
+        data={briefing.data}
+        isPending={briefing.isPending}
+        error={briefing.error as Error | null}
+        onClose={() => {
+          setBriefingIndustry(null);
+          briefing.reset();
+        }}
+      />
 
       <Card>
         <CardHeader>
