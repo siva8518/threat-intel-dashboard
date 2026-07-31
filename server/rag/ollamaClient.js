@@ -15,30 +15,26 @@ export class OllamaUnavailableError extends Error {
 // fetch() here previously had no timeout at all -- confirmed live that a
 // model wedged in Ollama's own "Stopping..." unload deadlock (recurs on
 // this machine every so often, a bug in Ollama itself, not this app) hung
-// an in-flight request forever with no error and no response. Both
-// server/aiThreatSummaryJob.js and server/combinedExtractionJob.js are
-// self-rescheduling only after their current cycle settles (to guarantee
-// exactly one cycle in flight at a time -- see their own loop() comments),
-// so an unbounded hang here didn't just fail one request, it permanently
-// froze the entire job loop with zero log output until someone noticed
-// hours later and restarted Ollama by hand. Aborting after this long
-// converts that silent freeze back into the OllamaUnavailableError path
-// every caller (both jobs, the chat route) already handles: dedup-logged
-// once, cycle retried next interval.
+// an in-flight request forever with no error and no response. Aborting
+// after this long converts that silent freeze back into the
+// OllamaUnavailableError path every caller already handles: dedup-logged
+// once, retried next interval.
 const REQUEST_TIMEOUT_MS = 120_000;
 
 // Serializes every call through this file -- confirmed via ollama/ollama
 // issue #14364 that Ollama can wedge into the same permanent "Stopping..."
 // deadlock this file otherwise works around when two independent processes
-// send it concurrent chat requests at once. This app has exactly that shape:
-// aiThreatSummaryJob.js and combinedExtractionJob.js both run on a 2min
-// cycle only ~10s apart, each generation call commonly takes 20-40s+, and
-// the chat route can fire at any time on top of that -- their requests were
-// very plausibly overlapping in-flight on most cycles. A simple
+// send it concurrent chat requests at once. Originally added because
+// server/aiThreatSummaryJob.js and server/combinedExtractionJob.js both ran
+// their own 2min cycles only ~10s apart on top of local Ollama, each
+// generation call commonly taking 20-40s+, so their requests were very
+// plausibly overlapping in-flight most cycles -- both have since moved to
+// Groq's hosted API (see server/groqClient.js), leaving the RAG chat route
+// as this file's only real caller. Kept anyway as cheap insurance: a simple
 // promise-chain queue means this whole app never has more than one Ollama
-// request in flight at a time, sidestepping the trigger entirely rather
-// than reacting to it after the fact. queueTail always resolves (even when
-// the queued call itself rejects) so one failed call never blocks everyone
+// request in flight at a time, regardless of what future feature might get
+// added back onto local Ollama. queueTail always resolves (even when the
+// queued call itself rejects) so one failed call never blocks everyone
 // waiting behind it.
 let queueTail = Promise.resolve();
 

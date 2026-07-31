@@ -1,13 +1,13 @@
 // Thin client for Groq's free-tier hosted inference (OpenAI-compatible chat
-// completions API) -- used only by server/aiThreatSummary.js, swapped in for
-// the local Ollama call that job used to make. Ollama's own recurring
-// "Stopping..." deadlock (see server/rag/ollamaClient.js) hit this
-// specific job hardest, since it's this app's single heaviest LLM call
-// (25+ section structured report, largest prompt+completion of anything
-// here) -- moving just this one call off the local model onto a free
-// hosted API sidesteps that whole class of problem for it, while
-// server/combinedExtraction.js and the RAG chatbot stay on local Ollama
-// (untouched, out of scope for this change).
+// completions API). Originally added for server/aiThreatSummary.js, swapped
+// in for the local Ollama call that job used to make -- Ollama's own
+// recurring "Stopping..." deadlock (see server/rag/ollamaClient.js) hit that
+// job hardest, since it's this app's single heaviest LLM call (25+ section
+// structured report, largest prompt+completion of anything here). Also used
+// by server/combinedExtraction.js (the six-entity-kind extraction pipeline)
+// so it works in any environment with a GROQ_API_KEY and no local model
+// installed. The RAG chatbot (server/rag/) is the one remaining Ollama-only
+// consumer -- Groq has no embedding endpoint, so it can't serve that half.
 import { ApiError, fetchJson } from "./lib/http.js";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";

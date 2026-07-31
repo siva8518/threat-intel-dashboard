@@ -1,12 +1,12 @@
 // Drains the news pool through the combined per-article extraction call (see
-// server/combinedExtraction.js) and upserts confirmed entities into all six
-// canonical entity stores (malware/actor/campaign/technique/dark-web/tool
-// intelligence). Replaces the separate jobs that used to each make their own
-// sequential local-LLM call per article (malwareExtractionJob.js,
-// threatActorExtractionJob.js, campaignExtractionJob.js,
-// attackTechniqueExtractionJob.js) -- one combined call per article cuts the
-// per-article LLM round-trip count, the actual throughput bottleneck (each
-// call blocks on a local model, not a fast network request).
+// server/combinedExtraction.js, which runs on Groq's free hosted API) and
+// upserts confirmed entities into all six canonical entity stores (malware/
+// actor/campaign/technique/dark-web/tool intelligence). Replaces the
+// separate jobs that used to each make their own sequential LLM call per
+// article (malwareExtractionJob.js, threatActorExtractionJob.js,
+// campaignExtractionJob.js, attackTechniqueExtractionJob.js) -- one combined
+// call per article cuts the per-article LLM round-trip count, the actual
+// throughput bottleneck.
 //
 // An article only counts as "processed" once all six stores agree it is --
 // see isUnprocessed/markProcessedEverywhere below -- so articles the old,
@@ -30,7 +30,7 @@ import * as campaignIntel from "./campaignIntelligence.js";
 import * as techniqueIntel from "./attackTechniqueIntelligence.js";
 import * as darkWebIntel from "./darkWebIntelligence.js";
 import * as toolIntel from "./toolIntelligence.js";
-import { OllamaUnavailableError } from "./rag/ollamaClient.js";
+import { GroqUnavailableError } from "./groqClient.js";
 import { log } from "./lib/log.js";
 
 // Was 15 when this job (and its four now-merged predecessors) were designed
@@ -40,9 +40,9 @@ import { log } from "./lib/log.js";
 // findings is added, since every store must agree an article is processed)
 // would take upwards of 10 hours -- confirmed live, a new store sat at 0
 // results for the first several cycles purely from queue depth, not a bug.
-// Raised to 40; each combined call is a local, sequential Ollama call, so
-// this is still bounded by wall-clock model throughput, not just article
-// count.
+// Raised to 40; each combined call is a hosted Groq request, still
+// sequential (one in flight at a time) to stay comfortably under Groq's
+// free-tier rate limit rather than to work around a slow local model.
 const MAX_ARTICLES_PER_CYCLE = 40;
 const CYCLE_INTERVAL_MS = 2 * 60 * 1000;
 
@@ -223,7 +223,7 @@ async function runCycle() {
         darkweb.length - validDarkWeb.length +
         tools.length - validTools.length;
     } catch (error) {
-      if (error instanceof OllamaUnavailableError) throw error; // stop the whole cycle -- Ollama being down affects every remaining article the same way
+      if (error instanceof GroqUnavailableError) throw error; // stop the whole cycle -- Groq being down/rate-limited affects every remaining article the same way
       log.error("combined-extraction", `failed to process "${article.title.slice(0, 60)}...": ${error.message}`);
     } finally {
       markProcessedEverywhere(article.link);
@@ -259,9 +259,9 @@ async function safeCycle() {
     await runCycle();
     hasWarnedUnavailable = false;
   } catch (error) {
-    if (error instanceof OllamaUnavailableError) {
+    if (error instanceof GroqUnavailableError) {
       if (!hasWarnedUnavailable) {
-        log.warn("combined-extraction", `${error.message} -- combined extraction will report itself unavailable until Ollama is running.`);
+        log.warn("combined-extraction", `${error.message} -- combined extraction will report itself unavailable until GROQ_API_KEY is set / Groq is reachable again.`);
         hasWarnedUnavailable = true;
       }
     } else {
@@ -271,10 +271,10 @@ async function safeCycle() {
 }
 
 /**
- * Self-rescheduling instead of setInterval: each local-model call is
- * ~10-20s, and a 40-article cycle can take well over CYCLE_INTERVAL_MS on
- * CPU-only inference -- confirmed live, a single cycle took ~13 minutes
- * against a 2-minute interval. setInterval doesn't wait for the previous
+ * Self-rescheduling instead of setInterval: a 40-article cycle can still take
+ * a while even against a fast hosted API (sequential, one request in flight
+ * at a time, plus each article also runs its own validation/reconcile work).
+ * setInterval doesn't wait for the previous
  * async callback, so it would have queued several more overlapping cycles
  * before the first one finished, all re-selecting the same still-unprocessed
  * backlog before any of them could mark it done. Scheduling the next run

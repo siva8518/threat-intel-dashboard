@@ -1,26 +1,31 @@
 // Single combined-prompt entity extraction from one article's headline +
-// summary -- replaces six separate per-article Ollama calls
+// summary -- replaces six separate per-article LLM calls
 // (malwareExtraction.js#extractMalwareNames, threatActorExtraction.js#extractActorMentions,
 // campaignExtraction.js#extractCampaignMentions, attackTechniqueExtraction.js#extractTechniqueMentions,
 // darkWebExtraction.js's finding candidates, toolExtraction.js's tool-name
-// candidates) with one call asking for all six entity kinds at once. Local
-// models handle one well-specified multi-part extraction about as reliably
-// as six separate single-part ones, and this cuts LLM calls (the actual
-// per-article bottleneck, since each call is a blocking sequential
-// round-trip to a local model) 6x. Each extraction module's own
-// validateCandidates/resolveTechniques still runs unchanged afterward --
-// only the "ask the model" step is merged.
+// candidates) with one call asking for all six entity kinds at once. One
+// well-specified multi-part extraction is about as reliable as six separate
+// single-part ones, and this cuts LLM calls (the actual per-article
+// bottleneck) 6x. Each extraction module's own validateCandidates/
+// resolveTechniques still runs unchanged afterward -- only the "ask the
+// model" step is merged.
 //
-// The DARKWEB category is NOT dark-web-forum scraping -- every article fed
-// into this prompt already comes from an OSINT source in
-// server/connectors/newsFeeds.js's FEEDS list (vendor/researcher blogs,
-// journalism, government advisories). It only asks the model to notice when
-// one of those already-public articles is itself reporting on something
-// seen on an underground forum/marketplace/Telegram channel -- exactly the
-// "researcher tweets/blogs about a dark-web posting" pattern, never a
-// request to visit or read a dark-web site.
-import { ollamaJson } from "./rag/ollamaClient.js";
-import { OLLAMA_CHAT_MODEL } from "./rag/config.js";
+// Runs on Groq's free hosted API (same one server/aiThreatSummary.js already
+// uses), not local Ollama -- deliberately swapped so this pipeline (and the
+// five Intelligence tabs it feeds: Malware/Actor/Campaign/Dark Web/Tools)
+// works in any environment with a GROQ_API_KEY, including a hosted demo
+// deploy with no local model installed. The RAG chatbot (server/rag/) is a
+// separate consumer and stays on local Ollama -- Groq has no embedding
+// endpoint, so it can't serve that half regardless.
+import { groqJson } from "./groqClient.js";
+
+// A smaller/faster model than AI Summarization's own GROQ_CHAT_MODEL default
+// (llama-3.3-70b-versatile) -- this prompt is a much lighter six-category
+// name/ID extraction, not a 25+ section report, and an 8B-class model
+// carries a materially higher free-tier rate limit, which matters more here
+// since this job runs continuously against dozens of articles per cycle
+// rather than once a day.
+const GROQ_EXTRACTION_MODEL = process.env.GROQ_EXTRACTION_MODEL || "llama-3.1-8b-instant";
 
 const SYSTEM_PROMPT =
   "You are a threat intelligence analyst. You will be given one security news article's headline and, if available, its summary. " +
@@ -63,19 +68,19 @@ function parseJsonObject(text) {
 
 /**
  * Extracts all six entity-kind candidates from one article's headline +
- * summary via a single local-model call. Returns raw candidates, not yet
+ * summary via a single hosted-model call. Returns raw candidates, not yet
  * validated -- each kind is still run through its own module's
  * validateCandidates/resolveTechniques exactly as before the merge.
  */
 export async function extractAllEntities({ title, summary }) {
   const userContent = summary ? `Headline: ${title}\nSummary: ${summary}` : `Headline: ${title}`;
-  const response = await ollamaJson("/api/chat", {
-    model: OLLAMA_CHAT_MODEL,
+  const response = await groqJson({
+    model: GROQ_EXTRACTION_MODEL,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userContent },
     ],
-    options: { temperature: 0 },
+    temperature: 0,
   });
   return parseJsonObject(response.message?.content ?? "");
 }

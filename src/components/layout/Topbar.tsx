@@ -21,7 +21,7 @@ export function Topbar({ onOpenPalette }: TopbarProps) {
         </div>
         <div>
           <h1 className="text-base font-semibold leading-tight tracking-tight">
-            <span className="text-gradient">Threat Intelligence</span>{" "}
+            <span className="text-gradient">Cyber Intelligence</span>{" "}
             <span className="text-foreground">Platform</span>
           </h1>
           <div className="flex items-center gap-1.5 text-xs text-muted">
