@@ -45,6 +45,8 @@ const SEVERITY_RANK = { critical: 3, high: 2, medium: 1, low: 0 };
 // tactic names for display. Order here is kill-chain order, used as the
 // tie-break when tacticsSummary ranks by observed count.
 const TACTIC_DISPLAY = new Map([
+  ["reconnaissance", "Reconnaissance"],
+  ["resource development", "Resource Development"],
   ["initial access", "Initial Access"],
   ["execution", "Execution"],
   ["persistence", "Persistence"],
@@ -102,6 +104,11 @@ export function poolForIndustry(industry, taggedNewsItems, reports, kevIds) {
     matched.push({
       id: item.link,
       title: item.title,
+      // Not sent to the model (buildGroundingTable stays title-only, to keep
+      // the prompt small) -- kept only for selectCandidateTechniques below,
+      // whose keyword scoring is otherwise blind to anything not literally
+      // in a headline. See its own comment for why that mattered live.
+      summary: item.summary ?? "",
       source: item.source,
       publishedDate: item.publishedDate,
       severity: report?.severity?.toLowerCase() ?? item.severity,
@@ -120,12 +127,22 @@ export function poolForIndustry(industry, taggedNewsItems, reports, kevIds) {
 
 // Keyword-overlap scoring against this app's own synced MITRE ATT&CK catalog
 // (server/connectors/attack.js), same philosophy as aiThreatSummary.js's
-// selectCandidateTechniques -- scored against every article's title in the
-// pool combined (an industry briefing spans many articles, not one), so the
-// model gets a short, plausible, real-ID candidate list instead of free-
-// associating from ~600 techniques' worth of training memory.
+// selectCandidateTechniques -- scored against every article's title+summary
+// in the pool combined (an industry briefing spans many articles, not one),
+// so the model gets a short, plausible, real-ID candidate list instead of
+// free-associating from ~700 techniques' worth of training memory.
+// Title-only was confirmed live to under-match: technique names (e.g.
+// "Phishing", "Process Injection") show up far more in a source's own
+// summary/dek than in a punchy headline, and aiThreatSummary.js's own
+// per-article version already scores title+summary -- this brings the
+// multi-article version in line with that, not a new scope.
 function selectCandidateTechniques(pool, techniques) {
-  const words = new Set(pool.map((a) => a.title.toLowerCase()).join(" ").match(/[a-z0-9]{4,}/g) ?? []);
+  const words = new Set(
+    pool
+      .map((a) => `${a.title} ${a.summary}`.toLowerCase())
+      .join(" ")
+      .match(/[a-z0-9]{4,}/g) ?? [],
+  );
   if (words.size === 0 || !techniques.length) return [];
   const scored = [];
   for (const t of techniques) {
