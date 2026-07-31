@@ -77,8 +77,18 @@ export function poolForIndustry(industry, taggedNewsItems, reports, kevIds) {
   const reportsByLink = new Map(reports.map((r) => [r.id, r]));
   const now = Date.now();
   const matched = [];
+  // The underlying news pool can legitimately contain the same link twice
+  // (a source syncing the same advisory into more than one feed category --
+  // confirmed live via a React key-collision warning on a duplicated CISA
+  // ICS advisory) -- same dedupe-by-link fix already applied to
+  // buildEmergingThreatsRanking() in emergingThreatsRanking.js, needed here
+  // too since `id` (the link) is this pool's identity for citations/keys.
+  const seenLinks = new Set();
 
   for (const item of taggedNewsItems) {
+    if (seenLinks.has(item.link)) continue;
+    seenLinks.add(item.link);
+
     const age = now - new Date(item.publishedDate).getTime();
     if (age > POOL_WINDOW_MS) continue;
 
