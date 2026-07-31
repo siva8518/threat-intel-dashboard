@@ -155,11 +155,19 @@ export interface AttackTechnique {
   observedCount?: number;
 }
 
+/** A named MITRE ATT&CK group recorded (real "uses" relationship) as using a given technique/tactic -- see server/correlate.js#actorsByTechniqueId. */
+export interface AttackTacticHeatmapActor {
+  name: string;
+  url: string | null;
+}
+
 export interface AttackTacticHeatmapTechnique {
   id: string;
   name: string;
   url: string;
   count: number;
+  actors: AttackTacticHeatmapActor[]; // capped -- see actorCount for the true total
+  actorCount: number;
 }
 
 export interface AttackTacticHeatmapCell {
@@ -167,6 +175,7 @@ export interface AttackTacticHeatmapCell {
   total: number;
   intensity: number; // 0-1, relative to the hottest tactic
   techniques: AttackTacticHeatmapTechnique[];
+  actors: AttackTacticHeatmapActor[]; // deduped across every technique observed under this tactic, capped
 }
 
 export interface DetectionRuleRef {

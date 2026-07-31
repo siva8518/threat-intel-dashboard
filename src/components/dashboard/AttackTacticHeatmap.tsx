@@ -1,11 +1,27 @@
 import { useState } from "react";
-import { ExternalLink, Flame } from "lucide-react";
+import { ExternalLink, Flame, UserSearch } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "./ErrorState";
 import { useAttackTacticHeatmap } from "@/hooks/useAttackTacticHeatmap";
-import type { AttackTacticHeatmapCell } from "@/types/threat-intel";
+import type { AttackTacticHeatmapActor, AttackTacticHeatmapCell } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
+
+function ActorBadge({ actor }: { actor: AttackTacticHeatmapActor }) {
+  return actor.url ? (
+    <a href={actor.url} target="_blank" rel="noreferrer">
+      <Badge variant="muted" className="gap-1 font-mono text-[10px] hover:text-primary">
+        {actor.name}
+        <ExternalLink className="h-2.5 w-2.5" />
+      </Badge>
+    </a>
+  ) : (
+    <Badge variant="muted" className="font-mono text-[10px]">
+      {actor.name}
+    </Badge>
+  );
+}
 
 // Heat intensity uses the same "critical" red the rest of the app already
 // uses for severity -- a cell's background opacity scales with its
@@ -39,7 +55,10 @@ function TacticCell({ cell, selected, onClick }: { cell: AttackTacticHeatmapCell
  * A per-tactic (kill-chain stage) view of the same technique-frequency data
  * behind the "ATT&CK Techniques Observed" table below -- see
  * server/correlate.js#computeAttackTacticHeatmap for why this needs its own
- * query instead of reusing that table's (top-15-capped) data.
+ * query instead of reusing that table's (top-15-capped) data. Selecting a
+ * tactic also surfaces which named threat actors are recorded as using each
+ * technique (and, rolled up, the tactic as a whole) -- MITRE ATT&CK's own
+ * group<->technique "uses" relationships, not a guess.
  */
 export function AttackTacticHeatmap() {
   const { data, isLoading, isError, error } = useAttackTacticHeatmap();
@@ -55,7 +74,7 @@ export function AttackTacticHeatmap() {
           MITRE ATT&amp;CK Tactic Heat Map{" "}
           <span
             className="text-muted"
-            title="Derived from this platform's synced MITRE ATT&CK Software catalog (real malware/tool -> technique relationships, 800+ entries) plus techniques automatically extracted from news article text -- not a live telemetry feed"
+            title="Derived from this platform's synced MITRE ATT&CK Software catalog (real malware/tool -> technique relationships, 800+ entries) plus techniques automatically extracted from news article text -- not a live telemetry feed. Actor attribution per technique/tactic comes from MITRE ATT&CK's own group<->technique 'uses' relationships (server/threatActorIntelligence.js), so it only ever shows ATT&CK-confirmed actors, never a news-extraction guess."
           >
             (best-effort, see tooltip)
           </span>
@@ -88,17 +107,44 @@ export function AttackTacticHeatmap() {
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted capitalize">
                   Top techniques &middot; {selected.tactic}
                 </p>
-                <ul className="space-y-1.5">
+                <ul className="space-y-2.5">
                   {selected.techniques.map((t) => (
-                    <li key={t.id} className="flex items-center justify-between gap-2 text-xs">
-                      <a href={t.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-primary hover:underline">
-                        <span className="font-mono">{t.id}</span> {t.name}
-                        <ExternalLink className="h-3 w-3 shrink-0" />
-                      </a>
-                      <span className="shrink-0 tabular-nums text-muted">{t.count}</span>
+                    <li key={t.id} className="text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <a href={t.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-primary hover:underline">
+                          <span className="font-mono">{t.id}</span> {t.name}
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                        </a>
+                        <span className="shrink-0 tabular-nums text-muted">{t.count}</span>
+                      </div>
+                      {t.actors.length > 0 && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1 pl-1">
+                          <UserSearch className="h-3 w-3 shrink-0 text-muted" />
+                          {t.actors.map((actor) => (
+                            <ActorBadge key={actor.name} actor={actor} />
+                          ))}
+                          {t.actorCount > t.actors.length && (
+                            <span className="text-[10px] text-muted">+{t.actorCount - t.actors.length} more</span>
+                          )}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>
+
+                {selected.actors.length > 0 && (
+                  <div className="mt-3 border-t border-white/[0.06] pt-2.5">
+                    <p className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                      <UserSearch className="h-3 w-3" />
+                      Threat actors observed using {selected.tactic}
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {selected.actors.map((actor) => (
+                        <ActorBadge key={actor.name} actor={actor} />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </>

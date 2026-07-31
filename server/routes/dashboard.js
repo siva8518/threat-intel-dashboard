@@ -553,7 +553,15 @@ router.get("/dashboard/attack-techniques", (req, res) => {
 // --- ATT&CK Tactic Heat Map (see server/correlate.js#computeAttackTacticHeatmap) ---
 router.get("/dashboard/attack-tactic-heatmap", (_req, res) => {
   const attackData = cache.getEntry("attack").data;
-  res.json(computeAttackTacticHeatmap(threatFeedIocs(), attackData?.techniques ?? [], getNewsTechniqueCounts(), attackData?.software ?? []));
+  res.json(
+    computeAttackTacticHeatmap(
+      threatFeedIocs(),
+      attackData?.techniques ?? [],
+      getNewsTechniqueCounts(),
+      attackData?.software ?? [],
+      getThreatActorIntelligenceEntities(),
+    ),
+  );
 });
 
 // --- Ransomware campaigns + threat actor activity ------------------------

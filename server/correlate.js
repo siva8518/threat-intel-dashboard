@@ -207,6 +207,31 @@ const ATTACK_TACTICS_ORDER = [
   "lateral movement", "collection", "command and control", "exfiltration", "impact",
 ];
 const TOP_TECHNIQUES_PER_TACTIC = 5;
+const MAX_ACTORS_PER_TECHNIQUE = 6;
+const MAX_ACTORS_PER_TACTIC = 10;
+
+/**
+ * Reverse-indexes server/threatActorIntelligence.js's own techniqueIds field
+ * into techniqueId -> [{name, url}]. That field is only ever populated once
+ * an actor entity is ATT&CK-confirmed (see that module's reconcile(), which
+ * merges in a matched ATT&CK group's real techniqueIds) -- so every actor
+ * this produces traces back to a real, official MITRE ATT&CK group<->
+ * technique "uses" relationship, never a news-extraction guess. This is the
+ * same store already seeded with one entity per ATT&CK group plus every
+ * actor name this app has extracted from live news coverage, just inverted
+ * from "actor -> techniques" to "technique -> actors".
+ */
+function actorsByTechniqueId(actorIndex) {
+  const map = new Map();
+  for (const actor of actorIndex) {
+    for (const techniqueId of actor.techniqueIds ?? []) {
+      const list = map.get(techniqueId) ?? [];
+      list.push({ name: actor.name, url: actor.attackUrl ?? null });
+      map.set(techniqueId, list);
+    }
+  }
+  return map;
+}
 
 /**
  * ATT&CK Tactic Heat Map: same underlying technique-frequency data as
@@ -216,8 +241,15 @@ const TOP_TECHNIQUES_PER_TACTIC = 5;
  * techniques -- a proper heat map needs every tactic represented, including
  * the "cold" ones with zero hits, not just whichever techniques happen to
  * rank highest overall.
+ *
+ * Each technique also carries which named threat actors are recorded as
+ * using it (capped, see actorsByTechniqueId above), and each tactic carries
+ * a deduped roll-up of actors across every technique observed under it --
+ * not just the top-5 techniques actually rendered -- so "which actor used
+ * this tactic" stays a strict superset of "which actor used this specific
+ * technique".
  */
-export function computeAttackTacticHeatmap(iocs, attackIndex, newsTechniqueCounts = new Map(), softwareIndex = []) {
+export function computeAttackTacticHeatmap(iocs, attackIndex, newsTechniqueCounts = new Map(), softwareIndex = [], actorIndex = []) {
   const techniqueCounts = new Map(); // techniqueId -> count
   for (const ioc of iocs) {
     for (const id of techniqueIdsForFamily(ioc.malwareFamily, softwareIndex)) {
@@ -228,18 +260,33 @@ export function computeAttackTacticHeatmap(iocs, attackIndex, newsTechniqueCount
     techniqueCounts.set(id, (techniqueCounts.get(id) ?? 0) + count);
   }
 
-  const byTactic = new Map(); // tactic -> [{id, name, url, count}]
+  const actorsByTechnique = actorsByTechniqueId(actorIndex);
+
+  const byTactic = new Map(); // tactic -> [{id, name, url, count, actors, actorCount}]
   for (const [id, count] of techniqueCounts) {
     const technique = resolveTechnique(id, attackIndex);
+    const actors = (actorsByTechnique.get(id) ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
     const list = byTactic.get(technique.tactic) ?? [];
-    list.push({ id: technique.id, name: technique.name, url: technique.url, count });
+    list.push({ id: technique.id, name: technique.name, url: technique.url, count, actors: actors.slice(0, MAX_ACTORS_PER_TECHNIQUE), actorCount: actors.length });
     byTactic.set(technique.tactic, list);
   }
 
   const tactics = ATTACK_TACTICS_ORDER.map((tactic) => {
     const techniques = (byTactic.get(tactic) ?? []).sort((a, b) => b.count - a.count);
     const total = techniques.reduce((sum, t) => sum + t.count, 0);
-    return { tactic, total, techniques: techniques.slice(0, TOP_TECHNIQUES_PER_TACTIC) };
+
+    const seenActors = new Set();
+    const tacticActors = [];
+    outer: for (const t of techniques) {
+      for (const actor of t.actors) {
+        if (seenActors.has(actor.name)) continue;
+        seenActors.add(actor.name);
+        tacticActors.push(actor);
+        if (tacticActors.length >= MAX_ACTORS_PER_TACTIC) break outer;
+      }
+    }
+
+    return { tactic, total, techniques: techniques.slice(0, TOP_TECHNIQUES_PER_TACTIC), actors: tacticActors };
   });
 
   const maxTotal = Math.max(1, ...tactics.map((t) => t.total));
