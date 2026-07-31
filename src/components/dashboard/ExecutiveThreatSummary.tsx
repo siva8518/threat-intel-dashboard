@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { animate } from "framer-motion";
 import { motion } from "framer-motion";
-import { AlertTriangle, Bug, Flame, Globe2, ShieldAlert, Skull, TrendingUp } from "lucide-react";
+import { AlertTriangle, Bug, Flame, Globe2, ShieldAlert, Skull, TrendingUp, Wrench } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "./ErrorState";
 import { TopSecurityEventsToday, type TodayEventKey } from "./TopSecurityEventsToday";
 import { useExecutiveSummary } from "@/hooks/useExecutiveSummary";
+import { useDetectionBacklog } from "@/hooks/useDetectionBacklog";
 import { useSelection } from "@/context/SelectionContext";
 import { fetchCveById } from "@/api/dashboardApi";
 import type { ThreatLevel } from "@/types/threat-intel";
@@ -123,6 +124,7 @@ interface ExecutiveThreatSummaryProps {
   onNavigateToCountry: (countryCode: string) => void;
   onNavigateToIndustry: (industry: string) => void;
   onNavigateTodayEvent: (key: TodayEventKey) => void;
+  onNavigateToDetectionGaps: () => void;
 }
 
 export function ExecutiveThreatSummary({
@@ -131,8 +133,10 @@ export function ExecutiveThreatSummary({
   onNavigateToCountry,
   onNavigateToIndustry,
   onNavigateTodayEvent,
+  onNavigateToDetectionGaps,
 }: ExecutiveThreatSummaryProps) {
   const { data, isLoading, isError, error } = useExecutiveSummary();
+  const { items: detectionBacklogItems } = useDetectionBacklog();
   const { selectMalware, selectCve } = useSelection();
   const [loadingCve, setLoadingCve] = useState(false);
 
@@ -290,6 +294,16 @@ export function ExecutiveThreatSummary({
                     </button>
                   ))}
                 </div>
+              </FactCard>
+
+              <FactCard
+                icon={<Wrench className="h-3.5 w-3.5" />}
+                label="Detection Gaps"
+                onClick={onNavigateToDetectionGaps}
+                title="Untriaged detection-engineering gaps -- rolled up live from AI Summarization reports, active Malware/Threat Actor Intelligence entities, and CISA KEV entries with no matching public YARA/Sigma rule -- click to open Detection Backlog"
+              >
+                {detectionBacklogItems.filter((i) => i.status === "open").length}{" "}
+                <span className="font-normal text-muted">open{detectionBacklogItems.length > 0 ? ` of ${detectionBacklogItems.length}` : ""}</span>
               </FactCard>
             </div>
           </div>

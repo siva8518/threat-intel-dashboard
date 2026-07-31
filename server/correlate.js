@@ -137,6 +137,36 @@ export function detectionRulesFor(name, ruleIndex) {
 }
 
 /**
+ * CVE-specific detection-rule lookup -- detectionRulesFor's generic filename-
+ * WORD matching doesn't work here, since server/connectors/detectionRules.js's
+ * own filename splitter tokenizes "CVE-2021-44228" into three separate short
+ * words ("cve", "2021", "44228"), none of which equals the squashed
+ * "cve202144228" a generic normalize-and-compare would produce. Checks each
+ * rule's own file PATH directly for the CVE ID instead, since CVE-named rules
+ * consistently keep the ID intact somewhere in the filename, just with
+ * varying separator characters (dash, underscore, or none).
+ */
+export function detectionRulesForCve(cveId, ruleIndex) {
+  if (!cveId || !ruleIndex?.length) return [];
+  const match = /^CVE-(\d{4})-(\d{4,7})$/i.exec(cveId.trim());
+  if (!match) return [];
+  const [, year, number] = match;
+  const variants = [`cve-${year}-${number}`, `cve_${year}_${number}`, `cve${year}${number}`];
+
+  const seen = new Set();
+  const matches = [];
+  for (const row of ruleIndex) {
+    if (seen.has(`${row.label}:${row.path}`)) continue;
+    const pathLower = row.path.toLowerCase();
+    if (!variants.some((v) => pathLower.includes(v))) continue;
+    seen.add(`${row.label}:${row.path}`);
+    matches.push({ label: row.label, path: row.path, url: row.url });
+    if (matches.length >= 5) break;
+  }
+  return matches;
+}
+
+/**
  * Aggregates IOC malware-family frequency into a "trending malware" list.
  * Each entry gets whatever ATT&CK techniques the curated map associates with
  * it, so this doubles as the raw material for computeAttackTechniques below.

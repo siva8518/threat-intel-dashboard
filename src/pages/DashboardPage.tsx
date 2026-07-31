@@ -73,6 +73,12 @@ export function DashboardPage() {
   const [malwareSection, setMalwareSection] = useState<"families" | "iocs">("families");
   const [malwareDateRange, setMalwareDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
   const [ransomwareDateRange, setRansomwareDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
+  const [huntingDetectionSection, setHuntingDetectionSection] = useState<"hunting" | "backlog">("hunting");
+
+  function goToDetectionGaps() {
+    setHuntingDetectionSection("backlog");
+    setActiveTab("hunting-detection");
+  }
 
   function goToActorSearch(name: string) {
     setActorSearchQuery(name);
@@ -142,6 +148,7 @@ export function DashboardPage() {
                 onNavigateToCountry={goToCountry}
                 onNavigateToIndustry={goToIndustry}
                 onNavigateTodayEvent={goToTodayEvent}
+                onNavigateToDetectionGaps={goToDetectionGaps}
               />
               <WorldThreatMap onSelectCountry={goToCountry} />
             </div>
@@ -186,7 +193,7 @@ export function DashboardPage() {
       {activeTab === "darkweb-intelligence" && <DarkWebIntelligence />}
       {activeTab === "ai-summarization" && <AiSummarization />}
       {activeTab === "emerging-threats" && <EmergingThreats />}
-      {activeTab === "hunting-detection" && <HuntingDetectionHub />}
+      {activeTab === "hunting-detection" && <HuntingDetectionHub initialSection={huntingDetectionSection} />}
       {activeTab === "news" && <SecurityNews />}
       {activeTab === "watchlist" && <Watchlist />}
       {activeTab === "ai-assistant" && <Chatbot />}

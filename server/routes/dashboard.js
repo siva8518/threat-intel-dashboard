@@ -477,6 +477,7 @@ router.get("/dashboard/hunting-library", (_req, res) => {
 router.get("/dashboard/detection-backlog", (_req, res) => {
   const ruleIndex = cache.getEntry("detection-rules").data?.index ?? [];
   const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
+  const kevEntries = cache.getEntry("cisa-kev").data?.entries ?? [];
   const items = buildDetectionBacklog(
     getAllAiThreatSummaries(),
     getAllDetectionBacklogStatuses(),
@@ -484,6 +485,7 @@ router.get("/dashboard/detection-backlog", (_req, res) => {
     getThreatActorIntelligenceEntities(),
     ruleIndex,
     attackIndex,
+    kevEntries,
   );
   res.json({ items });
 });

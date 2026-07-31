@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, ExternalLink, Pencil, Radar, Wrench } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -348,8 +348,17 @@ function DetectionBacklogSection() {
  * read-only library for hunting queries, and a trackable backlog (mirrors
  * the Remediation Tracker's workflow) for detection gaps.
  */
-export function HuntingDetectionHub() {
-  const [section, setSection] = useState<SectionId>("hunting");
+interface HuntingDetectionHubProps {
+  /** Deep-link target set by clicking the Overview tab's "Detection Gaps" stat -- see DashboardPage.tsx#goToTodayEvent-style navigation. */
+  initialSection?: SectionId;
+}
+
+export function HuntingDetectionHub({ initialSection }: HuntingDetectionHubProps = {}) {
+  const [section, setSection] = useState<SectionId>(initialSection ?? "hunting");
+
+  useEffect(() => {
+    if (initialSection) setSection(initialSection);
+  }, [initialSection]);
 
   return (
     <Card>

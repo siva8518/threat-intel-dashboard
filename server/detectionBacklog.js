@@ -14,21 +14,30 @@
 // never flowed through this backlog at all before -- confirmed live the
 // only thing feeding this view was the same sparse, CVE-skewed AI
 // Summarization report pool the Hunting Query Library was limited to (see
-// server/huntingLibrary.js). Both entity-derived checks are phrased as
-// "confirm/verify", never "this IS a gap" -- this app never asserts a fact
-// (like "no detection exists") it has no way to actually know.
-import { detectionRulesFor } from "./correlate.js";
+// server/huntingLibrary.js). buildCveDetectionGaps() below adds a third:
+// CISA KEV entries with no matching public rule. All entity/CVE-derived
+// checks are phrased as "confirm/verify", never "this IS a gap" -- this app
+// never asserts a fact (like "no detection exists") it has no way to
+// actually know.
+import { detectionRulesFor, detectionRulesForCve } from "./correlate.js";
 
 // AI Summarization's report schema (server/aiThreatSummary.js) collapsed the
 // former 9-category detectionEngineeringOpportunities bucket into a single
 // focused operationalActions.detectionEngineer object, existing-rule-aware
-// rather than a flat "here are 9 kinds of new rules" list -- newDetectionLogic
-// is the concrete "build this" backlog item, detectionGaps and
-// logSourcesRequired are the remaining trackable categories.
+// rather than a flat "here are 9 kinds of new rules" list -- newDetectionLogic,
+// logSourcesRequired and detectionGaps below are that object's three fields,
+// the report-derived categories. newAnalytics/mitreCoverageGaps/
+// cveDetectionGaps are the three deterministic entity/CVE-derived categories
+// (see buildEntityDetectionBacklog/buildCveDetectionGaps below) -- kept in
+// this same map so every category a backlog item can carry always resolves
+// to a real label.
 const CATEGORY_LABELS = {
   newDetectionLogic: "New Detection Logic",
   logSourcesRequired: "Log Sources Required",
   detectionGaps: "Detection Gaps",
+  newAnalytics: "New Analytics",
+  mitreCoverageGaps: "MITRE Coverage Gaps",
+  cveDetectionGaps: "CVE Detection Gaps",
 };
 
 export const DETECTION_BACKLOG_CATEGORIES = Object.keys(CATEGORY_LABELS);
@@ -148,8 +157,51 @@ export function buildEntityDetectionBacklog(malwareEntities, actorEntities, rule
   return items;
 }
 
-export function buildDetectionBacklog(reports, statuses, malwareEntities = [], actorEntities = [], ruleIndex = [], attackIndex = []) {
-  const raw = [...reportBacklogItems(reports), ...buildEntityDetectionBacklog(malwareEntities, actorEntities, ruleIndex, attackIndex)];
+/**
+ * Third deterministic (no LLM) source: CISA KEV entries (confirmed actively
+ * exploited in the wild -- the strongest "this matters right now" signal
+ * this app has, same bar as malware's iocSightings>0/actor's mentionCount>0
+ * gates above) with no matching public YARA/Sigma rule, via
+ * detectionRulesForCve()'s CVE-ID-in-filename check. No CVE was ever checked
+ * against the rule index anywhere in this app before -- detectionRulesFor()
+ * is a name/family matcher, not CVE-aware, so exploited CVEs with zero public
+ * detection coverage were invisible to this backlog entirely until now.
+ */
+export function buildCveDetectionGaps(kevEntries, ruleIndex) {
+  const items = [];
+  const generatedAt = new Date().toISOString();
+
+  const recentKev = [...(kevEntries ?? [])]
+    .sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded))
+    .slice(0, MAX_ENTITIES_PER_KIND);
+
+  for (const entry of recentKev) {
+    if (detectionRulesForCve(entry.cveId, ruleIndex).length > 0) continue; // already covered by an existing public rule
+    items.push({
+      id: `entity::cve::${entry.cveId}::cveDetectionGaps`,
+      category: "cveDetectionGaps",
+      categoryLabel: CATEGORY_LABELS.cveDetectionGaps,
+      description: `${entry.cveId} (${entry.vulnerabilityName}) is on CISA's Known Exploited Vulnerabilities catalog -- confirmed actively exploited -- but no matching public YARA/Sigma rule was found. Confirm a custom detection exists, or build one.`,
+      source: "entity",
+      reportId: `entity::cve::${entry.cveId}`,
+      articleTitle: entry.cveId,
+      articleLink: `https://nvd.nist.gov/vuln/detail/${entry.cveId}`,
+      articleSource: "CISA KEV",
+      generatedAt,
+      severity: "UNKNOWN",
+      cveIds: [entry.cveId],
+    });
+  }
+
+  return items;
+}
+
+export function buildDetectionBacklog(reports, statuses, malwareEntities = [], actorEntities = [], ruleIndex = [], attackIndex = [], kevEntries = []) {
+  const raw = [
+    ...reportBacklogItems(reports),
+    ...buildEntityDetectionBacklog(malwareEntities, actorEntities, ruleIndex, attackIndex),
+    ...buildCveDetectionGaps(kevEntries, ruleIndex),
+  ];
 
   const items = raw.map((item) => {
     const tracked = statuses[item.id];

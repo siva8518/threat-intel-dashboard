@@ -70,20 +70,23 @@ export interface HuntingQueryItem {
   threatActors: string[];
 }
 
+// Matches server/detectionBacklog.js's CATEGORY_LABELS keys exactly: the
+// first three are AI Summarization's own operationalActions.detectionEngineer
+// fields (report-derived); the last three are deterministic, no-LLM
+// categories derived from Malware/Threat Actor Intelligence entities and
+// CISA KEV entries respectively (see buildEntityDetectionBacklog/
+// buildCveDetectionGaps).
 export type DetectionBacklogCategory =
+  | "newDetectionLogic"
+  | "logSourcesRequired"
+  | "detectionGaps"
   | "newAnalytics"
-  | "newCorrelationRules"
-  | "newSigmaRules"
-  | "newKqlDetections"
-  | "edrBehavioralDetections"
-  | "siemCorrelationLogic"
   | "mitreCoverageGaps"
-  | "telemetryGaps"
-  | "logSourceRequirements";
+  | "cveDetectionGaps";
 
 export type DetectionBacklogStatus = "open" | "in_progress" | "implemented" | "wont_do";
 
-/** One detection-engineering gap, either flattened out of an AI Summarization report's detectionEngineeringOpportunities, or derived deterministically from a Malware/Threat Actor Intelligence entity (an active family with no matching public rule, or an actor's own ATT&CK technique) (see server/detectionBacklog.js), paired with Detection Engineering's own tracked status/note -- this app's only source of truth for whether the gap's actually been closed. */
+/** One detection-engineering gap: flattened out of an AI Summarization report's operationalActions.detectionEngineer, OR derived deterministically from a Malware/Threat Actor Intelligence entity (an active family with no matching public rule, or an actor's own ATT&CK technique), OR from a CISA KEV entry with no matching public rule (see server/detectionBacklog.js), paired with Detection Engineering's own tracked status/note -- this app's only source of truth for whether the gap's actually been closed. */
 export interface DetectionBacklogItem {
   id: string;
   category: DetectionBacklogCategory;
