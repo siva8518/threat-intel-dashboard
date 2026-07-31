@@ -47,6 +47,7 @@ export const MAX_CHUNKS_PER_SOURCE = {
   techniques: 250,
   campaigns: 60,
   darkweb: 60,
+  tools: 60,
 };
 
 export const CHAT_HISTORY_TURNS = 6; // last N messages (both roles) sent as context, bounding prompt size for a small local model

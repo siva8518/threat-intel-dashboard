@@ -11,6 +11,7 @@ import { getAllEntities as getMalwareEntities } from "../malwareIntelligence.js"
 import { getAllEntities as getActorEntities } from "../threatActorIntelligence.js";
 import { getAllEntities as getCampaignEntities } from "../campaignIntelligence.js";
 import { getAllEntities as getDarkWebEntities } from "../darkWebIntelligence.js";
+import { getAllEntities as getToolEntities } from "../toolIntelligence.js";
 import { MAX_CHUNKS_PER_SOURCE as CAP } from "./config.js";
 
 function cveChunks() {
@@ -181,6 +182,28 @@ function darkWebIntelligenceChunks() {
   });
 }
 
+// Sourced from server/toolIntelligence.js -- one record per malicious/dual-use
+// tool (remote access software, C2 frameworks, red-team/pentest utilities)
+// reported as used by a threat actor, automatically extracted from news
+// article text (server/toolExtraction.js) and seeded/verified against MITRE
+// ATT&CK's Software list restricted to type "tool" only.
+function toolChunks() {
+  const entities = getToolEntities().slice(0, CAP.tools);
+  return entities.map((t) => {
+    const recentArticles = t.articles.slice(0, 5).map((a) => `"${a.title}" (${a.source}, ${a.publishedDate?.slice(0, 10)})`).join("; ");
+    return {
+      id: `tool:${t.id}`,
+      text:
+        `Tool "${t.name}"${t.aliases.length ? ` (aliases: ${t.aliases.join(", ")})` : ""}` +
+        `${t.verified ? " -- confirmed via MITRE ATT&CK's Software list" : " -- reported in news coverage, not yet confirmed via MITRE ATT&CK"}. ` +
+        `${t.description ? `${t.description} ` : ""}` +
+        `${t.usedByGroups.length ? `Known to be used by: ${t.usedByGroups.join(", ")}. ` : ""}` +
+        `${recentArticles ? `Recent coverage: ${recentArticles}.` : ""}`,
+      metadata: { type: "tool", label: t.name, url: t.attackUrl, date: t.lastSeen },
+    };
+  });
+}
+
 function newsChunks() {
   const items = (cache.getEntry("news").data?.items ?? []).slice(0, CAP.news);
   return items.map((n) => ({
@@ -201,6 +224,7 @@ export function buildChunks() {
     ...malwareChunks(),
     ...campaignIntelligenceChunks(),
     ...darkWebIntelligenceChunks(),
+    ...toolChunks(),
     ...newsChunks(),
   ];
 }

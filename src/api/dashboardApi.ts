@@ -38,6 +38,7 @@ import type {
   ThreatActorIntelligenceEntity,
   ThreatActorSummary,
   ThreatTimelineEvent,
+  ToolIntelligenceEntity,
   TodaySecurityEvents,
   TrendingMalwareEntry,
   VulnCheckKevCatalog,
@@ -107,6 +108,10 @@ export async function fetchTrendingMalware(): Promise<TrendingMalwareEntry[]> {
 
 export async function fetchMalwareIntelligence(): Promise<{ entities: MalwareIntelligenceEntity[] }> {
   return fetchJson("/api/dashboard/malware-intelligence", { source: "Dashboard API" });
+}
+
+export async function fetchToolIntelligence(): Promise<{ entities: ToolIntelligenceEntity[] }> {
+  return fetchJson("/api/dashboard/tool-intelligence", { source: "Dashboard API" });
 }
 
 export async function fetchThreatActorIntelligence(): Promise<{ entities: ThreatActorIntelligenceEntity[] }> {

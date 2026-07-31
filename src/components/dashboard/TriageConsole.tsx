@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils";
 type TriageType = "cve" | "ip" | "domain" | "url" | "hash" | "name";
 
 // Deliberately the same shapes this app's other indicator handling already
-// trusts (IocSearch.tsx's type dropdown, server/routes/dashboard.js's
+// trusts (useIocSearch.ts's IocSearchIndicatorType, server/routes/dashboard.js's
 // IOC_LOOKUPS) -- this just picks the type instead of making an analyst pick
 // it from a dropdown, since the whole point of a triage console is pasting
 // straight from an alert with no extra clicks first.

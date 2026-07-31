@@ -627,6 +627,29 @@ export interface MalwareIntelligenceEntity {
   articles: MalwareIntelligenceArticleRef[];
 }
 
+/**
+ * One canonical, deduped malicious/dual-use tool record (remote access
+ * software, C2 frameworks, red-team/pentest utilities reported as used by a
+ * threat actor) -- built by automatically extracting names from news article
+ * text (server/toolExtraction.js) and seeded/verified against MITRE ATT&CK's
+ * Software list restricted to type "tool" only (never "malware", which stays
+ * MalwareIntelligenceEntity's exclusively). See server/toolIntelligence.js.
+ */
+export interface ToolIntelligenceEntity {
+  id: string;
+  name: string;
+  aliases: string[];
+  description: string | null;
+  attackId: string | null;
+  attackUrl: string | null;
+  verified: boolean;
+  usedByGroups: string[];
+  firstSeen: string;
+  lastSeen: string;
+  mentionCount: number;
+  articles: MalwareIntelligenceArticleRef[];
+}
+
 export type ThreatActorType = "APT" | "Cybercrime" | "Ransomware" | "Hacktivist" | "Initial Access Broker" | "Insider" | "Unknown";
 
 export type ThreatActorIntelligenceArticleRef = MalwareIntelligenceArticleRef;

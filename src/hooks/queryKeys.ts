@@ -28,6 +28,7 @@ export const queryKeys = {
   malwareProfile: (family: string) => ["malware-profile", family] as const,
   chatHealth: ["chat-health"] as const,
   malwareIntelligence: ["malware-intelligence"] as const,
+  toolIntelligence: ["tool-intelligence"] as const,
   threatActorIntelligence: ["threat-actor-intelligence"] as const,
   campaignIntelligence: ["campaign-intelligence"] as const,
   darkWebIntelligence: ["darkweb-intelligence"] as const,

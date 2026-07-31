@@ -1,14 +1,14 @@
 // Drains the news pool through the combined per-article extraction call (see
-// server/combinedExtraction.js) and upserts confirmed entities into all five
-// canonical entity stores (malware/actor/campaign/technique/dark-web
-// intelligence). Replaces the four separate jobs that used to each make
-// their own sequential local-LLM call per article (malwareExtractionJob.js,
+// server/combinedExtraction.js) and upserts confirmed entities into all six
+// canonical entity stores (malware/actor/campaign/technique/dark-web/tool
+// intelligence). Replaces the separate jobs that used to each make their own
+// sequential local-LLM call per article (malwareExtractionJob.js,
 // threatActorExtractionJob.js, campaignExtractionJob.js,
 // attackTechniqueExtractionJob.js) -- one combined call per article cuts the
-// per-article LLM round-trip count 5x, the actual throughput bottleneck
-// (each call blocks on a local model, not a fast network request).
+// per-article LLM round-trip count, the actual throughput bottleneck (each
+// call blocks on a local model, not a fast network request).
 //
-// An article only counts as "processed" once all five stores agree it is --
+// An article only counts as "processed" once all six stores agree it is --
 // see isUnprocessed/markProcessedEverywhere below -- so articles the old,
 // separate jobs only partially got through before this merge still get a
 // full, correctly-merged pass exactly once.
@@ -23,11 +23,13 @@ import { validateCandidates as validateActorCandidates } from "./threatActorExtr
 import { validateCandidates as validateCampaignCandidates } from "./campaignExtraction.js";
 import { resolveTechniques } from "./attackTechniqueExtraction.js";
 import { validateCandidates as validateDarkWebCandidates } from "./darkWebExtraction.js";
+import { validateCandidates as validateToolCandidates } from "./toolExtraction.js";
 import * as malwareIntel from "./malwareIntelligence.js";
 import * as actorIntel from "./threatActorIntelligence.js";
 import * as campaignIntel from "./campaignIntelligence.js";
 import * as techniqueIntel from "./attackTechniqueIntelligence.js";
 import * as darkWebIntel from "./darkWebIntelligence.js";
+import * as toolIntel from "./toolIntelligence.js";
 import { OllamaUnavailableError } from "./rag/ollamaClient.js";
 import { log } from "./lib/log.js";
 
@@ -84,7 +86,8 @@ function isUnprocessed(link) {
     !actorIntel.isArticleProcessed(link) ||
     !campaignIntel.isArticleProcessed(link) ||
     !techniqueIntel.isArticleProcessed(link) ||
-    !darkWebIntel.isArticleProcessed(link)
+    !darkWebIntel.isArticleProcessed(link) ||
+    !toolIntel.isArticleProcessed(link)
   );
 }
 
@@ -94,6 +97,7 @@ function markProcessedEverywhere(link) {
   campaignIntel.markArticleProcessed(link);
   techniqueIntel.markArticleProcessed(link);
   darkWebIntel.markArticleProcessed(link);
+  toolIntel.markArticleProcessed(link);
 }
 
 /**
@@ -163,13 +167,14 @@ async function runCycle() {
 
   for (const article of unprocessed) {
     try {
-      const { malware, actors, campaigns, techniques, darkweb } = await extractAllEntities({ title: article.title, summary: article.summary });
-      extracted += malware.length + actors.length + campaigns.length + techniques.length + darkweb.length;
+      const { malware, actors, campaigns, techniques, darkweb, tools } = await extractAllEntities({ title: article.title, summary: article.summary });
+      extracted += malware.length + actors.length + campaigns.length + techniques.length + darkweb.length + tools.length;
 
       const selfTokens = selfReferenceTokens(article);
       const nonSelfMalware = malware.filter((name) => !selfTokens.has(name.toLowerCase()));
       const nonSelfActors = actors.filter((a) => !selfTokens.has((a.name ?? "").toLowerCase()));
       const nonSelfCampaigns = campaigns.filter((name) => !selfTokens.has(name.toLowerCase()));
+      const nonSelfTools = tools.filter((name) => !selfTokens.has(name.toLowerCase()));
 
       const validMalware = validateMalwareCandidates(nonSelfMalware, { articleSource: article.source, knownActorNamesLower: actorNamesLower, knownToolNamesLower: toolNamesLower });
       for (const name of validMalware) {
@@ -203,12 +208,20 @@ async function runCycle() {
         else updatedEntities += 1;
       }
 
+      const validTools = validateToolCandidates(nonSelfTools, { articleSource: article.source, knownMalwareNamesLower: malwareNamesLower, knownActorNamesLower: actorNamesLower });
+      for (const name of validTools) {
+        const { isNew } = toolIntel.upsertMention(name, article);
+        if (isNew) newEntities += 1;
+        else updatedEntities += 1;
+      }
+
       filtered +=
         malware.length - validMalware.length +
         actors.length - validActors.length +
         campaigns.length - validCampaigns.length +
         techniques.length - resolvedTechniques.length +
-        darkweb.length - validDarkWeb.length;
+        darkweb.length - validDarkWeb.length +
+        tools.length - validTools.length;
     } catch (error) {
       if (error instanceof OllamaUnavailableError) throw error; // stop the whole cycle -- Ollama being down affects every remaining article the same way
       log.error("combined-extraction", `failed to process "${article.title.slice(0, 60)}...": ${error.message}`);
@@ -222,18 +235,20 @@ async function runCycle() {
   campaignIntel.saveAfterMentions();
   techniqueIntel.saveAfterMentions();
   darkWebIntel.saveAfterMentions();
+  toolIntel.saveAfterMentions();
 
   if (attackData) {
     const { counts, records } = buildIocFamilyData();
     malwareIntel.reconcile(attackData, counts, records);
     actorIntel.reconcile(attackData, getRansomwareCampaigns());
+    toolIntel.reconcile(attackData);
   }
   campaignIntel.reconcile(attackData);
   darkWebIntel.reconcile();
 
   log.info(
     "combined-extraction",
-    `processed ${unprocessed.length} articles: ${extracted} candidate(s) extracted across 5 entity types, ${filtered} filtered by validation, ${newEntities} new + ${updatedEntities} updated entit${newEntities + updatedEntities === 1 ? "y" : "ies"}`,
+    `processed ${unprocessed.length} articles: ${extracted} candidate(s) extracted across 6 entity types, ${filtered} filtered by validation, ${newEntities} new + ${updatedEntities} updated entit${newEntities + updatedEntities === 1 ? "y" : "ies"}`,
   );
 }
 

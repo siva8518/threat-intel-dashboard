@@ -40,6 +40,7 @@ import { getAllEntities as getCampaignIntelligenceEntities } from "../campaignIn
 import { getNewsTechniqueCounts, getNewsTechniqueCountsWindowed } from "../attackTechniqueIntelligence.js";
 import { withinDays } from "../lib/dateWindow.js";
 import { getAllEntities as getDarkWebIntelligenceEntities } from "../darkWebIntelligence.js";
+import { getAllEntities as getToolIntelligenceEntities } from "../toolIntelligence.js";
 import { getKeywords, addKeyword, removeKeyword, getFlashReports, getUnreadCount, markRead, markAllRead } from "../watchlist.js";
 import { getAllReports as getAllAiThreatSummaries, getReportById as getAiThreatSummaryById } from "../aiThreatSummaryStore.js";
 import { getAllStatuses as getAllRemediationStatuses, setStatus as setRemediationStatus, clearStatus as clearRemediationStatus, REMEDIATION_STATUSES } from "../remediationTracker.js";
@@ -350,6 +351,17 @@ router.get("/dashboard/malware-trending/deltas", (_req, res) => {
 // live IOC-frequency snapshot with no memory and no article linkage.
 router.get("/dashboard/malware-intelligence", (_req, res) => {
   res.json({ entities: getMalwareIntelligenceEntities() });
+});
+
+// --- Tool Intelligence (canonical, deduped entity store, see server/toolIntelligence.js) ---
+// One record per malicious/dual-use tool (remote access software, C2
+// frameworks, red-team/pentest utilities) reported as used by a threat actor
+// -- built from names automatically extracted from news article text
+// (server/toolExtraction.js) and seeded/verified against MITRE ATT&CK's own
+// Software list restricted to type "tool" (never "malware", which stays
+// exclusively server/malwareIntelligence.js's).
+router.get("/dashboard/tool-intelligence", (_req, res) => {
+  res.json({ entities: getToolIntelligenceEntities() });
 });
 
 // --- Threat Actor Intelligence (canonical, deduped entity store, see server/threatActorIntelligence.js) ---
