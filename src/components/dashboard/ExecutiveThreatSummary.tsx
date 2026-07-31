@@ -191,7 +191,17 @@ export function ExecutiveThreatSummary({
               </span>
             </div>
 
-            <div className="grid w-full flex-1 grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Capped at 2 columns (never 3) -- this widget's own container halves
+                at the exact same `lg` breakpoint where the Overview page itself
+                goes two-column (see DashboardPage.tsx), so a 3rd column here
+                would be squeezed into roughly a sixth of the viewport width right
+                when the outer layout switches. Confirmed live: at that width, a
+                3-word uppercase tracked-out label like "Countries Under Attack"
+                wraps across 2-3 lines inside an ~119px-wide box. Fixed widths in
+                Tailwind (lg/xl/2xl) can't decouple this from the outer page's own
+                breakpoint without introducing container queries, so 2 columns
+                everywhere sidesteps the compounding squeeze entirely. */}
+            <div className="grid w-full flex-1 grid-cols-1 gap-2.5 sm:grid-cols-2">
               <FactCard icon={<Skull className="h-3.5 w-3.5" />} label="Most Active Threat Actor" onClick={onNavigateToActors}>
                 {data.mostActiveActor ? (
                   <>
