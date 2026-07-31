@@ -8,8 +8,8 @@
 // ~21MB, nioc-filehash ~10MB) that alone account for ~112MB of it. Excluding
 // anything over MAX_LIST_BYTES drops the real in-memory footprint to ~6MB
 // across the remaining ~121 lists -- deliberately conservative given this
-// app already hit a real Render OOM crash once from an oversized in-memory
-// dataset (see server/connectors/exploitdb.js's cveIndex and
+// app already hit a real hosting-platform OOM crash once from an oversized
+// in-memory dataset (see server/connectors/exploitdb.js's cveIndex and
 // server/connectors/detectionRules.js's rule index for the same class of
 // problem, caught the hard way).
 //
