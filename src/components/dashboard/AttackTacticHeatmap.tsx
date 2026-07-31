@@ -55,7 +55,7 @@ export function AttackTacticHeatmap() {
           MITRE ATT&amp;CK Tactic Heat Map{" "}
           <span
             className="text-muted"
-            title="Derived from a curated malware-to-technique map plus techniques automatically extracted from news article text -- not a live telemetry feed"
+            title="Derived from this platform's synced MITRE ATT&CK Software catalog (real malware/tool -> technique relationships, 800+ entries) plus techniques automatically extracted from news article text -- not a live telemetry feed"
           >
             (best-effort, see tooltip)
           </span>

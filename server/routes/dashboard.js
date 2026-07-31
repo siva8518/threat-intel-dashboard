@@ -28,7 +28,6 @@ import { getAllGithubRepos, computeTopCves } from "../githubIntel/index.js";
 import { buildCveProfile } from "../cveProfile.js";
 import { buildMalwareProfile } from "../malwareProfile.js";
 import { buildExecutiveSummary } from "../executiveSummary.js";
-import { buildCorrelationClusters } from "../correlationEngine.js";
 import { getTaggedNewsItems, getNewsCveCounts } from "../newsCorrelation.js";
 import { buildTodaySecurityEvents } from "../todaySecurityEvents.js";
 import { buildThreatTimeline } from "../threatTimeline.js";
@@ -93,7 +92,7 @@ router.get("/dashboard/executive-summary", (_req, res) => {
     kevEntries,
     threatFeedIocs: iocs,
     ransomwareCampaigns: campaigns,
-    trendingMalware: computeTrendingMalware(iocs, attackData?.techniques ?? [], cache.getEntry("detection-rules").data?.index),
+    trendingMalware: computeTrendingMalware(iocs, attackData?.techniques ?? [], cache.getEntry("detection-rules").data?.index, attackData?.software ?? []),
     githubTopCves: computeTopCves(getAllGithubRepos(), 10, getNewsCveCounts(cache.getEntry("news").data?.items)),
     industryHeatmap: computeActorIndustryHeatmap(campaigns, { country: null }),
     geoTargeting: computeGeoTargeting(campaigns),
@@ -114,18 +113,6 @@ router.get("/dashboard/executive-summary", (_req, res) => {
 // unsliced output as its own route rather than widening that inline slice.
 router.get("/dashboard/geo-targeting", (_req, res) => {
   res.json(computeGeoTargeting(getRansomwareCampaigns()));
-});
-
-// --- Threat Correlation Engine (see server/correlationEngine.js) --------
-router.get("/dashboard/correlation-engine", (_req, res) => {
-  const cards = buildCorrelationClusters({
-    threatFeedIocs: threatFeedIocs(),
-    attackData: cache.getEntry("attack").data,
-    ransomwareCampaigns: getRansomwareCampaigns(),
-    kevEntries: cache.getEntry("cisa-kev").data?.entries ?? [],
-    githubRepos: getAllGithubRepos(),
-  });
-  res.json({ cards });
 });
 
 // --- CVEs (cached default view, live for search/pagination/filters) ----
@@ -327,19 +314,21 @@ router.get("/dashboard/threat-feed", (_req, res) => {
 });
 
 // --- Trending malware + ATT&CK techniques (derived from threat feed) ----
-// attack.js's fetch() returns { techniques, groups, software, campaigns } (expanded
-// for Threat Actor Profiles) -- these two routes only ever need the flat technique list.
+// attack.js's fetch() returns { techniques, groups, software, campaigns } --
+// these routes need both `techniques` (to resolve an ID to name/tactic) and
+// `software` (the real per-malware technique relationships, see
+// correlate.js#techniqueIdsFromSoftwareIndex).
 router.get("/dashboard/malware-trending", (_req, res) => {
-  const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
-  res.json(computeTrendingMalware(threatFeedIocs(), attackIndex, cache.getEntry("detection-rules").data?.index));
+  const attackData = cache.getEntry("attack").data;
+  res.json(computeTrendingMalware(threatFeedIocs(), attackData?.techniques ?? [], cache.getEntry("detection-rules").data?.index, attackData?.software ?? []));
 });
 
 // Per-family day-over-day trend (see server/malwareTrendHistory.js), so
 // "which malware families are increasing" is answerable with a real
 // prior-day baseline instead of a raw current-count snapshot.
 router.get("/dashboard/malware-trending/deltas", (_req, res) => {
-  const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
-  const trending = computeTrendingMalware(threatFeedIocs(), attackIndex, cache.getEntry("detection-rules").data?.index);
+  const attackData = cache.getEntry("attack").data;
+  const trending = computeTrendingMalware(threatFeedIocs(), attackData?.techniques ?? [], cache.getEntry("detection-rules").data?.index, attackData?.software ?? []);
   const prior = recordAndGetPriorSnapshot(trending);
 
   const deltas = trending
@@ -543,16 +532,16 @@ router.get("/dashboard/attack-techniques", (req, res) => {
   // after the fact, so a technique's count genuinely reflects that window's
   // activity. Omitted/invalid -> all-time, unchanged from before.
   const days = req.query.days ? Number(req.query.days) : null;
-  const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
+  const attackData = cache.getEntry("attack").data;
   const iocs = threatFeedIocs().filter((ioc) => withinDays(ioc.firstSeen, days));
   const newsTechniqueCounts = days ? getNewsTechniqueCountsWindowed(days) : getNewsTechniqueCounts();
-  res.json(computeAttackTechniquesObserved(iocs, attackIndex, newsTechniqueCounts));
+  res.json(computeAttackTechniquesObserved(iocs, attackData?.techniques ?? [], newsTechniqueCounts, attackData?.software ?? []));
 });
 
 // --- ATT&CK Tactic Heat Map (see server/correlate.js#computeAttackTacticHeatmap) ---
 router.get("/dashboard/attack-tactic-heatmap", (_req, res) => {
-  const attackIndex = cache.getEntry("attack").data?.techniques ?? [];
-  res.json(computeAttackTacticHeatmap(threatFeedIocs(), attackIndex, getNewsTechniqueCounts()));
+  const attackData = cache.getEntry("attack").data;
+  res.json(computeAttackTacticHeatmap(threatFeedIocs(), attackData?.techniques ?? [], getNewsTechniqueCounts(), attackData?.software ?? []));
 });
 
 // --- Ransomware campaigns + threat actor activity ------------------------

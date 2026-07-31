@@ -515,19 +515,6 @@ export interface CveProfile {
   exploits: CveProfileExploit[];
 }
 
-export interface CorrelationCard {
-  malware: string[];
-  actors: string[];
-  cves: Array<{ id: string; knownExploited: boolean }>;
-  techniques: AttackTechnique[];
-  iocs: Array<{ indicatorType: IocType; indicator: string }>;
-  githubRepos: Array<{ fullName: string; url: string; stars: number }>;
-  ransomwareCampaigns: RansomwareCampaign[];
-  entityTypeCount: number;
-  recordCount: number;
-  totalIocCount: number;
-}
-
 export type ThreatTimelineEventType = "kev" | "ransomware" | "malware" | "github" | "news";
 
 export interface ThreatTimelineEvent {

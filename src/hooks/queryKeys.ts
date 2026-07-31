@@ -4,7 +4,6 @@ export const queryKeys = {
   summary: ["summary"] as const,
   executiveSummary: ["executive-summary"] as const,
   geoTargeting: ["geo-targeting"] as const,
-  correlationEngine: ["correlation-engine"] as const,
   todayEvents: ["today-events"] as const,
   threatTimeline: (days: number) => ["threat-timeline", days] as const,
   kev: ["kev"] as const,

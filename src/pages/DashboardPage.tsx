@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, BrainCircuit, Bug, Crosshair, Eye, Flame, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
+import { Bot, BrainCircuit, Bug, Crosshair, Eye, Flame, Ghost, Github, LayoutDashboard, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { TriageConsole } from "@/components/dashboard/TriageConsole";
 import { CveHub } from "@/components/dashboard/CveHub";
@@ -14,7 +14,6 @@ import { ThreatScoreTrend } from "@/components/dashboard/ThreatScoreTrend";
 import { CampaignVolumeTrend } from "@/components/dashboard/CampaignVolumeTrend";
 import { TopThreatActors } from "@/components/dashboard/TopThreatActors";
 import { TopCves } from "@/components/dashboard/TopCves";
-import { CorrelationEngine } from "@/components/dashboard/CorrelationEngine";
 import { AttackTechniques } from "@/components/dashboard/AttackTechniques";
 import { AttackTacticHeatmap } from "@/components/dashboard/AttackTacticHeatmap";
 import { ThreatActorsHub } from "@/components/dashboard/ThreatActorsHub";
@@ -42,7 +41,6 @@ const TABS = [
   { id: "triage", label: "Triage Console", icon: Siren },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "cves", label: "Latest CVEs", icon: ShieldAlert },
-  { id: "correlation-engine", label: "Correlation Engine", icon: Network },
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },
   { id: "threat-actors", label: "Ransomware Data", icon: Skull },
   { id: "github-intel", label: "GitHub Intel", icon: Github },
@@ -108,7 +106,11 @@ export function DashboardPage() {
   function goToTodayEvent(key: TodayEventKey) {
     switch (key) {
       case "activeExploitCampaigns":
-        setActiveTab("correlation-engine");
+        // Correlation Engine tab removed -- this stat counts today's OTX
+        // actor/pulse signals, which the Ransomware Data tab's merged
+        // threat-actor list (server/correlate.js#mergeThreatActors) already
+        // folds in, same as newRansomwareVictims below.
+        setActiveTab("threat-actors");
         break;
       case "githubExploits":
         setActiveTab("github-intel");
@@ -162,7 +164,6 @@ export function DashboardPage() {
         </div>
       )}
       {activeTab === "cves" && <CveHub initialSeverity={cveSeverityFilter} />}
-      {activeTab === "correlation-engine" && <CorrelationEngine />}
       {activeTab === "attack-techniques" && (
         <>
           <AttackTacticHeatmap />

@@ -53,11 +53,44 @@ export function dedupeIocs(iocLists) {
   return Array.from(byKey.values()).sort((a, b) => new Date(b.firstSeen).getTime() - new Date(a.firstSeen).getTime());
 }
 
-/** Case-insensitive substring match against the curated malware->ATT&CK seed map. */
-function techniqueIdsForFamily(malwareFamily) {
-  if (!malwareFamily || malwareFamily === "Unknown" || malwareFamily === "N/A") return [];
+// Below this length, a substring match against a real ATT&CK software/tool
+// name is too likely to be coincidental (e.g. a 2-3 letter alias matching
+// inside an unrelated family name) -- same guard convention as
+// MIN_FUZZY_WORD_LENGTH below for detection-rule filename matching.
+const MIN_SOFTWARE_FUZZY_LENGTH = 4;
+
+/**
+ * Real, MITRE-official malware/tool -> technique relationships (the STIX
+ * "uses" edges server/connectors/attack.js already parses into each
+ * `software` entry's own techniqueIds) -- confirmed live this covers 821
+ * named malware/tools (e.g. TrickBot alone maps to 55 real techniques),
+ * dwarfing the ~30-family hand-curated seed list below. Checked first/
+ * primarily; the curated map is kept as a supplementary source for any
+ * family name it covers that isn't in MITRE's own official catalog (a small,
+ * genuine gap -- e.g. neither "Mozi" nor "ClearFake" are catalogued as
+ * ATT&CK Software as of this bundle, confirmed live, so no source here can
+ * produce techniques for those two specifically).
+ */
+function techniqueIdsFromSoftwareIndex(malwareFamily, softwareIndex) {
   const lower = malwareFamily.toLowerCase();
   const ids = new Set();
+  for (const item of softwareIndex) {
+    const names = [item.name, ...(item.aliases ?? [])];
+    const isMatch = names.some((n) => {
+      const nLower = n.toLowerCase();
+      if (nLower.length < MIN_SOFTWARE_FUZZY_LENGTH) return nLower === lower;
+      return lower.includes(nLower) || nLower.includes(lower);
+    });
+    if (isMatch) item.techniqueIds.forEach((id) => ids.add(id));
+  }
+  return ids;
+}
+
+/** Case-insensitive substring match against the curated malware->ATT&CK seed map, merged with the real ATT&CK Software catalog above when one is supplied. */
+function techniqueIdsForFamily(malwareFamily, softwareIndex = []) {
+  if (!malwareFamily || malwareFamily === "Unknown" || malwareFamily === "N/A") return [];
+  const lower = malwareFamily.toLowerCase();
+  const ids = techniqueIdsFromSoftwareIndex(malwareFamily, softwareIndex);
   for (const [family, techniqueIds] of Object.entries(malwareAttackMap)) {
     if (family.startsWith("_")) continue;
     if (lower.includes(family)) techniqueIds.forEach((id) => ids.add(id));
@@ -108,7 +141,7 @@ export function detectionRulesFor(name, ruleIndex) {
  * Each entry gets whatever ATT&CK techniques the curated map associates with
  * it, so this doubles as the raw material for computeAttackTechniques below.
  */
-export function computeTrendingMalware(iocs, attackIndex, ruleIndex = []) {
+export function computeTrendingMalware(iocs, attackIndex, ruleIndex = [], softwareIndex = []) {
   const counts = new Map();
   for (const ioc of iocs) {
     // splitFamilies both splits combined values like "exe, AgentTesla" (URLHaus
@@ -131,23 +164,21 @@ export function computeTrendingMalware(iocs, attackIndex, ruleIndex = []) {
       family: entry.family,
       count: entry.count,
       sources: Array.from(entry.sources),
-      techniques: techniqueIdsForFamily(entry.family).map((id) => resolveTechnique(id, attackIndex)),
+      techniques: techniqueIdsForFamily(entry.family, softwareIndex).map((id) => resolveTechnique(id, attackIndex)),
       detectionRules: detectionRulesFor(entry.family, ruleIndex),
     }));
 }
 
 /**
- * Aggregates ATT&CK technique frequency across all IOCs (via the curated
- * malware-to-technique map) plus, additionally, techniques automatically
- * extracted from news article text (server/attackTechniqueExtraction.js +
- * server/attackTechniqueIntelligence.js) -- the curated map alone only
- * surfaces techniques for the ~20-30 families it was seeded with, which
- * under-represents everything vendor coverage actually names.
+ * Aggregates ATT&CK technique frequency across all IOCs (via the real ATT&CK
+ * Software catalog, merged with the curated malware-to-technique map) plus,
+ * additionally, techniques automatically extracted from news article text
+ * (server/attackTechniqueExtraction.js + server/attackTechniqueIntelligence.js).
  */
-export function computeAttackTechniquesObserved(iocs, attackIndex, newsTechniqueCounts = new Map()) {
+export function computeAttackTechniquesObserved(iocs, attackIndex, newsTechniqueCounts = new Map(), softwareIndex = []) {
   const counts = new Map();
   for (const ioc of iocs) {
-    for (const id of techniqueIdsForFamily(ioc.malwareFamily)) {
+    for (const id of techniqueIdsForFamily(ioc.malwareFamily, softwareIndex)) {
       counts.set(id, (counts.get(id) ?? 0) + 1);
     }
   }
@@ -186,10 +217,10 @@ const TOP_TECHNIQUES_PER_TACTIC = 5;
  * the "cold" ones with zero hits, not just whichever techniques happen to
  * rank highest overall.
  */
-export function computeAttackTacticHeatmap(iocs, attackIndex, newsTechniqueCounts = new Map()) {
+export function computeAttackTacticHeatmap(iocs, attackIndex, newsTechniqueCounts = new Map(), softwareIndex = []) {
   const techniqueCounts = new Map(); // techniqueId -> count
   for (const ioc of iocs) {
-    for (const id of techniqueIdsForFamily(ioc.malwareFamily)) {
+    for (const id of techniqueIdsForFamily(ioc.malwareFamily, softwareIndex)) {
       techniqueCounts.set(id, (techniqueCounts.get(id) ?? 0) + 1);
     }
   }

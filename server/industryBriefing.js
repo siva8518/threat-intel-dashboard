@@ -43,7 +43,11 @@ const SEVERITY_RANK = { critical: 3, high: 2, medium: 1, low: 0 };
 // kill_chain_phases (e.g. "command-and-control" -> "command and control"
 // after the dash replace) -- mapped to the canonical Enterprise ATT&CK
 // tactic names for display. Order here is kill-chain order, used as the
-// tie-break when tacticsSummary ranks by observed count.
+// tie-break when tacticsSummary ranks by observed count. Kept in sync with
+// server/correlate.js's own ATTACK_TACTICS_ORDER, the authoritative list --
+// confirmed live against the real bundle that the classic 14-tactic model
+// (single "Defense Evasion") is stale: the live Enterprise matrix splits
+// that into "Defense Impairment" and "Stealth" instead, a 15-tactic list.
 const TACTIC_DISPLAY = new Map([
   ["reconnaissance", "Reconnaissance"],
   ["resource development", "Resource Development"],
@@ -51,7 +55,8 @@ const TACTIC_DISPLAY = new Map([
   ["execution", "Execution"],
   ["persistence", "Persistence"],
   ["privilege escalation", "Privilege Escalation"],
-  ["defense evasion", "Defense Evasion"],
+  ["defense impairment", "Defense Impairment"],
+  ["stealth", "Stealth"],
   ["credential access", "Credential Access"],
   ["discovery", "Discovery"],
   ["lateral movement", "Lateral Movement"],

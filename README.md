@@ -140,23 +140,6 @@ back. `server/githubIntel/store.js` persists to a gitignored JSON file instead.
   total active campaigns. Clicking the malware/CVE facts opens the same detail drawers described below;
   clicking a country or industry jumps to Threat Actors & Tools filtered to it (ransomware campaigns
   are tagged with their industry bucket server-side in `/api/dashboard/ransomware` for this).
-- **Threat Correlation Engine** (`server/correlationEngine.js`, `GET /api/dashboard/correlation-engine`,
-  "Correlation Engine" tab): automatically links *live* records -- the deduped threat feed,
-  ransomware.live campaigns, and enriched GitHub Intel repos -- whenever they share a CVE, malware
-  family, threat actor, or IP/domain/URL/hash indicator, via a union-find over normalized key tokens.
-  Each connected cluster renders as one "Unified Intelligence Card" instead of the same activity
-  sitting scattered across separate, isolated feed rows. MITRE ATT&CK (techniques, plus any CVEs a
-  matched actor/malware's ATT&CK entry cites) is layered on top as read-only enrichment of an
-  already-formed cluster, never used to merge clusters. That distinction came from three real
-  supercluster bugs hit and fixed live while building this (all documented in the module itself):
-  ATT&CK technique IDs are shared by hundreds of unrelated malware families; common dual-use tools
-  (Mimikatz, Cobalt Strike, PsExec...) are used by dozens of otherwise-unrelated ATT&CK groups, and
-  MITRE's own group↔software graph turned out to be a genuinely dense small-world network no threshold
-  could tame; and GitHub "aggregator" repos (PoC/signature indexes covering dozens of unrelated
-  campaigns) and a handful of individually-common malware names (e.g. "Conti," a defunct brand still
-  name-dropped in countless unrelated repos' generic "detects: ..." blurbs) bridged the same way. Each
-  was fixed by excluding the specific hub source from *merging* records rather than lowering a
-  threshold, since lower thresholds still left enough short chains to re-collapse into one blob.
 - **Security Newsroom** (`server/newsCorrelation.js`, tagging done server-side in the existing
   `GET /api/dashboard/news`, "Security News" tab): every headline is tagged with the CVE IDs, threat
   actors, malware families, industries, and countries it mentions (regex for CVE IDs; word-boundary
@@ -191,9 +174,9 @@ back. `server/githubIntel/store.js` persists to a gitignored JSON file instead.
   same-calendar-day rollup -- active exploit campaigns (distinct OTX pulses reported today), new
   ransomware victims, new MalwareBazaar samples, new GitHub exploits/PoCs, and new IOCs -- each just a
   same-day filter over the exact sources already used elsewhere in this app, not a separate rollup
-  mechanism. Every tile is clickable, jumping to the most relevant tab (Active Exploit Campaigns →
-  Correlation Engine, New Ransomware Victims → Threat Actors & Tools, New Malware Samples/IOCs → Threat
-  Feed, GitHub Exploits → GitHub Intel).
+  mechanism. Every tile is clickable, jumping to the most relevant tab (Active Exploit Campaigns and
+  New Ransomware Victims → Threat Actors & Tools, New Malware Samples/IOCs → Threat Feed, GitHub
+  Exploits → GitHub Intel).
 - **Daily Summary** (`server/dailySummary.js`, `GET /api/dashboard/daily-summary`; originally named "AI
   Daily Brief" -- renamed since it does no LLM/AI summarization at all, just rule-based counts and
   comparisons over this app's own live data, and the old name implied otherwise): a short, skimmable

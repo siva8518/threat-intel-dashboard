@@ -7,7 +7,6 @@ import type {
   DarkWebIntelligenceEntity,
   WatchlistKeyword,
   FlashReport,
-  CorrelationCard,
   CveProfile,
   CveProgramActivity,
   CveRecord,
@@ -204,10 +203,6 @@ export async function fetchExecutiveSummary(): Promise<ExecutiveSummary> {
 
 export async function fetchGeoTargeting(): Promise<GeoTargeting> {
   return fetchJson("/api/dashboard/geo-targeting", { source: "Dashboard API" });
-}
-
-export async function fetchCorrelationEngine(): Promise<{ cards: CorrelationCard[] }> {
-  return fetchJson("/api/dashboard/correlation-engine", { source: "Dashboard API" });
 }
 
 export async function fetchTodaySecurityEvents(): Promise<TodaySecurityEvents> {
