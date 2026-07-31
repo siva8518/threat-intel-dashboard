@@ -210,7 +210,7 @@ export function buildDetectionBacklog(reports, statuses, malwareEntities = [], a
       status: tracked?.status ?? "open",
       note: tracked?.note ?? null,
       statusUpdatedAt: tracked?.updatedAt ?? null,
-      draftRule: tracked?.draftRule ?? null,
+      draftArtifacts: tracked?.draftArtifacts ?? null,
     };
   });
 

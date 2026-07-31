@@ -13,7 +13,7 @@ import type {
   CveSeverityDistribution,
   DetectionBacklogItem,
   DetectionBacklogStatus,
-  DraftRule,
+  DraftArtifactSet,
   EmergingThreatsRanking,
   ExecutiveSummary,
   ExploitIntelligence,
@@ -269,10 +269,15 @@ export async function clearDetectionBacklogStatus(id: string): Promise<{ ok: boo
   return fetchJson(`/api/dashboard/detection-backlog/${encodeURIComponent(id)}`, { source: "Dashboard API", method: "DELETE" });
 }
 
-export async function draftDetectionBacklogRule(
+export async function draftDetectionBacklogArtifacts(
   id: string,
-): Promise<{ id: string; status: DetectionBacklogStatus; note: string | null; updatedAt: string; draftRule: DraftRule }> {
-  return fetchJson(`/api/dashboard/detection-backlog/${encodeURIComponent(id)}/draft-rule`, { source: "Dashboard API", method: "POST" });
+): Promise<{ id: string; status: DetectionBacklogStatus; note: string | null; updatedAt: string; draftArtifacts: DraftArtifactSet }> {
+  // 12 artifacts assessed in one completion is a much larger generation than
+  // the single-rule version this replaced -- a longer timeout than the
+  // default 60s gives server/groqClient.js's own 60s request timeout room to
+  // fire and surface its real error first, rather than this racing it with
+  // a generic "Dashboard API timed out" message.
+  return fetchJson(`/api/dashboard/detection-backlog/${encodeURIComponent(id)}/draft-artifacts`, { source: "Dashboard API", method: "POST", timeoutMs: 90_000 });
 }
 
 export async function fetchSourcesHealth(): Promise<{ sources: SourceHealth[]; onlineCount: number; totalCount: number }> {

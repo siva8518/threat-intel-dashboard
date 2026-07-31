@@ -37,10 +37,10 @@ export function getAllStatuses() {
 
 export function setStatus(itemId, status, note) {
   if (!DETECTION_BACKLOG_STATUSES.includes(status)) throw new Error(`Invalid status "${status}"`);
-  // Spreads the existing record first so an AI-drafted rule (see setDraftRule
-  // below) survives a later status/note change on the same item -- these are
-  // two independent human actions on the same backlog item, not a
-  // status-vs-draft choice.
+  // Spreads the existing record first so AI-drafted artifacts (see
+  // setDraftArtifacts below) survive a later status/note change on the same
+  // item -- these are two independent human actions on the same backlog
+  // item, not a status-vs-draft choice.
   const record = { ...state.records[itemId], status, note: note?.trim() || null, updatedAt: new Date().toISOString() };
   state.records[itemId] = record;
   persist();
@@ -54,13 +54,15 @@ export function clearStatus(itemId) {
   return existed;
 }
 
-// AI-drafted candidate Sigma/YARA rule for this item (see
-// server/detectionRuleDraft.js) -- stored in the same record as status/note
-// since both are per-item human-facing state this app has no other way to
-// know, but tracked independently: drafting a rule never implies a status
-// change, and vice versa. Regenerating overwrites the previous draft.
-export function setDraftRule(itemId, draft) {
-  const record = { status: "open", note: null, ...state.records[itemId], draftRule: draft };
+// AI-drafted detection artifacts for this item (see
+// server/detectionRuleDraft.js -- Sigma, three query languages, YARA, two
+// network-rule languages, IOC/analytic-rule recommendations, hunting
+// hypotheses, detection-engineering notes) -- stored in the same record as
+// status/note since both are per-item human-facing state this app has no
+// other way to know, but tracked independently: drafting never implies a
+// status change, and vice versa. Regenerating overwrites the previous draft.
+export function setDraftArtifacts(itemId, draft) {
+  const record = { status: "open", note: null, ...state.records[itemId], draftArtifacts: draft };
   state.records[itemId] = record;
   persist();
   return record;

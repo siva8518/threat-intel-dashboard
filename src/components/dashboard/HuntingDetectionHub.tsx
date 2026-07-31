@@ -11,7 +11,7 @@ import { SeverityBadge } from "./SeverityBadge";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { useHuntingLibrary } from "@/hooks/useHuntingLibrary";
 import { useDetectionBacklog } from "@/hooks/useDetectionBacklog";
-import type { DetectionBacklogItem, DetectionBacklogStatus, DraftRule, HuntingQueryItem, HuntingQueryPlatform } from "@/types/threat-intel";
+import type { DetectionBacklogItem, DetectionBacklogStatus, DraftArtifact, DraftArtifactSet, HuntingQueryItem, HuntingQueryPlatform } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
 const SECTIONS = [
@@ -175,45 +175,130 @@ function HuntingQueriesSection() {
 
 // --- Detection Backlog ------------------------------------------------------
 
-const DRAFT_CONFIDENCE_BADGE: Record<DraftRule["confidence"], "success" | "medium" | "muted"> = {
+const DRAFT_CONFIDENCE_BADGE: Record<NonNullable<DraftArtifact["confidence"]>, "success" | "medium" | "muted"> = {
   High: "success",
   Medium: "medium",
   Low: "muted",
 };
 
-/** The AI-drafted candidate rule for one backlog item -- see server/detectionRuleDraft.js. Always framed as a starting point, never as validated/deploy-ready. */
-function DraftRulePanel({ draft }: { draft: DraftRule }) {
+/** One Generated artifact -- full card with content, confidence, human-review flag, and any caveats. */
+function GeneratedArtifactCard({ artifact }: { artifact: DraftArtifact }) {
   return (
-    <div className="space-y-2 py-1">
+    <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant={draft.format === "yara" ? "medium" : "cyan"}>{draft.format.toUpperCase()}</Badge>
-          <span className="text-xs font-medium text-foreground">{draft.ruleTitle}</span>
-          <Badge variant={DRAFT_CONFIDENCE_BADGE[draft.confidence]}>{draft.confidence} confidence</Badge>
+          <span className="text-xs font-semibold text-foreground">{artifact.label}</span>
+          {artifact.confidence && <Badge variant={DRAFT_CONFIDENCE_BADGE[artifact.confidence]}>{artifact.confidence} confidence</Badge>}
+          {artifact.humanReviewRequired && <Badge variant="medium">Human review required</Badge>}
         </div>
-        <CopyButton text={draft.ruleContent} />
+        {artifact.content && <CopyButton text={artifact.content} />}
       </div>
-      <p className="text-xs text-muted">{draft.explanation}</p>
-      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/[0.06] bg-black/30 p-2.5 font-mono text-xs text-foreground">
-        {draft.ruleContent}
-      </pre>
-      {draft.relatedRules.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] text-muted">Possibly related existing rules:</span>
-          {draft.relatedRules.map((r) => (
-            <a
-              key={r.path}
-              href={r.url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[10px] text-primary hover:underline"
-            >
-              {r.label}: {r.path.split("/").pop()}
-            </a>
+      {artifact.content && (
+        <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/[0.06] bg-black/30 p-2.5 font-mono text-xs text-foreground">
+          {artifact.content}
+        </pre>
+      )}
+      {artifact.implementationNotes && <p className="mt-1.5 text-xs text-muted">{artifact.implementationNotes}</p>}
+      {artifact.missingInformation.length > 0 && (
+        <div className="mt-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Missing information</span>
+          <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-xs text-muted">
+            {artifact.missingInformation.map((m, i) => (
+              <li key={i}>{m}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One Not Generated artifact -- compact card explaining why, what's missing, and what to go collect. */
+function NotGeneratedArtifactCard({ artifact }: { artifact: DraftArtifact }) {
+  return (
+    <div className="rounded-lg border border-white/[0.06] bg-white/[0.01] p-2.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs font-semibold text-muted">{artifact.label}</span>
+        <Badge variant="muted">Not Generated</Badge>
+      </div>
+      {artifact.reason && <p className="mt-1 text-xs text-muted">{artifact.reason}</p>}
+      {artifact.requiredInformation.length > 0 && (
+        <div className="mt-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Required information</span>
+          <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-xs text-muted">
+            {artifact.requiredInformation.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {artifact.suggestedIntelligenceCollection.length > 0 && (
+        <div className="mt-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Suggested intelligence collection</span>
+          <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-xs text-muted">
+            {artifact.suggestedIntelligenceCollection.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * All 12 AI-assessed detection artifacts for one backlog item -- see
+ * server/detectionRuleDraft.js. Each artifact was independently judged
+ * Generated or Not Generated against the gap's own evidence; a response
+ * where most of the 12 are Not Generated is the correct, honest output for
+ * a low-signal gap, not an incomplete one -- so Generated artifacts get
+ * full cards up front and Not Generated ones are grouped compactly below,
+ * rather than interleaved as 12 equally-weighted blocks.
+ */
+function DraftArtifactsPanel({ draft }: { draft: DraftArtifactSet }) {
+  const generated = draft.artifacts.filter((a) => a.status === "Generated");
+  const notGenerated = draft.artifacts.filter((a) => a.status === "Not Generated");
+  return (
+    <div className="space-y-3 py-1">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium text-foreground">
+          {generated.length} of {draft.artifacts.length} artifacts generated
+        </span>
+        {draft.relatedRules.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] text-muted">Possibly related existing rules:</span>
+            {draft.relatedRules.map((r) => (
+              <a key={r.path} href={r.url} target="_blank" rel="noreferrer" className="text-[10px] text-primary hover:underline">
+                {r.label}: {r.path.split("/").pop()}
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {generated.length > 0 && (
+        <div className="space-y-2">
+          {generated.map((artifact) => (
+            <GeneratedArtifactCard key={artifact.type} artifact={artifact} />
           ))}
         </div>
       )}
-      <p className="text-[10px] text-muted">AI-drafted starting point -- review, adapt, and test before deploying. Generated {new Date(draft.generatedAt).toLocaleString()}.</p>
+
+      {notGenerated.length > 0 && (
+        <div>
+          <h5 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Not Generated ({notGenerated.length})</h5>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {notGenerated.map((artifact) => (
+              <NotGeneratedArtifactCard key={artifact.type} artifact={artifact} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-[10px] text-muted">
+        AI-drafted starting point -- every Generated artifact requires human review, adaptation, and testing before deploying. Generated{" "}
+        {new Date(draft.generatedAt).toLocaleString()}.
+      </p>
     </div>
   );
 }
@@ -235,20 +320,20 @@ const BACKLOG_STATUS_BADGE: Record<DetectionBacklogStatus, "muted" | "medium" | 
 };
 
 function DetectionBacklogSection() {
-  const { items, isLoading, isError, error, setStatus, clearStatus, isUpdating, draftRule, draftingId } = useDetectionBacklog();
+  const { items, isLoading, isError, error, setStatus, clearStatus, isUpdating, draftArtifacts, draftingId } = useDetectionBacklog();
   const [statusFilter, setStatusFilter] = useState<DetectionBacklogStatus | "all">("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [expandedDraftId, setExpandedDraftId] = useState<string | null>(null);
   const [draftErrors, setDraftErrors] = useState<Record<string, string>>({});
 
-  async function requestDraftRule(item: DetectionBacklogItem) {
+  async function requestDraftArtifacts(item: DetectionBacklogItem) {
     setDraftErrors((prev) => ({ ...prev, [item.id]: "" }));
     try {
-      await draftRule(item.id);
+      await draftArtifacts(item.id);
       setExpandedDraftId(item.id);
     } catch (err) {
-      setDraftErrors((prev) => ({ ...prev, [item.id]: (err as Error)?.message ?? "Failed to draft a rule." }));
+      setDraftErrors((prev) => ({ ...prev, [item.id]: (err as Error)?.message ?? "Failed to draft detection artifacts." }));
     }
   }
 
@@ -320,7 +405,7 @@ function DetectionBacklogSection() {
               <TableHeaderCell>Source</TableHeaderCell>
               <TableHeaderCell>Status</TableHeaderCell>
               <TableHeaderCell>Note</TableHeaderCell>
-              <TableHeaderCell>Draft Rule</TableHeaderCell>
+              <TableHeaderCell>Draft Detections</TableHeaderCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -386,7 +471,7 @@ function DetectionBacklogSection() {
                 </TableCell>
                 <TableCell className="max-w-[10rem]">
                   <div className="flex flex-col items-start gap-1">
-                    {item.draftRule ? (
+                    {item.draftArtifacts ? (
                       <button
                         type="button"
                         onClick={() => setExpandedDraftId(expandedDraftId === item.id ? null : item.id)}
@@ -396,13 +481,13 @@ function DetectionBacklogSection() {
                         {expandedDraftId === item.id ? "Hide draft" : "View draft"}
                       </button>
                     ) : (
-                      <Button type="button" size="sm" variant="outline" onClick={() => requestDraftRule(item)} disabled={draftingId === item.id}>
+                      <Button type="button" size="sm" variant="outline" onClick={() => requestDraftArtifacts(item)} disabled={draftingId === item.id}>
                         <Sparkles className="h-3 w-3" />
-                        {draftingId === item.id ? "Drafting…" : "Draft Rule"}
+                        {draftingId === item.id ? "Drafting…" : "Draft Detections"}
                       </Button>
                     )}
-                    {item.draftRule && (
-                      <Button type="button" size="sm" variant="outline" onClick={() => requestDraftRule(item)} disabled={draftingId === item.id}>
+                    {item.draftArtifacts && (
+                      <Button type="button" size="sm" variant="outline" onClick={() => requestDraftArtifacts(item)} disabled={draftingId === item.id}>
                         {draftingId === item.id ? "Redrafting…" : "Regenerate"}
                       </Button>
                     )}
@@ -410,10 +495,10 @@ function DetectionBacklogSection() {
                   </div>
                 </TableCell>
               </TableRow>
-              {expandedDraftId === item.id && item.draftRule && (
+              {expandedDraftId === item.id && item.draftArtifacts && (
                 <TableRow key={`${item.id}::draft`}>
                   <TableCell colSpan={6} className="bg-black/20">
-                    <DraftRulePanel draft={item.draftRule} />
+                    <DraftArtifactsPanel draft={item.draftArtifacts} />
                   </TableCell>
                 </TableRow>
               )}

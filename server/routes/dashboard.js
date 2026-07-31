@@ -47,7 +47,7 @@ import { getAllStatuses as getAllRemediationStatuses, setStatus as setRemediatio
 import { buildRemediationQueue } from "../remediationQueue.js";
 import { buildHuntingQueryLibrary } from "../huntingLibrary.js";
 import { buildDetectionBacklog } from "../detectionBacklog.js";
-import { generateDraftRule } from "../detectionRuleDraft.js";
+import { generateDraftArtifacts } from "../detectionRuleDraft.js";
 import { buildEmergingThreatsRanking, computeAggregateIndustryHeatmap } from "../emergingThreatsRanking.js";
 import { generateIndustryBriefing, InsufficientCoverageError } from "../industryBriefing.js";
 import { GroqUnavailableError } from "../groqClient.js";
@@ -56,7 +56,7 @@ import {
   getAllStatuses as getAllDetectionBacklogStatuses,
   setStatus as setDetectionBacklogStatus,
   clearStatus as clearDetectionBacklogStatus,
-  setDraftRule as setDetectionBacklogDraftRule,
+  setDraftArtifacts as setDetectionBacklogDraftArtifacts,
   DETECTION_BACKLOG_STATUSES,
 } from "../detectionBacklogTracker.js";
 
@@ -476,8 +476,8 @@ router.get("/dashboard/hunting-library", (_req, res) => {
 // same broadening rationale as the Hunting Query Library above) -- paired
 // with a status this app has no other way to know (has Detection
 // Engineering actually built it), same pattern as the Remediation Tracker. ---
-// Shared by the GET route and the draft-rule route below, both of which need
-// the same fully-joined item list (the draft-rule route to find the one item
+// Shared by the GET route and the draft-artifacts route below, both of which need
+// the same fully-joined item list (the draft-artifacts route to find the one item
 // its :id refers to, since the backlog is re-derived on every request rather
 // than persisted).
 function getDetectionBacklogItems() {
@@ -517,19 +517,22 @@ router.delete("/dashboard/detection-backlog/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// On-demand AI-drafted candidate Sigma/YARA rule for one backlog item -- see
+// On-demand AI-drafted detection artifacts (Sigma, 3 query languages, YARA,
+// 2 network-rule languages, IOC/analytic-rule recommendations, hunting
+// hypotheses, detection-engineering notes -- 12 types total, each
+// independently Generated/Not Generated) for one backlog item -- see
 // server/detectionRuleDraft.js. Generated per-click, not bulk/scheduled (see
 // that module's own header for why), so this can be a plain synchronous
-// request/response despite the ~2-5s Groq round trip.
-router.post("/dashboard/detection-backlog/:id/draft-rule", async (req, res) => {
+// request/response despite the multi-second Groq round trip.
+router.post("/dashboard/detection-backlog/:id/draft-artifacts", async (req, res) => {
   const id = decodeURIComponent(req.params.id);
   const { items, ruleIndex } = getDetectionBacklogItems();
   const item = items.find((i) => i.id === id);
   if (!item) return res.status(404).json({ error: "Detection backlog item not found" });
 
   try {
-    const draft = await generateDraftRule(item, ruleIndex);
-    const record = setDetectionBacklogDraftRule(id, draft);
+    const draft = await generateDraftArtifacts(item, ruleIndex);
+    const record = setDetectionBacklogDraftArtifacts(id, draft);
     res.json({ id, ...record });
   } catch (error) {
     if (error instanceof GroqUnavailableError) return res.status(503).json({ error: error.message });
