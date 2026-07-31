@@ -8,7 +8,19 @@
 // how many enterprise "export to Word" features have worked for two decades,
 // not a hack). Both share one HTML-building pass over the report so the
 // two output formats can never drift out of sync with each other.
-import type { AiThreatSummaryReport } from "@/types/threat-intel";
+import type { AiThreatSummaryReport, OperationalRecommendationTeam } from "@/types/threat-intel";
+
+// Fixed reading order, mirrors src/components/dashboard/AiSummarization.tsx's
+// OperationalRecommendationsTable -- keeps the exported document's section
+// order identical to what the tab itself shows.
+const OPERATIONAL_RECOMMENDATION_TEAMS: OperationalRecommendationTeam[] = [
+  "Threat Intelligence",
+  "Threat Hunting",
+  "Detection Engineering",
+  "SOC Operations",
+  "Vulnerability Management",
+  "Incident Response",
+];
 
 function esc(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -429,6 +441,16 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     parts.push(paragraph(actions.threatIntelTakeaway));
     parts.push(heading(3, "Executive Leadership Takeaway"));
     parts.push(paragraph(actions.executiveLeadershipTakeaway));
+  }
+
+  if (report.operationalRecommendations?.length > 0) {
+    parts.push(heading(2, "Operational Recommendations"));
+    for (const team of OPERATIONAL_RECOMMENDATION_TEAMS) {
+      const rows = report.operationalRecommendations.filter((r) => r.team === team);
+      if (rows.length === 0) continue;
+      const items = rows.map((r) => `<li><strong>[${esc(r.priority)}] ${esc(r.recommendation)}</strong> -- ${esc(r.rationale)}</li>`).join("");
+      parts.push(`${heading(3, team)}<ul>${items}</ul>`);
+    }
   }
 
   parts.push(heading(2, "Confidence & Risk Reasoning"));

@@ -358,6 +358,51 @@ function RecommendedActionsChecklist({ actions }: { actions: Array<{ action: str
   );
 }
 
+const OPERATIONAL_RECOMMENDATION_TEAMS = ["Threat Intelligence", "Threat Hunting", "Detection Engineering", "SOC Operations", "Vulnerability Management", "Incident Response"] as const;
+
+/**
+ * The flat, prioritized cross-team checklist (server/aiThreatSummary.js's
+ * operationalRecommendations) -- distinct from the "Operational Actions"
+ * section below it, which is the deep per-team narrative this table
+ * distills from. Grouped by team in a fixed reading order regardless of
+ * what order the API returned entries in (the backend already sorts this
+ * way too; re-grouping here is just defensive against older cached
+ * responses). A team with no article-supported action still renders its own
+ * "No additional actions identified" row rather than disappearing, so the
+ * six-team checklist always reads as complete, not partially missing.
+ */
+function OperationalRecommendationsTable({ recommendations }: { recommendations: Array<{ team: string; priority: string; recommendation: string; rationale: string }> }) {
+  if (recommendations.length === 0) return null;
+  return (
+    <Section title="Operational Recommendations">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {OPERATIONAL_RECOMMENDATION_TEAMS.map((team) => {
+          const rows = recommendations.filter((r) => r.team === team);
+          if (rows.length === 0) return null;
+          return (
+            <div key={team} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
+              <h5 className="mb-1.5 text-xs font-semibold text-foreground">{team}</h5>
+              <ul className="space-y-2">
+                {rows.map((r, i) => (
+                  <li key={i} className="text-xs">
+                    <div className="flex items-start gap-1.5">
+                      <Badge variant={priorityVariant(r.priority)} className="mt-0.5 shrink-0">
+                        {r.priority}
+                      </Badge>
+                      <span className="font-medium text-foreground">{r.recommendation}</span>
+                    </div>
+                    <p className="mt-0.5 pl-1 text-muted">{r.rationale}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
+
 type ExposureAnswer = "yes" | "no" | "unsure";
 
 /**
@@ -959,6 +1004,8 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               </>
             );
           })()}
+
+          <OperationalRecommendationsTable recommendations={report.operationalRecommendations ?? []} />
 
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Confidence & Risk Reasoning</h4>

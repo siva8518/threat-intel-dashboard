@@ -1132,6 +1132,16 @@ export interface AiThreatSummaryOperationalActions {
   executiveLeadershipTakeaway: string;
 }
 
+export type OperationalRecommendationTeam = "Threat Intelligence" | "Threat Hunting" | "Detection Engineering" | "SOC Operations" | "Vulnerability Management" | "Incident Response";
+
+/** One row of the flat, prioritized cross-team checklist -- see server/aiThreatSummary.js's `safeOperationalRecommendations`. Distinct from AiThreatSummaryOperationalActions' deep per-team narrative sections: this is the scannable "what, in what order" view, not the "how exactly" detail. */
+export interface OperationalRecommendation {
+  team: OperationalRecommendationTeam;
+  priority: "Critical" | "High" | "Medium" | "Low";
+  recommendation: string;
+  rationale: string;
+}
+
 /**
  * One enterprise-grade SOC threat intelligence report generated from a
  * single major vendor/CISA advisory article -- see server/aiThreatSummary.js.
@@ -1167,6 +1177,7 @@ export interface AiThreatSummaryReport {
   threatActors: AiThreatSummaryActor[];
   malware: AiThreatSummaryMalware[];
   operationalActions: AiThreatSummaryOperationalActions;
+  operationalRecommendations: OperationalRecommendation[];
   confidenceAssessment: AiThreatSummaryConfidence;
   aiRiskScoring: AiThreatSummaryRiskScoring;
 }

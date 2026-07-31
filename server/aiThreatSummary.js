@@ -67,6 +67,7 @@ const SYSTEM_PROMPT =
   '  "threatIntelTakeaway": string -- a forward-looking trend/trajectory judgment for a CTI analyst, never a restatement of the vulnerability, patch guidance, or business risk already covered above. Answer whichever of these genuinely apply: is this part of a broader trend (device class, vulnerability class, technique) rather than an isolated incident? Is attacker capability or tooling sophistication increasing? Is this a new TTP or reuse of an established one? Is this likely tied to or a continuation of an existing campaign? Should follow-on activity be expected (weaponization, PoC release, botnet incorporation, ransomware targeting), and on what kind of timeline based on comparable historical disclosures? What specifically should an analyst watch for next? Ground every claim either in what the article states OR in a clearly-hedged general pattern for this vulnerability/device/technique category (e.g. "vulnerabilities affecting IoT access-control systems have increasingly been incorporated into botnets within days of disclosure") -- never assert a specific unconfirmed fact about THIS incident (no invented actor, no invented campaign name, no claim that exploitation IS happening if the article doesn\'t say so). Only write "Not Reported" if neither the article nor any well-established general pattern for this category offers a genuine trend/trajectory angle -- this should be rare; "apply the patch" is never an acceptable answer here.\n' +
   '  "executiveLeadershipTakeaway": string (under 100 words, zero technical jargon) -- answers "does management specifically need to get personally involved, and why" (tie this directly to businessRisk.requiresExecutiveAttention), a decision-relevance verdict distinct from executiveSummary\'s situational "what happened" read -- do not restate executiveSummary\'s sentences.\n' +
   '}\n' +
+  '"operationalRecommendations": array of role-specific action items across exactly these 6 teams -- "Threat Intelligence", "Threat Hunting", "Detection Engineering", "SOC Operations", "Vulnerability Management", "Incident Response" -- each shaped {"team": string (copied exactly from that list), "priority": "Critical"|"High"|"Medium"|"Low", "recommendation": string (MUST begin with an action verb -- Track, Hunt, Validate, Correlate, Update, Review, Create, Monitor, Search, Block, Escalate, Isolate, Contain, Audit, Investigate, Scan, Deploy, etc. -- specific and operational, e.g. "Hunt for internet-facing instances of the affected service exposed before the patch date" not "monitor for suspicious activity"), "rationale": string (exactly one sentence explaining why THIS threat specifically supports this action)}. This is a distinct, flat, prioritized CHECKLIST view across all six teams, not a restatement of operationalActions above -- distill and prioritize that guidance into short, scannable action items rather than repeating its sentences verbatim. Generate a recommendation for a team ONLY if the article\'s actual reported threat activity genuinely supports it -- never generic advice like "monitor for suspicious activity" or "apply patches." Do not invent a plausible-sounding action a team could theoretically take on any threat; ground every recommendation in what this specific article describes. If a team genuinely has no article-supported action, include exactly ONE entry for that team: {"team": that team, "priority": "Low", "recommendation": "No additional actions identified", "rationale": a one-sentence reason why (e.g. "Article contains no indicators or activity actionable by this team")}. A team may have multiple entries (up to 4) if the article genuinely supports several distinct actions for it; most single-CVE-advisory articles will not.\n' +
   '"confidenceAssessment": {"level": "High"|"Medium"|"Low", "score": integer 0-100, "reasoning": string, "factorsPresent": string[] (specific, concrete factors that are actually true of THIS article/data and increase confidence -- e.g. "Official CISA advisory", "KEV inclusion confirmed", "CVE ID confirmed against NVD", "Active exploitation confirmed by vendor", "Named vendor advisory available", "Full technical writeup with confirmed IOCs" -- only list what genuinely applies here, never pad with factors that don\'t apply), "factorsMissing": string[] (what would have increased confidence further but isn\'t available for this article -- e.g. "No IOC validation available", "No public PoC confirmed", "Not confirmed via independent telemetry", "Exploitation details beyond the vendor advisory are limited")} -- score must be justified purely by which factorsPresent/factorsMissing apply (roughly 85-100 High, 50-84 Medium, below 50 Low) -- never assign a score without grounding it in the specific factors listed. reasoning is a one-sentence summary of the same judgment, shown alongside the factor lists.\n' +
   '"aiRiskScoring": {"score": integer 0-100, "priority": "Critical"|"High"|"Medium"|"Low", "reasoning": string} -- build the score by adding: active exploitation +20, ransomware usage +15, public PoC +15, internet-exposed service +15, privilege escalation +10, authentication bypass +15, critical CVSS +10, widely deployed software +10; subtract points if exploitation requires unlikely conditions. Explain which factors applied.\n' +
   "No other text, no markdown formatting, no code fences.";
@@ -550,6 +551,41 @@ function safeIncidentResponse(v) {
   };
 }
 
+// Deliberately a different SHAPE than operationalActions above, not a
+// duplicate of its content: operationalActions is deep, per-team, tool-
+// specific guidance (real event IDs, KQL logic, hunting hypotheses);
+// operationalRecommendations is the flat, scannable, prioritized checklist
+// view across all six teams -- the "what do I do, in what order" table a
+// team lead skims first, distinct from the "how exactly do I do it"
+// narrative sections it draws on. The model is instructed not to restate
+// those sections' sentences verbatim, only to distill/prioritize them.
+const OPERATIONAL_RECOMMENDATION_TEAMS = ["Threat Intelligence", "Threat Hunting", "Detection Engineering", "SOC Operations", "Vulnerability Management", "Incident Response"];
+const MAX_RECOMMENDATIONS_PER_TEAM = 4;
+
+function safeOperationalRecommendations(value) {
+  if (!Array.isArray(value)) return [];
+  const perTeamCount = new Map();
+  const out = [];
+  for (const entry of value) {
+    const team = OPERATIONAL_RECOMMENDATION_TEAMS.includes(entry?.team) ? entry.team : null;
+    const recommendation = typeof entry?.recommendation === "string" && entry.recommendation.trim() ? entry.recommendation.trim() : null;
+    if (!team || !recommendation) continue; // drop rather than guess a team/recommendation the model didn't clearly supply
+    const count = perTeamCount.get(team) ?? 0;
+    if (count >= MAX_RECOMMENDATIONS_PER_TEAM) continue;
+    perTeamCount.set(team, count + 1);
+    out.push({
+      team,
+      priority: safePriority(entry.priority),
+      recommendation,
+      rationale: safeString(entry.rationale, "Not Reported"),
+    });
+  }
+  // Fixed team order (matches OPERATIONAL_RECOMMENDATION_TEAMS), Critical-first within a team -- a stable, scannable reading order regardless of what order the model emitted entries in.
+  const teamRank = new Map(OPERATIONAL_RECOMMENDATION_TEAMS.map((t, i) => [t, i]));
+  const priorityRank = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+  return out.sort((a, b) => teamRank.get(a.team) - teamRank.get(b.team) || priorityRank[a.priority] - priorityRank[b.priority]);
+}
+
 function safeOperationalActions(v) {
   v ??= {};
   return {
@@ -636,6 +672,7 @@ function parseModelReport(text, validTechniqueIds, techniqueNameToId, idToTechni
       threatActors: safeThreatActors(parsed.threatActors),
       malware: safeMalware(parsed.malware),
       operationalActions: safeOperationalActions(parsed.operationalActions),
+      operationalRecommendations: safeOperationalRecommendations(parsed.operationalRecommendations),
       confidenceAssessment: safeConfidenceAssessment(parsed.confidenceAssessment),
       aiRiskScoring: safeAiRiskScoring(parsed.aiRiskScoring),
     };
