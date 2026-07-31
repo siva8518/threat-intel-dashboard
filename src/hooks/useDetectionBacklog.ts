@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchDetectionBacklog, setDetectionBacklogStatus, clearDetectionBacklogStatus } from "@/api/dashboardApi";
+import { fetchDetectionBacklog, setDetectionBacklogStatus, clearDetectionBacklogStatus, draftDetectionBacklogRule } from "@/api/dashboardApi";
 import { AUTO_REFRESH_MS, STALE_TIME_MS } from "@/config/constants";
 import type { DetectionBacklogStatus } from "@/types/threat-intel";
 import { queryKeys } from "./queryKeys";
@@ -26,6 +26,15 @@ export function useDetectionBacklog() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.detectionBacklog }),
   });
 
+  // Drafting is a ~2-5s Groq round trip triggered one item at a time from
+  // the table -- draftingId (not just isPending) lets the UI show a
+  // per-row "Drafting…" state instead of disabling every row's button at
+  // once while any one draft is in flight.
+  const draftRuleMutation = useMutation({
+    mutationFn: draftDetectionBacklogRule,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.detectionBacklog }),
+  });
+
   return {
     items: query.data?.items ?? [],
     isLoading: query.isLoading,
@@ -34,5 +43,7 @@ export function useDetectionBacklog() {
     setStatus: setStatusMutation.mutateAsync,
     clearStatus: clearStatusMutation.mutateAsync,
     isUpdating: setStatusMutation.isPending || clearStatusMutation.isPending,
+    draftRule: draftRuleMutation.mutateAsync,
+    draftingId: draftRuleMutation.isPending ? draftRuleMutation.variables : null,
   };
 }

@@ -86,7 +86,28 @@ export type DetectionBacklogCategory =
 
 export type DetectionBacklogStatus = "open" | "in_progress" | "implemented" | "wont_do";
 
-/** One detection-engineering gap: flattened out of an AI Summarization report's operationalActions.detectionEngineer, OR derived deterministically from a Malware/Threat Actor Intelligence entity (an active family with no matching public rule, or an actor's own ATT&CK technique), OR from a CISA KEV entry with no matching public rule (see server/detectionBacklog.js), paired with Detection Engineering's own tracked status/note -- this app's only source of truth for whether the gap's actually been closed. */
+export type DraftRuleFormat = "sigma" | "yara";
+export type DraftRuleConfidence = "High" | "Medium" | "Low";
+
+export interface DraftRuleRelatedRule {
+  label: string;
+  path: string;
+  url: string;
+}
+
+/** AI-drafted candidate rule for one Detection Backlog gap -- server/detectionRuleDraft.js. Always a starting point for a human to review/adapt/test, never a validated or deploy-ready rule -- see confidence and explanation. */
+export interface DraftRule {
+  format: DraftRuleFormat;
+  ruleTitle: string;
+  ruleContent: string;
+  explanation: string;
+  confidence: DraftRuleConfidence;
+  relatedRules: DraftRuleRelatedRule[];
+  model: string;
+  generatedAt: string;
+}
+
+/** One detection-engineering gap: flattened out of an AI Summarization report's operationalActions.detectionEngineer, OR derived deterministically from a Malware/Threat Actor Intelligence entity (an active family with no matching public rule, or an actor's own ATT&CK technique), OR from a CISA KEV entry with no matching public rule (see server/detectionBacklog.js), paired with Detection Engineering's own tracked status/note -- this app's only source of truth for whether the gap's actually been closed -- and an optional AI-drafted candidate rule (see DraftRule above). */
 export interface DetectionBacklogItem {
   id: string;
   category: DetectionBacklogCategory;
@@ -95,6 +116,7 @@ export interface DetectionBacklogItem {
   status: DetectionBacklogStatus;
   note: string | null;
   statusUpdatedAt: string | null;
+  draftRule: DraftRule | null;
   source: "ai-report" | "entity";
   reportId: string;
   articleTitle: string;

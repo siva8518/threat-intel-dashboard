@@ -13,6 +13,7 @@ import type {
   CveSeverityDistribution,
   DetectionBacklogItem,
   DetectionBacklogStatus,
+  DraftRule,
   EmergingThreatsRanking,
   ExecutiveSummary,
   ExploitIntelligence,
@@ -266,6 +267,12 @@ export async function setDetectionBacklogStatus(
 
 export async function clearDetectionBacklogStatus(id: string): Promise<{ ok: boolean }> {
   return fetchJson(`/api/dashboard/detection-backlog/${encodeURIComponent(id)}`, { source: "Dashboard API", method: "DELETE" });
+}
+
+export async function draftDetectionBacklogRule(
+  id: string,
+): Promise<{ id: string; status: DetectionBacklogStatus; note: string | null; updatedAt: string; draftRule: DraftRule }> {
+  return fetchJson(`/api/dashboard/detection-backlog/${encodeURIComponent(id)}/draft-rule`, { source: "Dashboard API", method: "POST" });
 }
 
 export async function fetchSourcesHealth(): Promise<{ sources: SourceHealth[]; onlineCount: number; totalCount: number }> {

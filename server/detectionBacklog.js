@@ -205,7 +205,13 @@ export function buildDetectionBacklog(reports, statuses, malwareEntities = [], a
 
   const items = raw.map((item) => {
     const tracked = statuses[item.id];
-    return { ...item, status: tracked?.status ?? "open", note: tracked?.note ?? null, statusUpdatedAt: tracked?.updatedAt ?? null };
+    return {
+      ...item,
+      status: tracked?.status ?? "open",
+      note: tracked?.note ?? null,
+      statusUpdatedAt: tracked?.updatedAt ?? null,
+      draftRule: tracked?.draftRule ?? null,
+    };
   });
 
   return items.sort((a, b) => {
