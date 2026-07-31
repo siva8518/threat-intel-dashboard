@@ -79,11 +79,18 @@ export function IndustryHeatmap({ rows, onGenerateBriefing }: { rows: IndustryHe
           {sorted.map((row) => {
             const isOpen = expanded === row.industry;
             const applicable = row.relevance !== "Not Applicable";
+            // "Not Applicable" here only means the last 30 days of news found
+            // no elevated signal -- the on-demand briefing searches a wider
+            // 90-day window and can still find enough to generate from (e.g.
+            // Energy & Utilities: Not Applicable here, but a real briefing
+            // exists), so the row must stay reachable whenever that action
+            // is available, even with nothing else to show in this table.
+            const canExpand = applicable || Boolean(onGenerateBriefing);
             return (
               <Fragment key={row.industry}>
                 <tr
-                  onClick={() => applicable && setExpanded(isOpen ? null : row.industry)}
-                  className={cn("border-b border-white/[0.05]", applicable && "cursor-pointer hover:bg-white/[0.02]")}
+                  onClick={() => canExpand && setExpanded(isOpen ? null : row.industry)}
+                  className={cn("border-b border-white/[0.05]", canExpand && "cursor-pointer hover:bg-white/[0.02]")}
                 >
                   <td className="py-2 pr-3 text-foreground">
                     <span className="mr-1.5" aria-hidden="true">
@@ -100,74 +107,83 @@ export function IndustryHeatmap({ rows, onGenerateBriefing }: { rows: IndustryHe
                   <td className="py-2 pr-3 tabular-nums text-foreground">{row.riskScore}/10</td>
                   <td className="py-2 text-muted">{row.priority}</td>
                 </tr>
-                {isOpen && applicable && (
+                {isOpen && canExpand && (
                   <tr className="border-b border-white/[0.05] bg-white/[0.02]">
                     <td colSpan={4} className="px-2 py-3 text-xs">
-                      <p className="mb-2 text-foreground">
-                        <span className="font-semibold">Why: </span>
-                        {row.whyAffected} <span className="text-muted">(confidence: {row.confidence})</span>
-                      </p>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        {row.potentialImpact.length > 0 && (
-                          <div>
-                            <p className="mb-1 font-semibold text-foreground">Potential Impact</p>
-                            <ul className="list-disc space-y-0.5 pl-4 text-muted">
-                              {row.potentialImpact.map((x, i) => (
-                                <li key={i}>{x}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {row.likelyTargetAssets.length > 0 && (
-                          <div>
-                            <p className="mb-1 font-semibold text-foreground">Likely Target Assets</p>
-                            <ul className="list-disc space-y-0.5 pl-4 text-muted">
-                              {row.likelyTargetAssets.map((x, i) => (
-                                <li key={i}>{x}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {row.defensiveFocus.length > 0 && (
-                          <div>
-                            <p className="mb-1 font-semibold text-foreground">Defensive Focus</p>
-                            <ul className="list-disc space-y-0.5 pl-4 text-muted">
-                              {row.defensiveFocus.map((x, i) => (
-                                <li key={i}>{x}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                      {row.contributingArticles && row.contributingArticles.length > 0 && (
-                        <div className="mt-3 border-t border-white/[0.05] pt-2.5">
-                          <p className="mb-1.5 font-semibold text-foreground">
-                            Source articles behind this sector's rating
-                            {row.subtitle && <span className="ml-1 font-normal text-muted">{row.subtitle}</span>}
+                      {applicable ? (
+                        <>
+                          <p className="mb-2 text-foreground">
+                            <span className="font-semibold">Why: </span>
+                            {row.whyAffected} <span className="text-muted">(confidence: {row.confidence})</span>
                           </p>
-                          <ul className="space-y-1">
-                            {row.contributingArticles.map((a) => (
-                              <li key={a.id}>
-                                <a
-                                  href={a.id}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="flex items-center gap-1.5 text-muted transition-colors hover:text-foreground"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <Badge variant={RELEVANCE_BADGE_VARIANT[a.relevance]} className="shrink-0">
-                                    {a.relevance}
-                                  </Badge>
-                                  <span className="truncate">{a.title}</span>
-                                  <span className="shrink-0 text-[11px]">
-                                    ({a.source} &middot; {timeAgo(a.publishedDate)})
-                                  </span>
-                                  <ExternalLink className="h-3 w-3 shrink-0" />
-                                </a>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            {row.potentialImpact.length > 0 && (
+                              <div>
+                                <p className="mb-1 font-semibold text-foreground">Potential Impact</p>
+                                <ul className="list-disc space-y-0.5 pl-4 text-muted">
+                                  {row.potentialImpact.map((x, i) => (
+                                    <li key={i}>{x}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {row.likelyTargetAssets.length > 0 && (
+                              <div>
+                                <p className="mb-1 font-semibold text-foreground">Likely Target Assets</p>
+                                <ul className="list-disc space-y-0.5 pl-4 text-muted">
+                                  {row.likelyTargetAssets.map((x, i) => (
+                                    <li key={i}>{x}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {row.defensiveFocus.length > 0 && (
+                              <div>
+                                <p className="mb-1 font-semibold text-foreground">Defensive Focus</p>
+                                <ul className="list-disc space-y-0.5 pl-4 text-muted">
+                                  {row.defensiveFocus.map((x, i) => (
+                                    <li key={i}>{x}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                          {row.contributingArticles && row.contributingArticles.length > 0 && (
+                            <div className="mt-3 border-t border-white/[0.05] pt-2.5">
+                              <p className="mb-1.5 font-semibold text-foreground">
+                                Source articles behind this sector's rating
+                                {row.subtitle && <span className="ml-1 font-normal text-muted">{row.subtitle}</span>}
+                              </p>
+                              <ul className="space-y-1">
+                                {row.contributingArticles.map((a) => (
+                                  <li key={a.id}>
+                                    <a
+                                      href={a.id}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="flex items-center gap-1.5 text-muted transition-colors hover:text-foreground"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <Badge variant={RELEVANCE_BADGE_VARIANT[a.relevance]} className="shrink-0">
+                                        {a.relevance}
+                                      </Badge>
+                                      <span className="truncate">{a.title}</span>
+                                      <span className="shrink-0 text-[11px]">
+                                        ({a.source} &middot; {timeAgo(a.publishedDate)})
+                                      </span>
+                                      <ExternalLink className="h-3 w-3 shrink-0" />
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-muted">
+                          No elevated signal for this sector in the last 30 days of news. The full briefing searches a wider 90-day window and may still find enough
+                          to generate from.
+                        </p>
                       )}
                       {onGenerateBriefing && (
                         <button
