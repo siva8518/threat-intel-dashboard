@@ -22,17 +22,10 @@
 // grounded fields (cves, iocs, mitreAttack, threatActors, malware,
 // references) are unchanged -- this redesign only touches the model's own
 // synthesis, not the extraction pipeline.
-import { groqJson } from "./groqClient.js";
+import { aiRouter } from "./ai/aiRouter.js";
 import { extractEntities } from "./githubIntel/extractor.js";
 import { detectionRulesFor } from "./correlate.js";
 import { fetchArticleText } from "./lib/articleText.js";
-
-// Groq's largest generally-available free-tier model -- this report's own
-// schema is exactly the kind of output a smaller model struggles to fill
-// out reliably (confirmed live earlier with a local 1.5B-parameter model
-// producing mostly "Not Reported"/empty fields) -- so this stays on the
-// strongest free option rather than trading down for speed/quota headroom.
-const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || "llama-3.3-70b-versatile";
 
 const SYSTEM_PROMPT =
   "You are a Principal Cyber Threat Intelligence Analyst supporting an enterprise SOC, Detection Engineering, Incident Response, Threat Hunting, and Security Leadership. " +
@@ -855,21 +848,21 @@ export async function generateThreatSummary(article, grounded) {
     `Overall severity already computed for this article: ${grounded.severity}\n` +
     `${buildTechniqueCandidatesBlock(candidateTechniques)}\n`;
 
-  // Groq is a hosted service with its own large context window (well past
-  // what this prompt + article text + completion ever needs), so none of
-  // the num_ctx/keep_alive tuning the old local-Ollama call needed here
-  // applies -- that was all working around this machine's own limited free
-  // RAM, not a property of the model or the task itself.
-  const response = await groqJson({
-    model: GROQ_CHAT_MODEL,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userContent },
-    ],
+  // Routed through server/ai/aiRouter.js (Gemini -> Qwen -> Groq -> Cohere,
+  // automatic failover on rate limits/quota/timeouts/5xx) rather than
+  // calling Groq directly -- this report generation is the single heaviest,
+  // most latency-sensitive LLM call in the app, so it benefits the most
+  // from not going fully dark whenever one provider's free tier is
+  // exhausted. AllProvidersFailedError (thrown only once every configured
+  // provider has been attempted) is caught by server/aiThreatSummaryJob.js
+  // the same way GroqUnavailableError used to be -- stop the cycle, don't
+  // advance lastCycleAt, retry on the next tick.
+  const response = await aiRouter.summarizeJson(userContent, {
+    systemPrompt: SYSTEM_PROMPT,
     temperature: 0.2,
   });
 
-  const modelReport = parseModelReport(response.message?.content ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);
+  const modelReport = parseModelReport(response.summary ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);
   if (!modelReport) return null;
 
   const groundedReport = groundRecommendedActions(groundExistingRules(modelReport, grounded.detectionRuleIndex), iocs);

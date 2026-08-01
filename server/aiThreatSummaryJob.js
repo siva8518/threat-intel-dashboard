@@ -1,5 +1,5 @@
 // Drains the news pool through generateThreatSummary() -- the full combined
-// ~200-source pool (server/connectors/newsFeeds.js), the same one Daily
+// ~180-source pool (server/connectors/newsFeeds.js), the same one Daily
 // Summary's "Top News" reads from (see BreakingNewsStrip.tsx), not just
 // major-vendor/CISA sources. Previously restricted to MAJOR_VENDOR_SOURCES +
 // CISA only; widened because that restriction meant an article surfaced in
@@ -10,27 +10,44 @@
 // below is kept as a secondary sort tie-break (see buildBatch), not a filter,
 // so vendor/CERT-grade advisories still get first crack at each cycle's
 // limited slots -- widening eligibility doesn't mean giving up on quality
-// prioritization, just removing the hard exclusion. The full
-// enterprise-report schema (25+ sections, several with per-platform hunting-
-// query arrays) is far heavier to generate than the 5-category combined
-// extraction (server/combinedExtractionJob.js), so this runs one article at
-// a time on a slow cadence -- generating too aggressively would repeat the
-// exact "recomputing something expensive too often" mistake already found
-// and fixed in this app (see the news-tagging cache fix in
-// server/routes/dashboard.js). Also scoped to RECENCY_WINDOW_MS below --
-// this used to strictly drain an ever-growing historical backlog by
-// severity, which on a slow CPU-only local model meant it was always
-// working through old ground instead of keeping current. Restricting to
-// freshly-published advisories means the job's job is now "keep up with
-// today," a much smaller and steadier workload than "eventually finish
-// months of backlog."
+// prioritization, just removing the hard exclusion.
+//
+// Also drains two non-news platform sources through the SAME pipeline --
+// ransomware victim disclosures (ransomwareCandidates()) and high-signal
+// GitHub-discovered exploit repos (githubRepoCandidates()) -- so "AI
+// Summarization covers everything this platform tracks" doesn't stop at RSS
+// news. Neither has real article prose, so each is turned into a genuine
+// (never fabricated) title/summary built only from that record's own real
+// fields, then run through generateThreatSummary() unchanged -- the
+// existing "say Not Reported rather than guess" grounding discipline
+// naturally produces a correspondingly thin report for these rather than
+// needing a second report schema.
+//
+// The full enterprise-report schema (25+ sections, several with
+// per-platform hunting-query arrays) is far heavier to generate than the
+// 5-category combined extraction (server/combinedExtractionJob.js), so this
+// runs one article at a time on a slow cadence -- generating too
+// aggressively would repeat the exact "recomputing something expensive too
+// often" mistake already found and fixed in this app (see the news-tagging
+// cache fix in server/routes/dashboard.js). Also scoped to
+// RECENCY_WINDOW_MS below -- this used to strictly drain an ever-growing
+// historical backlog by severity, which on a slow CPU-only local model
+// meant it was always working through old ground instead of keeping
+// current. Restricting to freshly-published/discovered candidates means the
+// job's job is now "keep up with today," a much smaller and steadier
+// workload than "eventually finish months of backlog."
 import * as cache from "./cache.js";
 import { MAJOR_VENDOR_SOURCES } from "./connectors/newsFeeds.js";
-import { tagNewsItems } from "./newsCorrelation.js";
+import { getTaggedNewsItems } from "./newsCorrelation.js";
+import { threatFeedIocs } from "./threatFeed.js";
+import { ransomwareCampaigns as getRansomwareCampaigns } from "./ransomwareCampaigns.js";
+import { getAllEntities as getMalwareIntelligenceEntities } from "./malwareIntelligence.js";
+import { getAllEntities as getThreatActorIntelligenceEntities } from "./threatActorIntelligence.js";
+import { getAllGithubRepos } from "./githubIntel/index.js";
 import { generateThreatSummary } from "./aiThreatSummary.js";
 import { isArticleProcessed, markArticleProcessed, addReport, getLastCycleAt, setLastCycleAt } from "./aiThreatSummaryStore.js";
 import { queryCves } from "./connectors/nvd.js";
-import { GroqUnavailableError } from "./groqClient.js";
+import { AllProvidersFailedError } from "./ai/aiRouter.js";
 import { log } from "./lib/log.js";
 
 // A separate attempt to also switch to a smaller/faster model just for this
@@ -203,11 +220,71 @@ class NewsCacheNotReadyError extends Error {}
 // (a non-empty batch) has actually been attempted.
 class NoEligibleCandidatesError extends Error {}
 
+function slugify(text) {
+  return (text ?? "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+// Ransomware victim disclosures and GitHub-discovered exploit repos have no
+// narrative article text of their own -- unlike every other candidate here,
+// they're structured records (a group/victim/date, or a repo's own
+// metadata), not prose a report can extract technical detail from. Rather
+// than build a second, thinner report schema for them, this synthesizes a
+// real (never fabricated -- every field below comes straight from the
+// record itself) title/summary from their own data and feeds them through
+// the exact same generateThreatSummary() pipeline as a news article. The
+// existing "say Not Reported rather than guess" grounding discipline
+// naturally produces a correspondingly thin report for these -- most
+// narrative sections legitimately empty, but severity/CVE/reference fields
+// still real -- without any schema or prompt change.
+function ransomwareCandidates(campaigns) {
+  return (campaigns ?? [])
+    .filter((c) => c.group && c.victim && c.discoveredDate)
+    .map((c) => ({
+      title: `${c.group} lists new ransomware victim: ${c.victim}`,
+      summary:
+        `Ransomware group "${c.group}" added "${c.victim}" to its leak site` +
+        (c.sector && c.sector !== "Unknown" ? `, sector: ${c.sector}` : "") +
+        (c.country && c.country !== "Unknown" ? `, country: ${c.country}` : "") +
+        `. Discovered ${c.discoveredDate}.`,
+      // A real per-victim/group leak-site URL when known (fetchArticleText()
+      // in aiThreatSummary.js will genuinely try to fetch it, same as any
+      // news link) -- a stable synthetic identifier otherwise, purely for
+      // isArticleProcessed() dedup, never shown as if it were a real source.
+      link: c.sourceUrl || `ransomware-victim://${slugify(c.group)}/${slugify(c.victim)}`,
+      source: `${c.group} (Ransomware Leak Site)`,
+      publishedDate: c.discoveredDate,
+    }));
+}
+
+// Restricted to already-enriched, genuinely high-signal repos (a real CVE
+// match, or a meaningfully-scored threat classification) -- most of the
+// GitHub Intel backlog is still pending enrichment or low-signal (a personal
+// dotfiles repo that merely matched a broad search query), and would
+// otherwise flood this job's limited daily batch with noise the way the
+// pre-widening `#/dashboard/github-intel` backlog itself once did. link is
+// the repo's own real GitHub URL, so fetchArticleText() can genuinely pull
+// its README as source text, same as a real news article.
+const GITHUB_MIN_THREAT_SCORE = 40;
+function githubRepoCandidates(repos) {
+  return (repos ?? [])
+    .filter((r) => r.lastEnrichedAt && ((r.extracted?.cveIds?.length ?? 0) > 0 || (r.threatScore?.score ?? 0) >= GITHUB_MIN_THREAT_SCORE))
+    .map((r) => ({
+      title: `New GitHub repository: ${r.fullName}`,
+      summary:
+        (r.description || "No description provided.") +
+        (r.extracted?.cveIds?.length ? ` References: ${r.extracted.cveIds.join(", ")}.` : ""),
+      link: r.url,
+      source: "GitHub Intel",
+      publishedDate: r.discoveredAt,
+    }));
+}
+
 async function runCycle() {
   if (!cache.getEntry("news").data) throw new NewsCacheNotReadyError("News cache has not synced yet");
 
   const newsItems = cache.getEntry("news").data?.items ?? [];
-  const candidates = newsItems.filter((item) => isRecent(item.publishedDate) && !isArticleProcessed(item.link));
+  const allCandidateSources = [...newsItems, ...ransomwareCandidates(getRansomwareCampaigns()), ...githubRepoCandidates(getAllGithubRepos())];
+  const candidates = allCandidateSources.filter((item) => isRecent(item.publishedDate) && !isArticleProcessed(item.link));
   if (candidates.length === 0) throw new NoEligibleCandidatesError("No eligible candidates in this check");
 
   const attackData = cache.getEntry("attack").data;
@@ -219,11 +296,24 @@ async function runCycle() {
   // slicing to BATCH_SIZE -- otherwise a run of Low-severity articles sitting
   // earlier in the news pool could starve the batch every cycle even while
   // Critical/High/Medium articles are waiting right behind them.
-  const tagged = tagNewsItems(candidates, {
-    actorNames: (attackData?.groups ?? []).flatMap((g) => [g.name, ...(g.aliases ?? [])]),
-    malwareNames: (attackData?.software ?? []).flatMap((s) => [s.name, ...(s.aliases ?? [])]),
-    kevIds: new Set((kevEntries ?? []).map((e) => e.cveId)),
-    epssScores: epssScores ?? {},
+  //
+  // Uses the same shared getTaggedNewsItems() as Daily Summary/Emerging
+  // Threats/Security News (server/routes/dashboard.js's getTaggedNewsCached())
+  // instead of a narrower inline ATT&CK-only tagNewsItems() call this job
+  // used to make on its own -- confirmed live those two tagging passes had
+  // drifted apart, so an article whose only actor/malware signal came from
+  // Malware/Threat Actor Intelligence (not ATT&CK's own catalog) computed a
+  // lower severity here than it showed elsewhere in the app, silently
+  // de-prioritizing it in this job's Critical-first batch ordering.
+  const tagged = getTaggedNewsItems({
+    newsItems: candidates,
+    attackData,
+    ransomwareCampaigns: getRansomwareCampaigns(),
+    threatFeedIocs: threatFeedIocs(),
+    kevEntries,
+    epssScores,
+    malwareEntities: getMalwareIntelligenceEntities(),
+    threatActorEntities: getThreatActorIntelligenceEntities(),
   });
 
   // tagNewsItems() returns lowercase severity strings ("critical"/"high"/...)
@@ -276,7 +366,7 @@ async function runCycle() {
         markArticleProcessed(item.link);
       }
     } catch (error) {
-      if (error instanceof GroqUnavailableError) throw error; // stop the cycle -- Groq being down/rate-limited affects every remaining article the same way
+      if (error instanceof AllProvidersFailedError) throw error; // stop the cycle -- every AI provider being down/rate-limited affects every remaining article the same way
       log.error("ai-threat-summary", `failed to summarize "${item.title.slice(0, 60)}...": ${error.message}`);
       markArticleProcessed(item.link);
     }
@@ -289,12 +379,14 @@ let hasWarnedUnavailable = false;
 
 /**
  * Returns whether today's cycle should count as "done" for lastCycleAt
- * purposes. Groq being unavailable (down, or free-tier rate-limited) does
- * NOT count -- if the daily cycle lands during an outage, we want the next
- * CHECK_INTERVAL_MS tick to retry (and keep retrying) until it recovers,
- * not silently skip an entire day's reports waiting for the next 24h
- * boundary. Zero eligible candidates also does NOT count, same reasoning --
- * see NoEligibleCandidatesError above. Any other failure (a bad article, an
+ * purposes. Every configured AI provider being unavailable (down, or
+ * rate-limited/quota-exhausted -- server/ai/aiRouter.js already tried each
+ * one, with retries, before giving up) does NOT count -- if the daily cycle
+ * lands during an outage, we want the next CHECK_INTERVAL_MS tick to retry
+ * (and keep retrying) until at least one provider recovers, not silently
+ * skip an entire day's reports waiting for the next 24h boundary. Zero
+ * eligible candidates also does NOT count, same reasoning -- see
+ * NoEligibleCandidatesError above. Any other failure (a bad article, an
  * NVD hiccup) still counts as this day's attempt -- those already log
  * per-article inside runCycle() and don't warrant a retry-loop every 10
  * minutes.
@@ -305,9 +397,9 @@ async function safeCycle() {
     hasWarnedUnavailable = false;
     return true;
   } catch (error) {
-    if (error instanceof GroqUnavailableError) {
+    if (error instanceof AllProvidersFailedError) {
       if (!hasWarnedUnavailable) {
-        log.warn("ai-threat-summary", `${error.message} -- AI Summarization will report itself unavailable until Groq is reachable again.`);
+        log.warn("ai-threat-summary", `${error.message} -- AI Summarization will report itself unavailable until at least one provider is reachable again.`);
         hasWarnedUnavailable = true;
       }
       return false;

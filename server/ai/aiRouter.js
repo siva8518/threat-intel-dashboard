@@ -1,13 +1,16 @@
 // Provider-agnostic AI summarization router. The rest of the app should
 // only ever import { aiRouter } from here and call aiRouter.summarize(prompt)
-// -- it walks PROVIDERS in priority order, retrying each once (exponential
-// backoff, see server/lib/retry.js) before failing over to the next, and
-// returns a normalized result no matter which provider actually answered.
+// (plain text) or aiRouter.summarizeJson(prompt, opts) (structured JSON,
+// used by server/aiThreatSummary.js's report generation) -- both walk
+// PROVIDERS in priority order, retrying each once (exponential backoff, see
+// server/lib/retry.js) before failing over to the next, and return a
+// normalized result no matter which provider actually answered.
 //
 // Adding a 6th provider is a two-file change: write one more
 // server/ai/providers/*.js implementing { label, model, isConfigured(),
-// summarize(prompt) }, then add it to the PROVIDERS array below. Nothing
-// else here, or in any caller, needs to change.
+// summarize(prompt), summarizeJson(prompt, opts) }, then add it to the
+// PROVIDERS array below. Nothing else here, or in any caller, needs to
+// change.
 import { log } from "../lib/log.js";
 import { withRetry } from "../lib/retry.js";
 import { classifyProviderError } from "./aiProviderError.js";
@@ -54,15 +57,16 @@ export class AllProvidersFailedError extends Error {
  */
 
 /**
- * Sends `prompt` to the first configured, working provider in priority
- * order. A provider not configured (no API key) is skipped without
- * counting as a failure. A provider that errors is retried once, then
- * skipped as a failover. Only throws once every configured provider has
- * failed.
- * @param {string} prompt
+ * Shared failover loop for both summarize() and summarizeJson() -- they
+ * only differ in which provider method gets called (`summarize` vs.
+ * `summarizeJson`) and what arguments it's given; the priority-order walk,
+ * retry-then-failover behavior, logging, and terminal-failure handling are
+ * identical, so that logic lives here once instead of twice.
+ * @param {"summarize"|"summarizeJson"} method
+ * @param {unknown[]} callArgs - forwarded to provider[method](...callArgs)
  * @returns {Promise<AISummaryResult>}
  */
-export async function summarize(prompt) {
+async function runWithFailover(method, callArgs) {
   const attempts = [];
   const cycleStart = Date.now();
 
@@ -75,7 +79,7 @@ export async function summarize(prompt) {
 
     const start = Date.now();
     try {
-      const result = await withRetry(() => provider.summarize(prompt), {
+      const result = await withRetry(() => provider[method](...callArgs), {
         retries: RETRIES_PER_PROVIDER,
         baseDelayMs: RETRY_BASE_DELAY_MS,
       });
@@ -102,4 +106,33 @@ export async function summarize(prompt) {
   throw new AllProvidersFailedError(attempts);
 }
 
-export const aiRouter = { summarize };
+/**
+ * Sends `prompt` to the first configured, working provider in priority
+ * order. A provider not configured (no API key) is skipped without
+ * counting as a failure. A provider that errors is retried once, then
+ * skipped as a failover. Only throws once every configured provider has
+ * failed.
+ * @param {string} prompt
+ * @returns {Promise<AISummaryResult>}
+ */
+export async function summarize(prompt) {
+  return runWithFailover("summarize", [prompt]);
+}
+
+/**
+ * Same failover behavior as summarize(), but requests each provider's
+ * native structured/JSON-object response mode and allows a separate system
+ * prompt -- for structured-report callers like server/aiThreatSummary.js
+ * that need a schema-following JSON response, not free text. `result.summary`
+ * is the raw JSON text (still a string); parsing/validating it against the
+ * caller's own schema is the caller's job, same as it already was when
+ * server/aiThreatSummary.js called server/groqClient.js directly.
+ * @param {string} userPrompt
+ * @param {{systemPrompt?: string, temperature?: number}} [options]
+ * @returns {Promise<AISummaryResult>}
+ */
+export async function summarizeJson(userPrompt, options = {}) {
+  return runWithFailover("summarizeJson", [userPrompt, options]);
+}
+
+export const aiRouter = { summarize, summarizeJson };
