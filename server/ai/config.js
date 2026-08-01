@@ -10,7 +10,11 @@
 export const AI_ROUTER_CONFIG = {
   gemini: {
     apiKey: process.env.GEMINI_API_KEY,
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    // Confirmed live that a pinned "gemini-2.5-flash" 404s for newer API
+    // keys ("no longer available to new users" per Google's own error) --
+    // using Google's maintained "-latest" alias instead of a pinned version
+    // avoids this exact breakage recurring every time a model gets retired.
+    model: process.env.GEMINI_MODEL || "gemini-flash-latest",
   },
   qwen: {
     // Qwen is served through OpenRouter's single unified API, not its own
