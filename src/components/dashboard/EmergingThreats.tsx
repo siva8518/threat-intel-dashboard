@@ -34,19 +34,6 @@ function timeAgo(iso: string) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function scoreBreakdownTitle(entry: EmergingThreatEntry) {
-  const f = entry.threatPriorityScore.factors;
-  const line = (label: string, factor: { value: number; weight: number; contribution: number }) =>
-    `${label}: ${Math.round(factor.value)} × ${Math.round(factor.weight * 100)}w = ${factor.contribution.toFixed(1)}`;
-  return [
-    "Threat Priority Score -- a transparent weighted heuristic, not an industry-standard metric.",
-    line(entry.hasReport ? "AI risk score" : "Severity-tier risk (no AI report yet)", f.risk),
-    line("Known exploited (KEV)", f.kev),
-    line("Peak industry risk", f.industryRisk),
-    line("Recency", f.recency),
-  ].join("\n");
-}
-
 function ThreatRow({ entry }: { entry: EmergingThreatEntry }) {
   return (
     <a
@@ -55,12 +42,6 @@ function ThreatRow({ entry }: { entry: EmergingThreatEntry }) {
       rel="noreferrer"
       className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 transition-colors hover:border-white/20"
     >
-      <div
-        className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-sm font-bold tabular-nums text-foreground"
-        title={scoreBreakdownTitle(entry)}
-      >
-        {entry.threatPriorityScore.score}
-      </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="truncate text-sm font-semibold text-foreground">{entry.articleTitle}</span>
@@ -165,7 +146,7 @@ export function EmergingThreats() {
             Ranked Threats <span className="font-normal text-muted">({data?.entries.length ?? 0})</span>
           </CardTitle>
           <p className="mt-1 text-xs text-muted">
-            Every article across all sources from the last 30 days, ranked by Threat Priority Score -- hover a score for the factor breakdown. Entries tagged{" "}
+            Every article across all sources from the last 30 days, ranked by Threat Priority Score. Entries tagged{" "}
             <span className="font-semibold text-accent-cyan">AI Report</span> have a full AI Summarization report backing a sharper score.
           </p>
         </CardHeader>
