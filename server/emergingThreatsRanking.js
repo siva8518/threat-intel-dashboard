@@ -130,12 +130,83 @@ function toRankedEntry(item, report, kevIds) {
   };
 }
 
+const DIVERSITY_HEAD_SIZE = 12; // how many leading slots get category-guaranteed, before falling back to pure score order -- comfortably covers the Overview widget's own top-10 slice of this same list
+const DIVERSITY_CATEGORIES = ["ransomware", "threatActor", "malware", "cve"];
+
+// A single best-fit label per article, used only to decide diversity-head
+// placement below -- never affects the score itself. Precedence favors the
+// more specific/newsworthy signal when an article matches more than one
+// (e.g. "CVE-2026-0257 Leads to Qilin Ransomware" is labeled "ransomware",
+// not "cve", since that's the more useful bucket to guarantee visibility
+// for). ransomwareGroupNames distinguishes a ransomware-attributed actor
+// hit from a generic threat-actor hit (e.g. an APT/nation-state group) --
+// tags.actors alone can't tell them apart, since ransomware group names are
+// folded into the same actor set (see getTaggedNewsItems in
+// server/newsCorrelation.js).
+function categorizeForDiversity(item, ransomwareGroupNames) {
+  const actors = item.tags?.actors ?? [];
+  const malware = item.tags?.malware ?? [];
+  const cveIds = item.tags?.cveIds ?? [];
+  if (actors.some((a) => ransomwareGroupNames.has(a.toLowerCase()))) return "ransomware";
+  if (actors.length > 0) return "threatActor";
+  if (malware.length > 0) return "malware";
+  if (cveIds.length > 0) return "cve";
+  return "general";
+}
+
+// Confirmed live that closing the scoring gap (see namedThreat above) still
+// wasn't enough on its own -- pure score order means whichever category has
+// the deepest bench of high-scoring articles on a given day (usually CVE/KEV
+// advisories, since there are structurally more of those than ransomware/
+// actor hits) can still fill the entire visible head, even when real
+// ransomware/malware/actor activity exists further down the list. This
+// round-robins the best not-yet-picked article from each of
+// ransomware/threatActor/malware/cve into the first DIVERSITY_HEAD_SIZE
+// slots (skipping any category with nothing left, never fabricating or
+// padding), so the head -- what a user actually sees without scrolling --
+// always reflects the real mix of activity instead of one format
+// dominating by score alone. Score-desc order is preserved for everything
+// after the head; "general" articles (no cve/actor/malware tag at all)
+// don't compete for head slots since the goal is guaranteeing those four
+// specific categories, not diluting them with untagged news.
+function diversifyHead(pairs, ransomwareGroupNames) {
+  const byCategory = { ransomware: [], threatActor: [], malware: [], cve: [] };
+  for (const p of pairs) {
+    const category = categorizeForDiversity(p.item, ransomwareGroupNames);
+    if (byCategory[category]) byCategory[category].push(p);
+  }
+
+  const picked = new Set();
+  const head = [];
+  const cursor = { ransomware: 0, threatActor: 0, malware: 0, cve: 0 };
+  while (head.length < DIVERSITY_HEAD_SIZE) {
+    let progressed = false;
+    for (const category of DIVERSITY_CATEGORIES) {
+      if (head.length >= DIVERSITY_HEAD_SIZE) break;
+      const bucket = byCategory[category];
+      while (cursor[category] < bucket.length && picked.has(bucket[cursor[category]].item.link)) cursor[category]++;
+      if (cursor[category] < bucket.length) {
+        const p = bucket[cursor[category]];
+        head.push(p);
+        picked.add(p.item.link);
+        cursor[category]++;
+        progressed = true;
+      }
+    }
+    if (!progressed) break; // every category exhausted -- nothing left to guarantee
+  }
+
+  const rest = pairs.filter((p) => !picked.has(p.item.link));
+  return [...head, ...rest];
+}
+
 /**
  * @param {Array} taggedNewsItems - server/newsCorrelation.js#tagNewsItems output, the full ~200-source pool
  * @param {Array} reports - getAllReports() from server/aiThreatSummaryStore.js -- used to enrich matching articles (by link), never to filter the pool
  * @param {Set<string>} kevIds
+ * @param {Set<string>} ransomwareGroupNames - lowercased ransomware group names (see server/ransomwareCampaigns.js), used only to tell a ransomware-attributed article apart from a generic threat-actor one for diversifyHead() above
  */
-export function buildEmergingThreatsRanking(taggedNewsItems, reports, kevIds) {
+export function buildEmergingThreatsRanking(taggedNewsItems, reports, kevIds, ransomwareGroupNames = new Set()) {
   const reportsByLink = new Map(reports.map((r) => [r.id, r]));
   const now = Date.now();
 
@@ -146,16 +217,19 @@ export function buildEmergingThreatsRanking(taggedNewsItems, reports, kevIds) {
   // (the link) is this list's React key, so duplicates would collide.
   const seen = new Set();
 
-  return taggedNewsItems
+  const pairs = taggedNewsItems
     .filter((item) => now - new Date(item.publishedDate).getTime() <= POOL_WINDOW_MS)
     .filter((item) => {
       if (seen.has(item.link)) return false;
       seen.add(item.link);
       return true;
     })
-    .map((item) => toRankedEntry(item, reportsByLink.get(item.link) ?? null, kevIds))
-    .sort((a, b) => b.threatPriorityScore.score - a.threatPriorityScore.score || new Date(b.publishedDate) - new Date(a.publishedDate))
-    .slice(0, MAX_ENTRIES);
+    .map((item) => ({ item, entry: toRankedEntry(item, reportsByLink.get(item.link) ?? null, kevIds) }))
+    .sort((a, b) => b.entry.threatPriorityScore.score - a.entry.threatPriorityScore.score || new Date(b.entry.publishedDate) - new Date(a.entry.publishedDate));
+
+  return diversifyHead(pairs, ransomwareGroupNames)
+    .slice(0, MAX_ENTRIES)
+    .map((p) => p.entry);
 }
 
 const RELEVANCE_RANK = { Critical: 4, High: 3, Medium: 2, Low: 1, "Not Applicable": 0 };

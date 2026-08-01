@@ -426,8 +426,9 @@ router.get("/dashboard/emerging-threats-ranking", (_req, res) => {
   // the ranked list and the industry heatmap, so the heatmap is never
   // empty waiting on report coverage either.
   const taggedNews = getTaggedNewsCached();
+  const ransomwareGroupNames = new Set(getRansomwareCampaigns().map((c) => c.group.toLowerCase()));
   res.json({
-    entries: buildEmergingThreatsRanking(taggedNews, reports, kevIds),
+    entries: buildEmergingThreatsRanking(taggedNews, reports, kevIds, ransomwareGroupNames),
     industryHeatmap: computeAggregateIndustryHeatmap(taggedNews, reports),
   });
 });
