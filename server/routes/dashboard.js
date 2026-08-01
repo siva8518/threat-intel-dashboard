@@ -676,12 +676,26 @@ router.get("/dashboard/threat-actor-profiles/:attackId", async (req, res) => {
 // computing once in the background and having routes just read the result.
 let taggedNewsMemo = { key: null, items: [] };
 
+// Malware/Threat Actor Intelligence has no cache-entry `updatedAt` of its
+// own (it updates via server/combinedExtractionJob.js's own cadence, not
+// through cache.js) -- this derives a cheap freshness token (count + the
+// single most-recent lastSeen) so the memo above still invalidates when new
+// verified entities appear, instead of only ever refreshing on the next
+// news/attack/kev/epss change.
+function intelFreshnessToken(entities) {
+  let maxLastSeen = 0;
+  for (const e of entities) maxLastSeen = Math.max(maxLastSeen, new Date(e.lastSeen).getTime() || 0);
+  return `${entities.length}:${maxLastSeen}`;
+}
+
 function getTaggedNewsCached() {
   const newsEntry = cache.getEntry("news");
   const attackEntry = cache.getEntry("attack");
   const kevEntry = cache.getEntry("cisa-kev");
   const epssEntry = cache.getEntry("epss");
-  const key = `${newsEntry.updatedAt}|${attackEntry.updatedAt}|${kevEntry.updatedAt}|${epssEntry.updatedAt}`;
+  const malwareEntities = getMalwareIntelligenceEntities();
+  const threatActorEntities = getThreatActorIntelligenceEntities();
+  const key = `${newsEntry.updatedAt}|${attackEntry.updatedAt}|${kevEntry.updatedAt}|${epssEntry.updatedAt}|${intelFreshnessToken(malwareEntities)}|${intelFreshnessToken(threatActorEntities)}`;
   if (taggedNewsMemo.key !== key) {
     taggedNewsMemo = {
       key,
@@ -692,6 +706,8 @@ function getTaggedNewsCached() {
         threatFeedIocs: threatFeedIocs(),
         kevEntries: kevEntry.data?.entries,
         epssScores: epssEntry.data,
+        malwareEntities,
+        threatActorEntities,
       }),
     };
   }

@@ -198,14 +198,55 @@ export function tagNewsItems(newsItems, sources) {
   });
 }
 
+// Same "unknown"/"unnamed" placeholder-name convention already used to
+// filter these two entity stores everywhere else they feed into something
+// besides their own detail page (see server/detectionBacklog.js's
+// GENERIC_ENTITY_NAMES), extended here with bare malware/actor CATEGORY
+// words -- confirmed live the malware store contains verified-but-bogus
+// entities literally named "malware", "Stealer", and "Loader" (an LLM
+// extraction recording the generic category a family belongs to as if it
+// were the family's own name). Those three alone would have matched an
+// enormous fraction of ordinary headlines once fed into the substring
+// matcher below ("malware" appears in nearly every security article title).
+// A real, specific family name (e.g. "RedLine Stealer") still matches fine
+// against these headlines regardless -- matchNames' word-boundary check
+// means blocking the bare category word never blocks the specific name it's
+// part of.
+const GENERIC_INTEL_NAMES = new Set([
+  "unknown", "unknown malware", "unnamed malware", "unknown actor", "not reported", "n/a",
+  "malware", "ransomware", "trojan", "virus", "spyware", "backdoor", "loader", "stealer",
+  "botnet", "worm", "rootkit", "adware", "wiper", "rat", "keylogger", "dropper", "downloader",
+  "infostealer", "cryptominer", "miner", "actor", "threat actor", "group", "gang", "hackers", "attackers",
+]);
+function isRealIntelName(name) {
+  return Boolean(name) && !GENERIC_INTEL_NAMES.has(name.trim().toLowerCase());
+}
+
 /**
  * Builds the actor/malware name lists from already-cached data and tags
  * `newsItems` in one call -- used by /dashboard/news.
+ *
+ * malwareEntities/threatActorEntities (server/malwareIntelligence.js,
+ * server/threatActorIntelligence.js -- optional, [] if omitted) widen the
+ * name lists beyond ATT&CK's own group/software catalog and the
+ * ransomware-tracker group list: those two sources only cover
+ * MITRE-cataloged and ransomware-specific names, so a real family/actor
+ * named only in ongoing news coverage (a new stealer, a non-ransomware
+ * actor group) was invisible to this tagging pass even though this app had
+ * already extracted and verified it elsewhere. Restricted to `verified`
+ * entities only (confirmed against ATT&CK or a live IOC sighting/campaign
+ * match, same bar server/detectionBacklog.js already applies when these
+ * stores feed into something else) -- an unverified LLM extraction
+ * shouldn't get to tag arbitrary headlines.
  */
-export function getTaggedNewsItems({ newsItems, attackData, ransomwareCampaigns, threatFeedIocs, kevEntries, epssScores }) {
+export function getTaggedNewsItems({ newsItems, attackData, ransomwareCampaigns, threatFeedIocs, kevEntries, epssScores, malwareEntities = [], threatActorEntities = [] }) {
   const actorNames = new Set();
   for (const g of attackData?.groups ?? []) for (const n of [g.name, ...(g.aliases ?? [])]) actorNames.add(n);
   for (const c of ransomwareCampaigns ?? []) actorNames.add(c.group);
+  for (const e of threatActorEntities) {
+    if (!e.verified || !isRealIntelName(e.name)) continue;
+    for (const n of [e.name, ...(e.aliases ?? [])]) if (isRealIntelName(n)) actorNames.add(n);
+  }
 
   const commonTools = getCommonAttackToolNames(attackData);
   const malwareNames = new Set();
@@ -214,6 +255,10 @@ export function getTaggedNewsItems({ newsItems, attackData, ransomwareCampaigns,
     for (const n of [s.name, ...(s.aliases ?? [])]) malwareNames.add(n);
   }
   for (const ioc of threatFeedIocs ?? []) for (const fam of splitFamilies(ioc.malwareFamily)) malwareNames.add(fam);
+  for (const e of malwareEntities) {
+    if (!e.verified || !isRealIntelName(e.name)) continue;
+    for (const n of [e.name, ...(e.aliases ?? [])]) if (isRealIntelName(n)) malwareNames.add(n);
+  }
 
   return tagNewsItems(newsItems ?? [], {
     actorNames: Array.from(actorNames),
