@@ -32,6 +32,11 @@ export const AI_ROUTER_CONFIG = {
   },
   cohere: {
     apiKey: process.env.COHERE_API_KEY,
-    model: process.env.COHERE_MODEL || "command-r",
+    // Confirmed live that the undated "command-r" was retired ("removed on
+    // September 15, 2025" per Cohere's own error) -- command-r-08-2024 is
+    // the last still-live dated snapshot of the same model family. Unlike
+    // Gemini, Cohere has no "-latest" alias, so this will need bumping by
+    // hand again once this snapshot is retired too.
+    model: process.env.COHERE_MODEL || "command-r-08-2024",
   },
 };

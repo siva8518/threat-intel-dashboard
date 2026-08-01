@@ -481,13 +481,14 @@ const result = await aiRouter.summarize(prompt);
   other client in this app uses), no vendor SDKs. Adding a 5th provider is a two-file change: one new
   `providers/*.js` file, one line in `server/ai/aiRouter.js`'s `PROVIDERS` array.
 - `server/ai/config.js` centralizes every provider's env var name and default model in one place.
-- Run `npm run ai:example` for a live end-to-end demo. Verified live: a normal run (only `GROQ_API_KEY`
-  set) skips Gemini/Qwen as not-configured and succeeds via Groq; forcing invalid Gemini/OpenRouter keys
-  confirms real failover through two live API rejections into a working Groq call.
-- **Cohere's provider was written from its published API docs, not verified against a live call** (no
-  key was available while building this) — double-check `server/ai/providers/cohereProvider.js`'s
-  response parsing once `COHERE_API_KEY` is set, same as any other integration in this app would get
-  confirmed before being considered done.
+- Run `npm run ai:example` for a live end-to-end demo. All four providers are verified live, each one's
+  actual response parsing confirmed against a real successful call, and each confirmed to correctly win
+  the router when it's next in priority order (forcing the ones ahead of it to fail). Two model defaults
+  needed correcting from their originally-documented names because the vendor retired them: Gemini's
+  pinned `gemini-2.5-flash` 404s for newer API keys (now defaults to `gemini-flash-latest`, Google's
+  maintained alias), and Cohere's undated `command-r` was retired entirely (now defaults to
+  `command-r-08-2024`, the last live dated snapshot — Cohere has no `-latest` equivalent, so this one
+  will need bumping by hand again eventually).
 - Not yet wired into AI Summarization's own report generation (`server/aiThreatSummary.js`) — that would
   need every provider here to also support forced-JSON response mode, which this router doesn't attempt.
 
