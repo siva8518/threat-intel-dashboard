@@ -1,0 +1,105 @@
+// Provider-agnostic AI summarization router. The rest of the app should
+// only ever import { aiRouter } from here and call aiRouter.summarize(prompt)
+// -- it walks PROVIDERS in priority order, retrying each once (exponential
+// backoff, see server/lib/retry.js) before failing over to the next, and
+// returns a normalized result no matter which provider actually answered.
+//
+// Adding a 6th provider is a two-file change: write one more
+// server/ai/providers/*.js implementing { label, model, isConfigured(),
+// summarize(prompt) }, then add it to the PROVIDERS array below. Nothing
+// else here, or in any caller, needs to change.
+import { log } from "../lib/log.js";
+import { withRetry } from "../lib/retry.js";
+import { classifyProviderError } from "./aiProviderError.js";
+import { geminiProvider } from "./providers/geminiProvider.js";
+import { qwenProvider } from "./providers/qwenProvider.js";
+import { groqProvider } from "./providers/groqProvider.js";
+import { cohereProvider } from "./providers/cohereProvider.js";
+
+// Priority order: Gemini 2.5 Flash -> Qwen 3 32B (OpenRouter) -> Groq Llama
+// 3.3 70B -> Cohere Command R.
+const PROVIDERS = [geminiProvider, qwenProvider, groqProvider, cohereProvider];
+
+const RETRIES_PER_PROVIDER = 1; // "retry each provider once" -- 2 total attempts per provider before failing over
+const RETRY_BASE_DELAY_MS = 1000;
+
+const REASON_LABEL = {
+  rate_limited: "Rate Limited",
+  quota_exceeded: "Quota Exceeded",
+  timeout: "Timeout",
+  server_error: "Server Error",
+  network_error: "Network Error",
+  not_configured: "Not Configured",
+  other: "Error",
+};
+
+/** Thrown only once every configured provider has actually been attempted. */
+export class AllProvidersFailedError extends Error {
+  /** @param {{provider: string, reason: string, message?: string}[]} attempts */
+  constructor(attempts) {
+    const detail = attempts.map((a) => `${a.provider} (${REASON_LABEL[a.reason] ?? a.reason})`).join(", ");
+    super(`All AI providers failed or were unavailable: ${detail}`);
+    this.name = "AllProvidersFailedError";
+    this.attempts = attempts;
+  }
+}
+
+/**
+ * @typedef {Object} AISummaryResult
+ * @property {string} provider - which provider answered, e.g. "Groq"
+ * @property {string} model - the specific model used, e.g. "llama-3.3-70b-versatile"
+ * @property {string} summary - the generated text
+ * @property {number} latency - ms taken by the winning provider's successful attempt
+ * @property {boolean} success - always true when this resolves (throws AllProvidersFailedError otherwise)
+ */
+
+/**
+ * Sends `prompt` to the first configured, working provider in priority
+ * order. A provider not configured (no API key) is skipped without
+ * counting as a failure. A provider that errors is retried once, then
+ * skipped as a failover. Only throws once every configured provider has
+ * failed.
+ * @param {string} prompt
+ * @returns {Promise<AISummaryResult>}
+ */
+export async function summarize(prompt) {
+  const attempts = [];
+  const cycleStart = Date.now();
+
+  for (const provider of PROVIDERS) {
+    if (!provider.isConfigured()) {
+      log.info("ai-router", `Provider: ${provider.label} | Status: ${REASON_LABEL.not_configured} | Skipping...`);
+      attempts.push({ provider: provider.label, reason: "not_configured" });
+      continue;
+    }
+
+    const start = Date.now();
+    try {
+      const result = await withRetry(() => provider.summarize(prompt), {
+        retries: RETRIES_PER_PROVIDER,
+        baseDelayMs: RETRY_BASE_DELAY_MS,
+      });
+      const latency = Date.now() - start;
+      const tokenPart = result.tokensUsed ? ` | Tokens: ${result.tokensUsed}` : "";
+      const failoverPart = attempts.length > 0 ? ` | Failovers: ${attempts.length}` : "";
+      log.info("ai-router", `Provider: ${provider.label} | Status: Success | Latency: ${(latency / 1000).toFixed(1)}s${tokenPart}${failoverPart}`);
+
+      return { provider: provider.label, model: provider.model, summary: result.summary, latency, success: true };
+    } catch (rawError) {
+      // Providers already classify their own errors before throwing (see
+      // aiProviderError.js) -- this fallback only matters if one somehow
+      // throws something unclassified.
+      const error = rawError.name === "AIProviderUnavailableError" ? rawError : classifyProviderError(provider.label, rawError);
+      const latency = Date.now() - start;
+      attempts.push({ provider: provider.label, reason: error.reason, message: error.message });
+      log.warn("ai-router", `Provider: ${provider.label} | Status: ${REASON_LABEL[error.reason] ?? "Error"} | Latency: ${(latency / 1000).toFixed(1)}s | Failing over...`);
+    }
+  }
+
+  const totalLatency = Date.now() - cycleStart;
+  const failoverCount = attempts.filter((a) => a.reason !== "not_configured").length;
+  log.error("ai-router", `All providers exhausted after ${failoverCount} failover(s), ${(totalLatency / 1000).toFixed(1)}s total -- summarization unavailable`);
+  throw new AllProvidersFailedError(attempts);
+}
+
+export const aiRouter = { summarize };

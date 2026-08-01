@@ -457,6 +457,40 @@ intel, executive leadership).
 - Generation speed is Groq's hosted inference (typically seconds per report, not minutes) rather than
   whatever this machine's own CPU/GPU can do locally.
 
+## AI Router (multi-provider failover)
+
+`server/ai/` is a generic, provider-agnostic text-summarization router — separate from AI Summarization
+above, which needs Groq's forced JSON-object mode for its 25+ section structured report schema and isn't
+a fit for this router's plain-text `summarize(prompt) -> string` interface. Built for cases where any
+single free-tier LLM provider's rate limits are the bottleneck, not the report schema.
+
+```js
+import { aiRouter } from "./server/ai/aiRouter.js";
+
+const result = await aiRouter.summarize(prompt);
+// { provider: "Groq", model: "llama-3.3-70b-versatile", summary: "...", latency: 612, success: true }
+```
+
+- Tries **Gemini 2.5 Flash → Qwen 3 32B (OpenRouter) → Groq Llama 3.3 70B → Cohere Command R**, in that
+  order. Every provider is optional — one with no API key set is skipped (not treated as a failure).
+- A provider that errors (rate limit, quota, timeout, 5xx, network error, or anything else) is retried
+  once with exponential backoff (`server/lib/retry.js`), then the router fails over to the next provider.
+  Only throws `AllProvidersFailedError` once every configured provider has actually been attempted.
+- `server/ai/providers/*.js` each implement the same shape — `{ label, model, isConfigured(), summarize(prompt) }`
+  — via plain `fetch` against each vendor's REST API (`server/lib/http.js`, the same foundation every
+  other client in this app uses), no vendor SDKs. Adding a 5th provider is a two-file change: one new
+  `providers/*.js` file, one line in `server/ai/aiRouter.js`'s `PROVIDERS` array.
+- `server/ai/config.js` centralizes every provider's env var name and default model in one place.
+- Run `npm run ai:example` for a live end-to-end demo. Verified live: a normal run (only `GROQ_API_KEY`
+  set) skips Gemini/Qwen as not-configured and succeeds via Groq; forcing invalid Gemini/OpenRouter keys
+  confirms real failover through two live API rejections into a working Groq call.
+- **Cohere's provider was written from its published API docs, not verified against a live call** (no
+  key was available while building this) — double-check `server/ai/providers/cohereProvider.js`'s
+  response parsing once `COHERE_API_KEY` is set, same as any other integration in this app would get
+  confirmed before being considered done.
+- Not yet wired into AI Summarization's own report generation (`server/aiThreatSummary.js`) — that would
+  need every provider here to also support forced-JSON response mode, which this router doesn't attempt.
+
 ## Environment variables
 
 See [.env.example](.env.example) for the full list with links to get each free key. All of them are

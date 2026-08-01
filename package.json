@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "start": "node server/index.js",
     "mcp": "node server/mcpServer.js",
+    "ai:example": "node server/ai/example.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
