@@ -21,7 +21,7 @@
 import { INDUSTRY_CATALOG } from "./aiThreatSummary.js";
 import industryKeywords10 from "./data/industry-map-10.json" with { type: "json" };
 
-const WEIGHTS = { risk: 0.4, kev: 0.15, industryRisk: 0.25, recency: 0.2 };
+const WEIGHTS = { risk: 0.35, kev: 0.15, namedThreat: 0.15, industryRisk: 0.2, recency: 0.15 };
 const RECENCY_FULL_WINDOW_MS = 24 * 60 * 60 * 1000; // full recency credit for anything published in the last 24h
 const RECENCY_ZERO_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // linearly decays to zero credit by 7 days old
 const POOL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // how far back the ranked pool reaches at all -- matches this app's existing "last 30 days" convention (see CveSeverityDistribution)
@@ -48,6 +48,24 @@ function actorMalwareFloor(item) {
   const hasMalware = (item.tags?.malware?.length ?? 0) > 0;
   if (hasActor && hasMalware) return 85; // a named campaign attributed to both an actor and a malware family -- strong signal
   if (hasActor || hasMalware) return 65;
+  return 0;
+}
+
+// Mirrors isKevMatch()'s role for CVE content: a dedicated bonus channel for
+// named actor/malware activity, not just a floor on the risk sub-score.
+// Confirmed live that the floor alone still left a structural gap -- a
+// KEV-tied CVE gets both a maxed-out risk value (100, since computeSeverity
+// reaches "critical" via KEV/high-EPSS) AND the flat +15-weighted kev bonus
+// on top, while an actor+malware article only ever touched the risk
+// sub-score (capped at 85 there), so it could never actually catch up even
+// with the floor in place (a KEV CVE scored ~75 vs. ~54 for the best-case
+// named campaign, same recency). This factor gives named-campaign articles
+// the same second bonus channel KEV articles already had.
+function namedThreatBonus(item) {
+  const hasActor = (item.tags?.actors?.length ?? 0) > 0;
+  const hasMalware = (item.tags?.malware?.length ?? 0) > 0;
+  if (hasActor && hasMalware) return 100;
+  if (hasActor || hasMalware) return 50;
   return 0;
 }
 
@@ -81,12 +99,14 @@ export function computeThreatPriorityScore(item, report, kevIds) {
   const baseRisk = report?.aiRiskScoring?.score ?? SEVERITY_BASE_SCORE[item.severity] ?? SEVERITY_BASE_SCORE.low;
   const risk = Math.max(baseRisk, actorMalwareFloor(item));
   const kev = isKevMatch(item, report, kevIds);
+  const namedThreat = namedThreatBonus(item);
   const industryRisk = maxIndustryRisk(report) * 10; // 0-10 -> 0-100
   const recency = recencyScore(item.publishedDate);
 
   const factors = {
     risk: { value: risk, weight: WEIGHTS.risk, contribution: risk * WEIGHTS.risk },
     kev: { value: kev ? 100 : 0, weight: WEIGHTS.kev, contribution: (kev ? 100 : 0) * WEIGHTS.kev },
+    namedThreat: { value: namedThreat, weight: WEIGHTS.namedThreat, contribution: namedThreat * WEIGHTS.namedThreat },
     industryRisk: { value: industryRisk, weight: WEIGHTS.industryRisk, contribution: industryRisk * WEIGHTS.industryRisk },
     recency: { value: recency, weight: WEIGHTS.recency, contribution: recency * WEIGHTS.recency },
   };

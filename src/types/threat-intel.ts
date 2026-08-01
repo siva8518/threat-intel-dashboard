@@ -1232,6 +1232,8 @@ export interface ThreatPriorityScore {
     /** aiRiskScoring.score when a report exists, otherwise a severity-tier proxy (critical/high/medium/low -> 100/70/40/15) -- see server/emergingThreatsRanking.js. */
     risk: ThreatPriorityScoreFactor;
     kev: ThreatPriorityScoreFactor;
+    /** Bonus for a named actor/malware-attributed campaign -- the actor/malware counterpart to the kev bonus above. */
+    namedThreat: ThreatPriorityScoreFactor;
     industryRisk: ThreatPriorityScoreFactor;
     recency: ThreatPriorityScoreFactor;
   };
