@@ -9,7 +9,7 @@ import { ErrorState, EmptyState } from "./ErrorState";
 import { SeverityBadge } from "./SeverityBadge";
 import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { IndustryHeatmap } from "./IndustryHeatmap";
-import { useAiThreatSummaries } from "@/hooks/useAiThreatSummaries";
+import { useAiThreatSummaries, useAiSummaryProvenance } from "@/hooks/useAiThreatSummaries";
 import type { AiThreatSummaryIndustryRelevance, AiThreatSummaryReport, IndustryName, Severity } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 import { downloadReportAsPdf, downloadReportAsWord } from "@/lib/reportExport";
@@ -196,6 +196,32 @@ function ScoreGauge({ label, value, variant, title }: { label: string; value: st
         <div className="text-[10px] uppercase tracking-wider text-muted">{label}</div>
         <div className="text-sm font-semibold text-foreground">{value}</div>
       </div>
+    </div>
+  );
+}
+
+// A one-time-per-report-view legend rather than a per-section badge --
+// tagging all ~25 sections individually would need threading a provenance
+// prop through every Section call site in this file for marginal added
+// clarity over stating the rule once. The classification itself still comes
+// from the backend's REPORT_SECTION_PROVENANCE (fetched via
+// useAiSummaryProvenance, cached indefinitely -- see server/aiThreatSummary.js
+// for why this is a static, code-determined map rather than the model
+// self-reporting it), not restated here independently.
+function ProvenanceLegend() {
+  const { data } = useAiSummaryProvenance();
+  if (!data) return null;
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[11px] text-muted">
+      <span className="font-semibold text-foreground">How to read this report: </span>
+      <Badge variant="low" className="mx-0.5">Vendor Confirmed</Badge>
+      sections (CVEs, IOCs, severity, references) are extracted directly from the source, never generated.{" "}
+      <Badge variant="cyan" className="mx-0.5">AI Assessment</Badge>
+      sections (technical analysis, industry relevance, risk scoring) are the model's own synthesis, grounded in the article but not independently verifiable.{" "}
+      <Badge variant="medium" className="mx-0.5">Analyst Recommendation</Badge>
+      sections (detection engineering, hunting, IR guidance) are suggested actions, not confirmed facts.{" "}
+      <Badge variant="muted" className="mx-0.5">Future Outlook</Badge>
+      sections (threat intel/executive takeaways) are forward-looking trajectory judgment, not a prediction of certainty.
     </div>
   );
 }
@@ -478,7 +504,7 @@ function ExposureAssessment({ exposure }: { exposure: typeof EMPTY_EXPOSURE_ASSE
 }
 
 /** Named threat-hunting hypotheses (operationalActions.threatHunter.hypotheses) -- each is a specific, testable claim, not a generic "hunt for suspicious activity" bullet. */
-function HypothesisList({ hypotheses }: { hypotheses: Array<{ hypothesis: string; dataSources: string[]; positiveFindingLooksLike: string; falsePositiveNote: string }> }) {
+function HypothesisList({ hypotheses }: { hypotheses: Array<{ hypothesis: string; dataSources: string[]; investigationSteps?: string[]; positiveFindingLooksLike: string; falsePositiveNote: string }> }) {
   if (hypotheses.length === 0) return null;
   return (
     <Section title="Threat Hunter -- Hypotheses">
@@ -490,6 +516,16 @@ function HypothesisList({ hypotheses }: { hypotheses: Array<{ hypothesis: string
             </div>
             <div className="mt-1 space-y-0.5 text-muted">
               {h.dataSources.length > 0 && <div>Data sources: {h.dataSources.join(", ")}</div>}
+              {(h.investigationSteps?.length ?? 0) > 0 && (
+                <div>
+                  Investigation steps:
+                  <ol className="ml-4 mt-0.5 list-decimal space-y-0.5">
+                    {h.investigationSteps!.map((step, j) => (
+                      <li key={j}>{step}</li>
+                    ))}
+                  </ol>
+                </div>
+              )}
               {h.positiveFindingLooksLike && h.positiveFindingLooksLike !== "Not Reported" && <div>Positive finding looks like: {h.positiveFindingLooksLike}</div>}
               {h.falsePositiveNote && h.falsePositiveNote !== "Not Reported" && <div>False-positive note: {h.falsePositiveNote}</div>}
             </div>
@@ -502,7 +538,7 @@ function HypothesisList({ hypotheses }: { hypotheses: Array<{ hypothesis: string
 
 function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryReport; expanded: boolean; onToggle: () => void }) {
   const kevCount = report.cves.filter((c) => c.knownExploited).length;
-  const totalIocs = report.iocs.ipAddresses.length + report.iocs.domains.length + report.iocs.urls.length + report.iocs.hashes.length + report.iocs.emailAddresses.length;
+  const totalIocs = Object.values(report.iocs).reduce((sum, list) => sum + (list?.length ?? 0), 0);
   // "Not Reported" is the model's explicit "the article names nothing here"
   // placeholder (see the "never invent facts" grounding in
   // server/aiThreatSummary.js), not a real actor/malware name -- confirmed
@@ -571,6 +607,8 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             <p className="mt-1.5 text-[11px] text-muted">Analysis Confidence is the model's certainty that this report reflects the source article -- not a severity signal. See "Overall SOC priority" below for the vendor-context assessment.</p>
           </div>
 
+          <ProvenanceLegend />
+
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Summary</h4>
             {report.executiveHeadline && <p className="mb-1.5 text-base font-semibold text-foreground">{report.executiveHeadline}</p>}
@@ -603,6 +641,11 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             const risk = report.businessRisk ?? EMPTY_BUSINESS_RISK;
             return (
               <>
+                {risk.overallRiskLevel && (
+                  <div className="-mb-3">
+                    <Badge variant={priorityVariant(risk.overallRiskLevel)}>Overall Risk: {risk.overallRiskLevel}</Badge>
+                  </div>
+                )}
                 <KeyValueBlock
                   title="Business Risk"
                   pairs={[
@@ -778,8 +821,18 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                       </Badge>
                       <span className="font-semibold text-foreground">{t.technique}</span>
                       <span className="text-muted">· {t.killChainPhase}</span>
+                      {t.confidence && (
+                        <Badge variant={priorityVariant(t.confidence)} className="ml-auto">
+                          {t.confidence} confidence
+                        </Badge>
+                      )}
                     </div>
                     <p className="mt-1 text-muted">{t.reason}</p>
+                    {t.evidence && (
+                      <p className="mt-1 border-l-2 border-white/10 pl-2 italic text-muted">
+                        Evidence: &ldquo;{t.evidence}&rdquo;
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -827,12 +880,30 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
 
           {totalIocs > 0 && (
             <Section title="Indicators of Compromise (verified, extracted from source text)">
+              {report.iocProvenance && (
+                <p className="mb-2.5 text-[11px] text-muted">
+                  Every indicator below is {report.iocProvenance.confidence.toLowerCase()} -- extracted directly from{" "}
+                  <a href={report.iocProvenance.sourceUrl} target="_blank" rel="noreferrer" className="underline hover:text-primary">
+                    {report.iocProvenance.source}
+                  </a>
+                  's own text, never model-generated. Vendor confirmed. First seen {new Date(report.iocProvenance.firstSeen).toLocaleDateString()}.
+                </p>
+              )}
               <div className="space-y-2.5">
                 <IocRow label="IP Addresses" values={report.iocs.ipAddresses} />
                 <IocRow label="Domains" values={report.iocs.domains} />
                 <IocRow label="URLs" values={report.iocs.urls} />
                 <IocRow label="Hashes" values={report.iocs.hashes} />
                 <IocRow label="Email Addresses" values={report.iocs.emailAddresses} />
+                <IocRow label="Registry Keys" values={report.iocs.registryKeys ?? []} />
+                <IocRow label="File Paths" values={report.iocs.filePaths ?? []} />
+                <IocRow label="File Names" values={report.iocs.fileNames ?? []} />
+                <IocRow label="Ports" values={report.iocs.ports ?? []} />
+                <IocRow label="Event IDs" values={report.iocs.eventIds ?? []} />
+                <IocRow label="Named Pipes" values={report.iocs.namedPipes ?? []} />
+                <IocRow label="Mutexes" values={report.iocs.mutexes ?? []} />
+                <IocRow label="Scheduled Tasks" values={report.iocs.scheduledTasks ?? []} />
+                <IocRow label="Services" values={report.iocs.services ?? []} />
               </div>
             </Section>
           )}
@@ -936,6 +1007,14 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                   {actions.detectionEngineer.existingRulesAvailable.length === 0 && actions.detectionEngineer.newDetectionLogic.length === 0 && (
                     <p className="text-xs text-muted">Rules: Not Reported</p>
                   )}
+                  <GroupedCodeLists
+                    title="Query Opportunities by Platform"
+                    groups={[
+                      ["KQL (Sentinel / Defender)", actions.detectionEngineer.kqlOpportunities ?? []],
+                      ["Sigma", actions.detectionEngineer.sigmaOpportunities ?? []],
+                      ["Splunk SPL", actions.detectionEngineer.splOpportunities ?? []],
+                    ]}
+                  />
                   <dl className="mt-1.5 space-y-1 text-sm">
                     <div>
                       <dt className="inline font-semibold text-foreground">Recommended action: </dt>

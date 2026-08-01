@@ -26,6 +26,7 @@ import { aiRouter } from "./ai/aiRouter.js";
 import { extractEntities } from "./githubIntel/extractor.js";
 import { detectionRulesFor } from "./correlate.js";
 import { fetchArticleText } from "./lib/articleText.js";
+import { log } from "./lib/log.js";
 
 const SYSTEM_PROMPT =
   "You are a Principal Cyber Threat Intelligence Analyst supporting an enterprise SOC, Detection Engineering, Incident Response, Threat Hunting, and Security Leadership. " +
@@ -39,22 +40,22 @@ const SYSTEM_PROMPT =
   '"executiveHeadline": a single headline (under 12 words) an executive skimming a list of reports would see first, e.g. "Critical WordPress flaw under active exploitation -- patch this week." Grounded only in what the article states, never sensationalized beyond it.\n' +
   '"executiveSummary": 2-4 sentences, written for an executive audience with zero technical jargon, that will be read as-is with no further context -- clear and crisp, and grounded ONLY in what the article/verified data actually supports (never speculate, never invent a detail to sound more complete). It MUST answer, in this order: (1) what this means for the business in concrete terms -- financial, operational, reputational, legal/compliance exposure, stated directly rather than vaguely; (2) what decision or action is being asked of the reader right now (e.g. approve an emergency patch window, allocate remediation budget, authorize customer notification) -- if nothing is currently being asked of leadership, say so explicitly (e.g. "No executive decision is required at this time; the SOC is handling remediation.") rather than omitting it. This is a situational read of what happened, not your analysis or opinion -- save judgment and trajectory reasoning for intelligenceAssessment.\n' +
   '"intelligenceAssessment": your own analytic judgment as a CTI analyst, not a restatement of facts already given elsewhere -- 2-4 concise paragraphs (separated by \\n\\n) that read as an opinion grounded in evidence and well-established threat-intelligence patterns. Never open with a generic risk-level phrase like "poses a moderate risk" or restate what the vulnerability "could allow" -- that\'s businessRisk\'s and technicalAnalysis\'s job, not this field\'s. Instead: name the specific underlying weakness being exposed (not the vulnerability description itself, which technicalAnalysis already covers), then make an actual judgment call about trajectory -- e.g. whether vulnerabilities of this type/mechanism/device class have historically moved quickly to automated exploitation or weaponization after disclosure, and what that implies defenders should do NOW rather than waiting for confirmed exploitation. Ground any historical-pattern claim in a clearly-hedged, defensible generalization about the vulnerability class/technique/device category (e.g. "similar weaknesses have historically been incorporated into automated exploitation shortly after public disclosure") -- never assert a specific unconfirmed fact about THIS incident (no invented exploitation, no invented actor, no invented campaign). This is the one field that should read as an opinion, not a report.\n' +
-  '"businessRisk": {"businessRisk": string, "operationalDisruption": string, "likelihoodOfExploitation": string, "impactIfUnpatched": string, "industriesCommonlyTargeted": string[], "regionsCommonlyTargeted": string[], "requiresExecutiveAttention": boolean, "topActions": string[] (the single most important 1-3 actions across every team -- not a repeat of every recommendation elsewhere, just the top priorities), "whatsMissing": string or null (what information a reader would want that this article/data genuinely doesn\'t provide -- null if nothing notable is missing)} -- regionsCommonlyTargeted: specific countries/regions the article says are impacted, targeted, or where victims/exploitation were observed, [] if the article doesn\'t specify geography -- never guess a region the article doesn\'t state. This is the executive-facing risk framing only -- do not restate these sentences in operationalImpact, which covers the separate SOC/analyst-facing operational reality.\n' +
+  '"businessRisk": {"businessRisk": string, "overallRiskLevel": "Critical"|"High"|"Medium"|"Low" (a single leveled verdict for the business-risk framing overall -- MUST agree with aiRiskScoring.priority below rather than contradicting it; this is the leveled label, businessRisk above is the free-text explanation of it), "operationalDisruption": string, "likelihoodOfExploitation": string, "impactIfUnpatched": string, "industriesCommonlyTargeted": string[], "regionsCommonlyTargeted": string[], "requiresExecutiveAttention": boolean, "topActions": string[] (the single most important 1-3 actions across every team -- not a repeat of every recommendation elsewhere, just the top priorities), "whatsMissing": string or null (what information a reader would want that this article/data genuinely doesn\'t provide -- null if nothing notable is missing)} -- regionsCommonlyTargeted: specific countries/regions the article says are impacted, targeted, or where victims/exploitation were observed, [] if the article doesn\'t specify geography -- never guess a region the article doesn\'t state. This is the executive-facing risk framing only -- do not restate these sentences in operationalImpact, which covers the separate SOC/analyst-facing operational reality.\n' +
   '"shouldICare": {"verdict": "YES"|"NO"|"UNKNOWN", "reasoning": string} -- this app has no knowledge of the specific reader\'s own environment, so answer as a conditional decision aid, not a personalized verdict: "YES" if the affected technology is so broadly deployed or the exploitation so indiscriminate that almost any reader should assume it applies to them (e.g. a mass-exploited, widely-used product/library, or active internet-wide scanning); "NO" if the described risk is narrow, theoretical, vendor-internal, or otherwise not something a typical reader needs to act on (e.g. an AI research announcement, a already-patched issue with no current relevance); "UNKNOWN" (the common case for a specific-product vulnerability) with reasoning that tells the reader exactly what to check, e.g. "YES if you run Fortinet FortiOS or Arista VeloCloud Orchestrator; otherwise this specific advisory does not apply to you directly." Ground the verdict only in what the article states about affected products/scope -- never guess at a reader\'s stack.\n' +
   '"exposureAssessment": {"applicable": boolean (true only when the article describes a risk tied to a specific, nameable product/software a reader could check for -- false for threat-actor/malware-only, research, or non-product news, in which case every other field here is "Not Applicable"), "product": string (the single most relevant product/software a reader should check for, exactly as named in the article, e.g. "Microsoft Exchange Server", "FortiOS", "Ivanti Connect Secure"), "howToCheckVersion": string (a concrete, specific command or UI path a reader can run right now to find their installed version, e.g. "Exchange Management Shell: Get-ExchangeServer | ft Name, AdminDisplayVersion" or "Help > About" -- generic advice like "check your version" is not acceptable), "affectedVersions": string (exactly what the article/advisory states is affected, e.g. "Exchange Server 2019 before CU15, 2016 before CU24"), "affectedGuidance": string (what to do if the reader confirms they are on an affected version -- concrete and prioritized, e.g. "Patch immediately to the fixed build; this is under active exploitation"), "notAffectedGuidance": string (what to do if the reader confirms they are on a version NOT listed as affected, e.g. "No immediate action required; continue routine patch cadence")} -- this is a self-service exposure check the reader runs against their own environment (this app has no visibility into what the reader actually has installed) -- supply the check itself, never guess whether the reader personally has this product or which version they run.\n' +
   '"technicalAnalysis": {"whatHappened": string, "whyItMatters": string (technical/operational significance -- what an attacker gains, the blast radius -- distinct from the business-language executiveSummary), "whoIsAffected": string, "exploitationStatus": string (state plainly: confirmed active exploitation / public PoC only / theoretical, with the evidence), "attackVector": string[], "rootCause": string[], "exploitationDetails": string[], "technicalFindings": string[], "attackChain": string (1-2 sentence kill-chain overview), "initialAccess": string|null, "privilegeEscalation": string|null, "execution": string|null, "persistence": string|null, "defenseEvasion": string|null, "lateralMovement": string|null, "commandAndControl": string|null, "dataTheft": string|null, "ransomwareDeployment": string|null, "products": string[], "versions": string[], "operatingSystems": string[], "cloudServices": string[], "applications": string[], "vendorSeverity": string, "activeExploitation": string, "overallSocPriority": "Critical"|"High"|"Medium"|"Low"} -- kill-chain fields: null (not "Not Reported") for any stage not described in the article, do not fabricate a kill chain the article doesn\'t support. affectedProducts fields: exactly as named in the article. vendorSeverity is the vendor\'s own stated rating, not your own guess -- CVSS/EPSS/KEV are supplied separately, don\'t restate them here. Every bullet should read like it came from a technical researcher, not a press release -- name the specific thing, don\'t generalize it away.\n' +
   '"threatRelevance": {"industriesAtRisk": string[], "technologiesTargeted": string[], "geographicFocus": string[], "victimProfile": string (who is likely to be targeted or affected -- role, organization type, user population, not a repeat of technicalAnalysis.whoIsAffected\'s product-scoping answer), "initialAccessVector": string (how attackers most likely gain initial entry for THIS specific threat, e.g. "phishing email with malicious attachment", "exploitation of the internet-facing vulnerable service", "compromised credentials via password spray" -- state plainly, don\'t hedge)} -- ground every field only in what the article states or directly implies; [] or "Not Reported" if unsupported. Do not restate MITRE technique IDs here -- those belong in mitreAttack below.\n' +
   '"operationalImpact": {"businessImpact": string (the operational/systemic consequence for the SOC/analyst -- what actually breaks or is at risk operationally, not the executive risk framing already covered in businessRisk; do not restate businessRisk\'s or executiveSummary\'s sentences here), "detectionChallenges": string[] (specific, concrete reasons this activity is hard to detect with typical tooling -- e.g. "living-off-the-land binary abuse blends with legitimate admin activity", "C2 traffic uses valid TLS to a reputable CDN" -- never generic "hard to detect"), "evasionTechniques": string[] (specific evasion/anti-detection methods the article describes or that are well-documented for this technique/malware family -- name the actual method, not generic "obfuscation"), "attackerObjectives": string[] (what the attacker is actually trying to achieve here -- data theft, ransomware deployment, espionage, financial fraud, initial-access resale, etc., grounded in the article, not assumed)}\n' +
   '"industryRelevance": array of EXACTLY these 10 entries, one each, in this exact order and with these exact "industry" strings -- "Financial Services", "Consumer", "Technology, Media & Telecommunications", "Life Sciences & Health Care", "Manufacturing", "Energy & Utilities", "Government & Public Sector", "Retail & eCommerce", "Education", "Transportation & Logistics" -- each shaped {"industry": string (copied exactly from the list above), "relevance": "Critical"|"High"|"Medium"|"Low"|"Not Applicable", "confidence": "High"|"Medium"|"Low" (your confidence in the relevance call itself), "whyAffected": string (2-3 sentences: why attackers may target this sector, which business processes are at risk, which technologies common in this sector are relevant here, and why this sector is more or less applicable than others -- "Not Applicable" if relevance is Not Applicable), "potentialImpact": string[] (2-4 items, e.g. "Credential Theft", "Ransomware", "Business Email Compromise", "Customer Data Exposure" -- [] if Not Applicable), "likelyTargetAssets": string[] (2-4 items, e.g. "Active Directory", "SAP", "OT/ICS Systems", "VPN" -- [] if Not Applicable), "defensiveFocus": string[] (3-5 concrete, sector-specific recommendations, e.g. for Manufacturing: "Monitor OT/ICS segmentation", "Review engineering workstation access" -- never generic advice, [] if Not Applicable), "riskScore": integer 0-10, "priority": "Immediate"|"High"|"Normal"|"Low"} -- DO NOT rate every industry Critical or High: only assign Critical/High when there is a clear technical or operational reason grounded in what the article actually describes (the affected product/sector, the attack vector, who is named as a target); for the common case of a narrow, sector-agnostic vulnerability or an article that names no specific victim sector, most industries should be "Low" or "Not Applicable" -- a heatmap that is mostly Low/Not Applicable with 1-3 genuinely elevated sectors is correct, not incomplete. Ground every "why" in the article or in well-established sector/technology overlap (e.g. a vulnerability in a hospital-focused device is High for Life Sciences & Health Care) -- never invent a sector-specific detail the article doesn\'t support.\n' +
-  '"mitreAttack": array of {"technique": string, "techniqueId": string or null, "reason": string (why this technique applies, grounded in what the article describes), "killChainPhase": string} -- techniqueId MUST be copied exactly from the CANDIDATE MITRE ATT&CK TECHNIQUES list in the user message, or null if none genuinely apply. Never invent a technique ID that isn\'t in that list, even if it looks plausible.\n' +
+  '"mitreAttack": array of {"technique": string, "techniqueId": string or null, "evidence": string (a short direct quote or close paraphrase FROM THE ARTICLE that specifically supports this technique -- not a restatement of the technique\'s generic definition; an entry with no article-grounded evidence is discarded entirely, so leave this array empty rather than including a technique you cannot point to specific article text for), "confidence": "High"|"Medium"|"Low" (High only when the article explicitly names this technique or describes the exact behavior; Medium when it\'s a reasonable but not explicit inference; Low when it\'s a weak/generic association -- prefer omitting Low-confidence guesses entirely), "reason": string (why this technique applies, grounded in what the article describes), "killChainPhase": string} -- techniqueId MUST be copied exactly from the CANDIDATE MITRE ATT&CK TECHNIQUES list in the user message, or null if none genuinely apply. Never invent a technique ID that isn\'t in that list, even if it looks plausible. Only map techniques explicitly supported by the article -- do not add extra plausible-sounding techniques beyond what the article\'s own described behavior supports.\n' +
   '"threatActors": array of {"group": string, "aliases": string[], "motivation": string|null, "targetSectors": string[], "geography": string|null, "knownCampaigns": string[]} -- only actors explicitly named in the article.\n' +
   '"malware": array of {"family": string, "capabilities": string[], "persistence": string|null, "payload": string|null, "deliveryMechanism": string|null} -- only malware explicitly named in the article.\n' +
   '"operationalActions": {\n' +
   '  "socAnalyst": {"telemetryToCheck": string[] (real, specific telemetry sources for THIS attack -- e.g. "Windows Event ID 4688 (process creation) for the child process spawned by the web service", "Sysmon Event ID 3 (network connection) for outbound C2 beacons", "Microsoft Defender for Endpoint DeviceProcessEvents / DeviceNetworkEvents advanced hunting tables", "firewall/proxy logs for requests to the vulnerable endpoint path" -- never just "logs" or "EDR telemetry" with no specifics), "whatToLookFor": string (the specific indicator/behavior that confirms this is happening in this environment), "immediateNextStep": string (the concrete next step if the indicator is found)},\n' +
   '  "recommendedActions": array of EXACTLY these 7 entries, one each, in this exact order and with these exact "action" strings -- "Block Firewall", "Block DNS", "Add to Defender IOC", "Create Sentinel Analytic Rule", "Hunt in MDE", "Search Proxy Logs", "Search Email Gateway" -- each shaped {"action": string (copied exactly from the list above), "applicable": boolean (true only if THIS article/data genuinely supports taking that specific action -- e.g. "Block Firewall" is only true if there are IP-based indicators worth blocking, "Search Email Gateway" is only true if the delivery mechanism described is phishing/email-based, "Create Sentinel Analytic Rule" is only true if there is a genuinely new, specific detection opportunity here, not for every report), "details": string (if applicable: the concrete thing to do -- which specific IPs/domains/hashes, which query, which technique, phrased as an instruction a Tier-1 analyst can execute immediately; if not applicable: "Not Applicable")} -- do not mark more than 2-3 as applicable unless the article genuinely supports it; a mostly-not-applicable checklist for a low-signal article is correct, not incomplete.\n' +
   '  "platformRecommendations": {"logSourcesToReview": string[] (specific log sources beyond telemetryToCheck above -- e.g. named firewall/proxy/DNS/cloud-audit log types relevant to this threat), "microsoftDefenderRecommendations": string[] (specific Microsoft Defender XDR / Defender for Endpoint actions -- custom indicators, specific Attack Surface Reduction rules, specific advanced hunting table/query ideas relevant to THIS threat, not generic "enable Defender"), "microsoftSentinelRecommendations": string[] (specific Sentinel analytic rule concepts or KQL hunting query ideas relevant to THIS threat -- describe the query\'s logic/target table, not a full KQL statement), "firewallDnsRecommendations": string[] (specific firewall/DNS blocking, sinkholing, or egress-filtering actions relevant to THIS threat), "emailSecurityRecommendations": string[] (specific Defender for Office 365 / email gateway actions -- ONLY if the delivery mechanism described is email/phishing-related, otherwise []), "identityMonitoringRecommendations": string[] (specific Entra ID / Conditional Access / MFA / credential-monitoring actions -- ONLY if credential theft, identity compromise, or account abuse is part of this threat, otherwise []), "edrRecommendations": string[] (specific EDR containment/isolation/response actions beyond socAnalyst.immediateNextStep)} -- every list must be specific to THIS threat, never generic platform best-practices; assume the reader\'s organization runs Microsoft Defender XDR, Microsoft Sentinel, and Microsoft Defender for Office 365 unless the article states otherwise. Do not repeat content already covered in recommendedActions or telemetryToCheck -- add depth, not restatement.\n' +
-  '  "threatHunter": {"hypotheses": array of {"hypothesis": string (a specific, testable hunting hypothesis grounded in this attack\'s actual behavior, e.g. "internet-facing instances of the affected service still unpatched", "unexpected administrative logins immediately following the exploitation window", "process spawning from the vulnerable web service"), "dataSources": string[] (what to query to test it), "positiveFindingLooksLike": string, "falsePositiveNote": string (what a benign explanation for the same signal would look like)} -- 2-4 hypotheses, each genuinely distinct, not restatements of each other, "behavioralIndicators": {"networkBehaviors": string[], "processBehaviors": string[], "authenticationAnomalies": string[], "dnsActivity": string[], "powershellActivity": string[], "scheduledTasks": string[], "registryModifications": string[], "persistenceIndicators": string[]} -- each a short list of concrete, hunt-actionable behavioral signatures specific to THIS threat (e.g. processBehaviors: "rundll32.exe spawned with no command-line arguments from a Word process", not "unusual process activity"); leave a category [] if this threat genuinely has no behavior there (a web-only exploit chain legitimately has no scheduledTasks/registryModifications) rather than padding it with generic filler},\n' +
-  '  "detectionEngineer": {"existingRulesAvailable": string[] (your own knowledge of whether public Sigma/Elastic/Microsoft-native detection rules already cover this activity -- name them if you know of specific ones, otherwise state plainly that none are known to exist yet; real, verified public rule matches are supplied separately and merged in automatically, don\'t restate those), "recommendedAction": string (update an existing rule vs. author a new one, and why), "yaraApplicable": string or null (is YARA a fit here -- e.g. for a dropped payload/webshell -- or null if not applicable to this attack type), "newDetectionLogic": string[] (concrete new detection RULE logic to build, described precisely enough for an engineer to implement -- not vague "add a rule"), "logSourcesRequired": string[], "expectedFalsePositives": string, "detectionGaps": string[] (blind spots -- what this attack could still evade even with the above detections in place), "likelyManifestation": string (how this threat would concretely show up in telemetry/logs/alerts in a typical enterprise environment -- the observable footprint, distinct from a rule spec), "behavioralDetectionOpportunities": string[] (the underlying attacker BEHAVIORS that are inherently detectable regardless of any specific rule -- e.g. process lineage anomalies, command-line patterns, beacon timing regularity -- distinct from newDetectionLogic\'s concrete rule-building tasks; if the two would restate each other, put the rule-specific version in newDetectionLogic and the behavioral rationale here, don\'t duplicate)},\n' +
+  '  "threatHunter": {"hypotheses": array of {"hypothesis": string (a specific, testable hunting hypothesis grounded in this attack\'s actual behavior, e.g. "internet-facing instances of the affected service still unpatched", "unexpected administrative logins immediately following the exploitation window", "process spawning from the vulnerable web service"), "dataSources": string[] (what to query to test it), "investigationSteps": string[] (the ordered, concrete steps a hunter actually takes to test this hypothesis -- e.g. "1. Query DeviceProcessEvents for the parent/child pair over the last 30 days", "2. Cross-reference matching hosts against the vulnerable-version inventory", "3. Pull the full process tree for any match" -- not a restatement of dataSources, this is the procedure, not the source), "positiveFindingLooksLike": string, "falsePositiveNote": string (what a benign explanation for the same signal would look like)} -- 2-4 hypotheses, each genuinely distinct, not restatements of each other, "behavioralIndicators": {"networkBehaviors": string[], "processBehaviors": string[], "authenticationAnomalies": string[], "dnsActivity": string[], "powershellActivity": string[], "scheduledTasks": string[], "registryModifications": string[], "persistenceIndicators": string[]} -- each a short list of concrete, hunt-actionable behavioral signatures specific to THIS threat (e.g. processBehaviors: "rundll32.exe spawned with no command-line arguments from a Word process", not "unusual process activity"); leave a category [] if this threat genuinely has no behavior there (a web-only exploit chain legitimately has no scheduledTasks/registryModifications) rather than padding it with generic filler},\n' +
+  '  "detectionEngineer": {"existingRulesAvailable": string[] (your own knowledge of whether public Sigma/Elastic/Microsoft-native detection rules already cover this activity -- name them if you know of specific ones, otherwise state plainly that none are known to exist yet; real, verified public rule matches are supplied separately and merged in automatically, don\'t restate those), "recommendedAction": string (update an existing rule vs. author a new one, and why), "yaraApplicable": string or null (is YARA a fit here -- e.g. for a dropped payload/webshell -- or null if not applicable to this attack type), "kqlOpportunities": string[] (specific Microsoft Sentinel/Defender KQL query CONCEPTS for this threat -- describe the query\'s target table and logic precisely enough for an engineer to write it, e.g. "DeviceProcessEvents where InitiatingProcessFileName == \'winword.exe\' and FileName == \'rundll32.exe\' with no command-line arguments" -- [] if KQL genuinely isn\'t a fit for this threat\'s telemetry), "sigmaOpportunities": string[] (specific Sigma rule CONCEPTS -- logsource category/product and the detection logic, e.g. "logsource: process_creation; detection: ParentImage contains outlook.exe AND Image contains powershell.exe" -- [] if not applicable), "splOpportunities": string[] (specific Splunk SPL search CONCEPTS -- named index/sourcetype and the search logic, e.g. "index=proxy sourcetype=squid uri_path=\\"/vulnerable-endpoint\\" | stats count by src_ip" -- [] if not applicable), "newDetectionLogic": string[] (any OTHER concrete new detection logic that doesn\'t fit the three named platforms above -- e.g. Elastic/EDR-native rule ideas -- described precisely enough for an engineer to implement, not vague "add a rule"; do not restate kqlOpportunities/sigmaOpportunities/splOpportunities here), "logSourcesRequired": string[], "expectedFalsePositives": string, "detectionGaps": string[] (blind spots -- what this attack could still evade even with the above detections in place), "likelyManifestation": string (how this threat would concretely show up in telemetry/logs/alerts in a typical enterprise environment -- the observable footprint, distinct from a rule spec), "behavioralDetectionOpportunities": string[] (the underlying attacker BEHAVIORS that are inherently detectable regardless of any specific rule -- e.g. process lineage anomalies, command-line patterns, beacon timing regularity -- distinct from newDetectionLogic\'s concrete rule-building tasks; if the two would restate each other, put the rule-specific version in newDetectionLogic and the behavioral rationale here, don\'t duplicate)},\n' +
   '  "vulnerabilityManagement": {"applicable": boolean (false if this article involves no specific CVE -- if false, every other field in this object should be "Not Applicable"/[]), "affectedAssetsSummary": string (affected products/versions and how to identify/scope them in a typical environment), "internetFacing": string, "exploitMaturity": string (weaponized/PoC/theoretical), "patchPriority": string, "maintenanceWindowRecommendation": string, "businessCriticality": string, "compensatingControls": string[] (if patching must be delayed), "knownWorkaround": string or null},\n' +
   '  "incidentResponse": {"immediateTriageSteps": string[], "containmentActions": string[], "recoveryActions": string[]},\n' +
   '  "threatIntelTakeaway": string -- a forward-looking trend/trajectory judgment for a CTI analyst, never a restatement of the vulnerability, patch guidance, or business risk already covered above. Answer whichever of these genuinely apply: is this part of a broader trend (device class, vulnerability class, technique) rather than an isolated incident? Is attacker capability or tooling sophistication increasing? Is this a new TTP or reuse of an established one? Is this likely tied to or a continuation of an existing campaign? Should follow-on activity be expected (weaponization, PoC release, botnet incorporation, ransomware targeting), and on what kind of timeline based on comparable historical disclosures? What specifically should an analyst watch for next? Ground every claim either in what the article states OR in a clearly-hedged general pattern for this vulnerability/device/technique category (e.g. "vulnerabilities affecting IoT access-control systems have increasingly been incorporated into botnets within days of disclosure") -- never assert a specific unconfirmed fact about THIS incident (no invented actor, no invented campaign name, no claim that exploitation IS happening if the article doesn\'t say so). Only write "Not Reported" if neither the article nor any well-established general pattern for this category offers a genuine trend/trajectory angle -- this should be rare; "apply the patch" is never an acceptable answer here.\n' +
@@ -62,7 +63,7 @@ const SYSTEM_PROMPT =
   '}\n' +
   '"operationalRecommendations": array of role-specific action items across exactly these 6 teams -- "Threat Intelligence", "Threat Hunting", "Detection Engineering", "SOC Operations", "Vulnerability Management", "Incident Response" -- each shaped {"team": string (copied exactly from that list), "priority": "Critical"|"High"|"Medium"|"Low", "recommendation": string (MUST begin with an action verb -- Track, Hunt, Validate, Correlate, Update, Review, Create, Monitor, Search, Block, Escalate, Isolate, Contain, Audit, Investigate, Scan, Deploy, etc. -- specific and operational, e.g. "Hunt for internet-facing instances of the affected service exposed before the patch date" not "monitor for suspicious activity"), "rationale": string (exactly one sentence explaining why THIS threat specifically supports this action)}. This is a distinct, flat, prioritized CHECKLIST view across all six teams, not a restatement of operationalActions above -- distill and prioritize that guidance into short, scannable action items rather than repeating its sentences verbatim. Generate a recommendation for a team ONLY if the article\'s actual reported threat activity genuinely supports it -- never generic advice like "monitor for suspicious activity" or "apply patches." Do not invent a plausible-sounding action a team could theoretically take on any threat; ground every recommendation in what this specific article describes. If a team genuinely has no article-supported action, include exactly ONE entry for that team: {"team": that team, "priority": "Low", "recommendation": "No additional actions identified", "rationale": a one-sentence reason why (e.g. "Article contains no indicators or activity actionable by this team")}. A team may have multiple entries (up to 4) if the article genuinely supports several distinct actions for it; most single-CVE-advisory articles will not.\n' +
   '"confidenceAssessment": {"level": "High"|"Medium"|"Low", "score": integer 0-100, "reasoning": string, "factorsPresent": string[] (specific, concrete factors that are actually true of THIS article/data and increase confidence -- e.g. "Official CISA advisory", "KEV inclusion confirmed", "CVE ID confirmed against NVD", "Active exploitation confirmed by vendor", "Named vendor advisory available", "Full technical writeup with confirmed IOCs" -- only list what genuinely applies here, never pad with factors that don\'t apply), "factorsMissing": string[] (what would have increased confidence further but isn\'t available for this article -- e.g. "No IOC validation available", "No public PoC confirmed", "Not confirmed via independent telemetry", "Exploitation details beyond the vendor advisory are limited")} -- score must be justified purely by which factorsPresent/factorsMissing apply (roughly 85-100 High, 50-84 Medium, below 50 Low) -- never assign a score without grounding it in the specific factors listed. reasoning is a one-sentence summary of the same judgment, shown alongside the factor lists.\n' +
-  '"aiRiskScoring": {"score": integer 0-100, "priority": "Critical"|"High"|"Medium"|"Low", "reasoning": string} -- build the score by adding: active exploitation +20, ransomware usage +15, public PoC +15, internet-exposed service +15, privilege escalation +10, authentication bypass +15, critical CVSS +10, widely deployed software +10; subtract points if exploitation requires unlikely conditions. Explain which factors applied.\n' +
+  '"aiRiskScoring": {"score": integer 0-100, "priority": "Critical"|"High"|"Medium"|"Low", "reasoning": string} -- build the score by adding, ONLY for factors the article actually supports (never add a factor speculatively): active exploitation +20, nation-state/APT actor attribution +10, ransomware usage +15, credential theft/harvesting +10, public PoC available +15, internet-exposed service +15, privilege escalation +10, authentication bypass +15, critical CVSS +10, widely deployed/enterprise-relevant software +10, cloud service impact (Azure/AWS/GCP/Entra ID/OAuth/SaaS) +5, vendor-confirmed exploitation or impact (not just vendor-disclosed) +5; subtract points if exploitation requires unlikely conditions. reasoning MUST name exactly which of these factors applied and which didn\'t, not just a generic risk narrative -- the score must be traceable to this list, never assigned by feel.\n' +
   "No other text, no markdown formatting, no code fences.";
 
 function safeArray(value) {
@@ -148,6 +149,7 @@ function safeBusinessRisk(v) {
   v ??= {};
   return {
     businessRisk: safeString(v.businessRisk),
+    overallRiskLevel: safePriority(v.overallRiskLevel),
     operationalDisruption: safeString(v.operationalDisruption),
     likelihoodOfExploitation: safeString(v.likelihoodOfExploitation),
     impactIfUnpatched: safeString(v.impactIfUnpatched),
@@ -337,11 +339,22 @@ function buildNormalizedNameToId(idToTechniqueName) {
   return map;
 }
 
+// Point-13-style quality gate, not just a shape check: a technique with no
+// article-grounded evidence is dropped entirely rather than kept with a
+// "Not Reported" evidence field -- an unsupported MITRE mapping is worse
+// than no mapping, since it reads as a verified claim to the report's
+// audience. Evidence is free text the model wrote, so this can't guarantee
+// the quote is genuinely accurate, only that the model was forced to
+// commit to a specific grounding rather than asserting the technique bare.
+function safeMitreEvidence(value) {
+  return typeof value === "string" && value.trim().length >= 8 ? value.trim() : null;
+}
+
 function safeMitreArray(value, validTechniqueIds, techniqueNameToId, idToTechniqueName) {
   if (!Array.isArray(value)) return [];
   const normalizedNameToId = buildNormalizedNameToId(idToTechniqueName);
   return value
-    .filter((v) => v && typeof v === "object" && typeof v.technique === "string")
+    .filter((v) => v && typeof v === "object" && typeof v.technique === "string" && safeMitreEvidence(v.evidence))
     .map((v) => {
       let techniqueName = v.technique.trim();
       let rawId = typeof v.techniqueId === "string" ? v.techniqueId.trim().toUpperCase() : null;
@@ -372,6 +385,8 @@ function safeMitreArray(value, validTechniqueIds, techniqueNameToId, idToTechniq
       return {
         technique: techniqueName,
         techniqueId,
+        evidence: safeMitreEvidence(v.evidence),
+        confidence: safeConfidenceLevel(v.confidence),
         reason: safeString(v.reason),
         killChainPhase: safeString(v.killChainPhase),
       };
@@ -471,6 +486,7 @@ function safeThreatHunter(v) {
       .map((h) => ({
         hypothesis: h.hypothesis.trim(),
         dataSources: safeArray(h.dataSources),
+        investigationSteps: safeArray(h.investigationSteps),
         positiveFindingLooksLike: safeString(h.positiveFindingLooksLike),
         falsePositiveNote: safeString(h.falsePositiveNote),
       })),
@@ -484,6 +500,9 @@ function safeDetectionEngineer(v) {
     existingRulesAvailable: safeArray(v.existingRulesAvailable),
     recommendedAction: safeString(v.recommendedAction),
     yaraApplicable: safeNullableString(v.yaraApplicable),
+    kqlOpportunities: safeArray(v.kqlOpportunities),
+    sigmaOpportunities: safeArray(v.sigmaOpportunities),
+    splOpportunities: safeArray(v.splOpportunities),
     newDetectionLogic: safeArray(v.newDetectionLogic),
     logSourcesRequired: safeArray(v.logSourcesRequired),
     expectedFalsePositives: safeString(v.expectedFalsePositives),
@@ -676,10 +695,17 @@ function parseModelReport(text, validTechniqueIds, techniqueNameToId, idToTechni
 
 // Only the IOC types this app can extract with proven, regex-verified logic
 // (server/githubIntel/extractor.js, already used elsewhere in this app) are
-// populated -- mutex names, registry keys, scheduled tasks, services, user
-// agents, certificates etc. have no reliable extraction path from prose news
-// text, so rather than ask the model to fabricate them (directly violating
-// the "never invent IOCs" rule), those categories are always reported empty.
+// populated -- named pipes/mutexes/scheduled tasks/services are covered on a
+// best-effort, quote-anchored basis (see that file's pattern comments: high
+// precision, deliberately low recall), while user agents, certificates,
+// process command lines, and cloud/OAuth resource NAMES have no reliable
+// syntax-or-anchor extraction path from prose news text at all, so rather
+// than ask the model to fabricate them (directly violating the "never invent
+// IOCs" rule), those categories are always reported empty here -- process
+// *behavior* and cloud *service* mentions are still covered, just as
+// AI-synthesized narrative (technicalAnalysis.cloudServices,
+// operationalActions.threatHunter.behavioralIndicators.processBehaviors),
+// clearly distinct from this objectively-extracted IOC section.
 const IOC_CATEGORY_BY_TYPE = {
   ipv4: "ipAddresses",
   ipv6: "ipAddresses",
@@ -689,15 +715,49 @@ const IOC_CATEGORY_BY_TYPE = {
   sha1: "hashes",
   md5: "hashes",
   emails: "emailAddresses",
+  registryKeys: "registryKeys",
+  filePaths: "filePaths",
+  fileNames: "fileNames",
+  ports: "ports",
+  eventIds: "eventIds",
+  namedPipes: "namedPipes",
+  mutexes: "mutexes",
+  scheduledTasks: "scheduledTasks",
+  services: "services",
 };
 
 function extractIocs(text) {
   const extracted = extractEntities(text, {});
-  const categories = { ipAddresses: [], domains: [], urls: [], hashes: [], emailAddresses: [] };
+  const categories = {
+    ipAddresses: [], domains: [], urls: [], hashes: [], emailAddresses: [],
+    registryKeys: [], filePaths: [], fileNames: [], ports: [], eventIds: [],
+    namedPipes: [], mutexes: [], scheduledTasks: [], services: [],
+  };
   for (const [type, category] of Object.entries(IOC_CATEGORY_BY_TYPE)) {
     for (const value of extracted[type] ?? []) categories[category].push(value);
   }
   return categories;
+}
+
+/**
+ * One shared provenance block for the entire IOC section, rather than
+ * repeating identical {source, confidence, vendorConfirmed, firstSeen}
+ * metadata on every single indicator -- every value in `iocs` above is
+ * extracted directly from this article's own text via regex, so the answer
+ * to "where did this come from / how confident are we / is it vendor-
+ * confirmed / when was it first seen" is, by construction, literally
+ * identical for every IOC in the report. Repeating that per-indicator would
+ * be pure noise, not information.
+ */
+function buildIocProvenance(article) {
+  return {
+    source: article.source,
+    sourceUrl: article.link,
+    confidence: "Confirmed",
+    vendorConfirmed: true,
+    firstSeen: article.publishedDate,
+    extractionMethod: "Extracted directly from the source article's text via regex-verified pattern matching -- never model-generated.",
+  };
 }
 
 const TECHNIQUE_CANDIDATE_LIMIT = 30;
@@ -800,6 +860,109 @@ function groundRecommendedActions(modelReport, iocs) {
   };
 }
 
+// Deliberately NOT a second LLM call asking the model to "review your own
+// report for errors" -- models are notoriously unreliable at catching their
+// own subtle mistakes on request, and a self-critique pass would just add
+// another unverifiable claim ("I checked, it's fine") on top of the
+// original one, doubling latency/cost/failure-surface for something this
+// app's existing hybrid-grounding architecture (verify facts with code,
+// never trust model recall) is already the real mitigation for. This is a
+// deterministic pass instead: checks that are actually mechanically
+// verifiable run here; anything that would require genuine semantic
+// judgment (e.g. "does the executive summary accurately reflect the
+// article") is explicitly NOT claimed to be verified, since no automated
+// check here can honestly do that.
+function validateReport(report, articleId) {
+  const warnings = [];
+  let result = report;
+
+  // An elevated industry-relevance rating with no article-grounded
+  // rationale is exactly the kind of unsupported claim this whole exercise
+  // is trying to eliminate -- downgrade rather than leave it standing.
+  const industryRelevance = result.industryRelevance.map((row) => {
+    const ungroundedElevated = (row.relevance === "Critical" || row.relevance === "High") && row.whyAffected === "Not Reported";
+    if (!ungroundedElevated) return row;
+    warnings.push(`industryRelevance: downgraded ${row.industry} from ${row.relevance} to Low -- no supporting rationale was provided`);
+    return { ...row, relevance: "Low", priority: "Low", riskScore: Math.min(row.riskScore, 3) };
+  });
+  if (industryRelevance !== result.industryRelevance) result = { ...result, industryRelevance };
+
+  // A high-confidence numeric score with no stated reasoning can't actually
+  // be traced to anything -- same principle as above, applied to the two
+  // scoring sections.
+  if (result.confidenceAssessment.score !== null && result.confidenceAssessment.score >= 70 && result.confidenceAssessment.reasoning === "Not Reported") {
+    warnings.push("confidenceAssessment: score was high with no reasoning given -- capped at 50");
+    result = { ...result, confidenceAssessment: { ...result.confidenceAssessment, score: Math.min(result.confidenceAssessment.score, 50), level: "Low" } };
+  }
+  if (result.aiRiskScoring.score !== null && result.aiRiskScoring.score >= 70 && result.aiRiskScoring.reasoning === "Not Reported") {
+    warnings.push("aiRiskScoring: score was high with no reasoning given -- capped at 50");
+    result = { ...result, aiRiskScoring: { ...result.aiRiskScoring, score: Math.min(result.aiRiskScoring.score, 50), priority: "Medium" } };
+  }
+
+  // businessRisk.overallRiskLevel and aiRiskScoring.priority are two
+  // independent model outputs answering the same "how bad is this"
+  // question in different sections -- a stark disagreement between them
+  // (Critical vs Low or vice versa) signals the model wasn't internally
+  // consistent, which point 13 explicitly asks to catch. Doesn't guess
+  // which one is "right" -- just flags it, since silently picking one would
+  // itself be an unverified guess.
+  const riskRank = { Critical: 3, High: 2, Medium: 1, Low: 0 };
+  if (Math.abs(riskRank[result.businessRisk.overallRiskLevel] - riskRank[result.aiRiskScoring.priority]) >= 2) {
+    warnings.push(`internal inconsistency: businessRisk.overallRiskLevel (${result.businessRisk.overallRiskLevel}) and aiRiskScoring.priority (${result.aiRiskScoring.priority}) disagree sharply`);
+  }
+
+  // mitreAttack entries lacking evidence were already dropped during
+  // parsing (see safeMitreArray/safeMitreEvidence) -- nothing left to
+  // validate here, that check runs earlier by construction rather than as
+  // a separate pass, so a dropped entry never reaches this function at all.
+
+  if (warnings.length > 0) {
+    log.warn("ai-threat-summary", `quality validation adjusted "${articleId}": ${warnings.join(" | ")}`);
+  }
+  return result;
+}
+
+// Static, code-determined classification of which report sections are
+// extraction-verified fact vs. AI-synthesized analysis vs. recommendation
+// vs. forward-looking judgment -- deliberately NOT the model self-reporting
+// this about its own output (asking a model to certify its own
+// trustworthiness is exactly the kind of unverifiable claim this whole
+// effort exists to eliminate). This is knowable statically: the code
+// already knows which fields are populated by extractIocs()/grounded.cveIds
+// (never touched by the model) versus which are the model's own synthesis,
+// so that classification is hard-coded once here rather than asked of an
+// unreliable source. The frontend renders these as section-level badges.
+export const REPORT_SECTION_PROVENANCE = {
+  cves: "Vendor Confirmed Intelligence",
+  iocs: "Vendor Confirmed Intelligence",
+  severity: "Vendor Confirmed Intelligence",
+  references: "Vendor Confirmed Intelligence",
+  executiveSummary: "AI Assessment",
+  intelligenceAssessment: "AI Assessment",
+  businessRisk: "AI Assessment",
+  shouldICare: "AI Assessment",
+  exposureAssessment: "AI Assessment",
+  technicalAnalysis: "AI Assessment",
+  threatRelevance: "AI Assessment",
+  operationalImpact: "AI Assessment",
+  industryRelevance: "AI Assessment",
+  mitreAttack: "AI Assessment", // technique IDs are catalog-validated, but the mapping/reason is the model's own judgment
+  threatActors: "AI Assessment", // named only if explicitly in the article, but structured/synthesized by the model
+  malware: "AI Assessment",
+  confidenceAssessment: "AI Assessment",
+  aiRiskScoring: "AI Assessment",
+  "operationalActions.socAnalyst": "Analyst Recommendation",
+  "operationalActions.recommendedActions": "Analyst Recommendation",
+  "operationalActions.platformRecommendations": "Analyst Recommendation",
+  "operationalActions.threatHunter": "Analyst Recommendation",
+  "operationalActions.detectionEngineer": "Analyst Recommendation",
+  "operationalActions.vulnerabilityManagement": "Analyst Recommendation",
+  "operationalActions.incidentResponse": "Analyst Recommendation",
+  operationalRecommendations: "Analyst Recommendation",
+  "operationalActions.threatIntelTakeaway": "Future Outlook",
+  "operationalActions.executiveLeadershipTakeaway": "Future Outlook",
+};
+
 /**
  * @param {object} article - {title, summary, link, source, publishedDate}
  * @param {object} grounded - already-verified per-article facts from server/newsCorrelation.js#tagNewsItems
@@ -865,7 +1028,7 @@ export async function generateThreatSummary(article, grounded) {
   const modelReport = parseModelReport(response.summary ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);
   if (!modelReport) return null;
 
-  const groundedReport = groundRecommendedActions(groundExistingRules(modelReport, grounded.detectionRuleIndex), iocs);
+  const groundedReport = validateReport(groundRecommendedActions(groundExistingRules(modelReport, grounded.detectionRuleIndex), iocs), article.link);
 
   return {
     id: article.link,
@@ -877,6 +1040,7 @@ export async function generateThreatSummary(article, grounded) {
     severity: grounded.severity,
     cves: grounded.cveIds.map((id) => grounded.cveEnrichment?.[id] ?? { id, severity: "UNKNOWN", cvssScore: null, knownExploited: false, epssScore: null, sourceUrl: `https://nvd.nist.gov/vuln/detail/${id}` }),
     iocs,
+    iocProvenance: buildIocProvenance(article),
     references: [
       { label: article.source, url: article.link },
       ...grounded.cveIds.map((id) => ({ label: id, url: `https://nvd.nist.gov/vuln/detail/${id}` })),

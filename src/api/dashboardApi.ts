@@ -1,6 +1,7 @@
 import { fetchJson } from "@/lib/http";
 import type {
   AiThreatSummaryReport,
+  ReportSectionProvenanceMap,
   AttackTacticHeatmapCell,
   AttackTechnique,
   CampaignIntelligenceEntity,
@@ -129,6 +130,10 @@ export async function fetchDarkWebIntelligence(): Promise<{ entities: DarkWebInt
 
 export async function fetchAiThreatSummaries(): Promise<{ reports: AiThreatSummaryReport[] }> {
   return fetchJson("/api/dashboard/ai-summaries", { source: "Dashboard API" });
+}
+
+export async function fetchAiSummaryProvenance(): Promise<ReportSectionProvenanceMap> {
+  return fetchJson("/api/dashboard/ai-summaries-provenance", { source: "Dashboard API" });
 }
 
 export async function fetchEmergingThreatsRanking(): Promise<EmergingThreatsRanking> {

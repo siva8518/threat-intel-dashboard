@@ -51,7 +51,7 @@ import { generateDraftArtifacts } from "../detectionRuleDraft.js";
 import { buildEmergingThreatsRanking, computeAggregateIndustryHeatmap } from "../emergingThreatsRanking.js";
 import { generateIndustryBriefing, InsufficientCoverageError } from "../industryBriefing.js";
 import { GroqUnavailableError } from "../groqClient.js";
-import { INDUSTRY_CATALOG } from "../aiThreatSummary.js";
+import { INDUSTRY_CATALOG, REPORT_SECTION_PROVENANCE } from "../aiThreatSummary.js";
 import {
   getAllStatuses as getAllDetectionBacklogStatuses,
   setStatus as setDetectionBacklogStatus,
@@ -409,6 +409,17 @@ router.get("/dashboard/ai-summaries/:id", (req, res) => {
   const report = getAiThreatSummaryById(decodeURIComponent(req.params.id));
   if (!report) return res.status(404).json({ error: "not found" });
   res.json(report);
+});
+
+// Static (never changes at runtime) section-level classification of which
+// report fields are extraction-verified fact vs. AI-synthesized analysis vs.
+// recommendation vs. forward-looking judgment -- see
+// server/aiThreatSummary.js#REPORT_SECTION_PROVENANCE for why this is a
+// code-determined map rather than the model self-reporting it. Fetched once
+// by the frontend (react-query caches it indefinitely) rather than embedded
+// in every single report payload, since the answer never varies per report.
+router.get("/dashboard/ai-summaries-provenance", (_req, res) => {
+  res.json(REPORT_SECTION_PROVENANCE);
 });
 
 // Ranked-by-Threat-Priority-Score feed + aggregate industry heatmap across

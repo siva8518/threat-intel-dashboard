@@ -76,7 +76,7 @@ function iocRow(label: string, values: string[]): string {
 function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   const namedThreatActors = report.threatActors.filter((a) => a.group !== "Not Reported");
   const namedMalware = report.malware.filter((m) => m.family !== "Not Reported");
-  const totalIocs = report.iocs.ipAddresses.length + report.iocs.domains.length + report.iocs.urls.length + report.iocs.hashes.length + report.iocs.emailAddresses.length;
+  const totalIocs = Object.values(report.iocs).reduce((sum, list) => sum + (list?.length ?? 0), 0);
   const kevCount = report.cves.filter((c) => c.knownExploited).length;
   const risk = report.businessRisk;
   const tech = report.technicalAnalysis;
@@ -271,7 +271,11 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
 
   if (report.mitreAttack.length > 0) {
     const rows = report.mitreAttack
-      .map((t) => `<li><strong>${esc(t.techniqueId ?? "T????")} -- ${esc(t.technique)}</strong> (${esc(t.killChainPhase)})<br/>${esc(t.reason)}</li>`)
+      .map((t) => {
+        const confidence = t.confidence ? ` [${esc(t.confidence)} confidence]` : "";
+        const evidence = t.evidence ? `<br/><em>Evidence: &ldquo;${esc(t.evidence)}&rdquo;</em>` : "";
+        return `<li><strong>${esc(t.techniqueId ?? "T????")} -- ${esc(t.technique)}</strong> (${esc(t.killChainPhase)})${confidence}<br/>${esc(t.reason)}${evidence}</li>`;
+      })
       .join("");
     parts.push(`${heading(3, "MITRE ATT&CK Mapping")}<ul>${rows}</ul>`);
   }
@@ -308,13 +312,25 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   }
 
   if (totalIocs > 0) {
+    const provenanceNote = report.iocProvenance
+      ? paragraph(`All indicators below are ${report.iocProvenance.confidence.toLowerCase()} -- extracted directly from ${esc(report.iocProvenance.source)}'s own text, never model-generated. First seen ${new Date(report.iocProvenance.firstSeen).toLocaleDateString()}.`)
+      : "";
     parts.push(
-      `${heading(3, "Indicators of Compromise (verified, extracted from source text)")}` +
+      `${heading(3, "Indicators of Compromise (verified, extracted from source text)")}${provenanceNote}` +
         iocRow("IP Addresses", report.iocs.ipAddresses) +
         iocRow("Domains", report.iocs.domains) +
         iocRow("URLs", report.iocs.urls) +
         iocRow("Hashes", report.iocs.hashes) +
-        iocRow("Email Addresses", report.iocs.emailAddresses),
+        iocRow("Email Addresses", report.iocs.emailAddresses) +
+        iocRow("Registry Keys", report.iocs.registryKeys ?? []) +
+        iocRow("File Paths", report.iocs.filePaths ?? []) +
+        iocRow("File Names", report.iocs.fileNames ?? []) +
+        iocRow("Ports", report.iocs.ports ?? []) +
+        iocRow("Event IDs", report.iocs.eventIds ?? []) +
+        iocRow("Named Pipes", report.iocs.namedPipes ?? []) +
+        iocRow("Mutexes", report.iocs.mutexes ?? []) +
+        iocRow("Scheduled Tasks", report.iocs.scheduledTasks ?? []) +
+        iocRow("Services", report.iocs.services ?? []),
     );
   }
 
@@ -363,6 +379,7 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
         .map((h, i) => {
           const details = [
             h.dataSources.length > 0 ? `Data sources: ${h.dataSources.join(", ")}` : null,
+            (h.investigationSteps?.length ?? 0) > 0 ? `Investigation steps: ${h.investigationSteps!.join(" ")}` : null,
             h.positiveFindingLooksLike !== "Not Reported" ? `Positive finding looks like: ${h.positiveFindingLooksLike}` : null,
             h.falsePositiveNote !== "Not Reported" ? `False-positive note: ${h.falsePositiveNote}` : null,
           ].filter((x): x is string => Boolean(x));
@@ -399,6 +416,13 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
       ]),
     );
     if (de.existingRulesAvailable.length === 0 && de.newDetectionLogic.length === 0) parts.push(paragraph("Rules: Not Reported"));
+    parts.push(
+      groupedListsSection("Query Opportunities by Platform", [
+        ["KQL (Sentinel / Defender)", de.kqlOpportunities ?? []],
+        ["Sigma", de.sigmaOpportunities ?? []],
+        ["Splunk SPL", de.splOpportunities ?? []],
+      ]),
+    );
     parts.push(paragraph(`Recommended action: ${de.recommendedAction}`));
     parts.push(paragraph(`YARA applicable: ${de.yaraApplicable ?? "Not Applicable"}`));
     parts.push(paragraph(`Expected false positives: ${de.expectedFalsePositives}`));

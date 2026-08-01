@@ -21,6 +21,34 @@ const YARA_RULE_NAME_PATTERN = /\brule\s+([A-Za-z_][A-Za-z0-9_]*)/g;
 const SIGMA_RULE_ID_PATTERN = /^\s*id:\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/gm;
 const ATTACK_TECHNIQUE_ID_PATTERN = /\bT1\d{3}(?:\.\d{3})?\b/g;
 
+// Registry keys have a distinctive, unambiguous syntax (HKLM\..., HKEY_LOCAL_MACHINE\...)
+// -- high-confidence, low-false-positive extraction, same reliability class as
+// the hash/IP/CVE patterns above.
+const REGISTRY_KEY_PATTERN = /\bHK(?:EY_)?(?:LM|CU|CR|U|CC|LOCAL_MACHINE|CURRENT_USER|CLASSES_ROOT|USERS|CURRENT_CONFIG)\\[^\s"'<>()[\]{}]+/gi;
+// Windows drive-letter paths -- similarly unambiguous syntax.
+const WINDOWS_FILE_PATH_PATTERN = /\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n\s]+\\)*[^\\/:*?"<>|\r\n\s]+/g;
+// Bare filenames anchored on a closed, security-relevant extension list --
+// deliberately not a generic "word.word" pattern (far too noisy against
+// prose), so genuine false positives are rare even without a preceding path.
+const FILE_NAME_PATTERN = /\b[\w][\w.-]{0,80}\.(?:exe|dll|ps1|psm1|bat|cmd|vbs|vbe|js|jse|wsf|scr|com|jar|py|sh|msi|hta|lnk|docm|xlsm|pptm|zip|rar|7z|iso|img)\b/gi;
+// "port 443" / "port: 8080" -- anchor-phrase required so a bare number in
+// unrelated prose (a CVE score, a byte count) is never mistaken for a port.
+const PORT_PATTERN = /\bport\s*[:#]?\s*(\d{1,5})\b/gi;
+// "Event ID 4688" / "EID 4104" -- anchor-phrase required for the same reason.
+const EVENT_ID_PATTERN = /\b(?:event\s*id|eid)\s*[:#]?\s*(\d{3,5})\b/gi;
+// Named pipes have their own unambiguous Windows syntax.
+const NAMED_PIPE_PATTERN = /\\\\\.\\pipe\\[^\s"'<>()[\]{}]+/g;
+// Mutex/scheduled-task/service names are NOT reliably extractable from free
+// prose in general (unlike the syntax-anchored patterns above, there's no
+// unambiguous shape to a mutex or task name) -- these three deliberately
+// only match when the source text quotes the name right after a clear
+// anchor phrase (e.g. `mutex named "Global\\FooBar"`), trading recall for
+// precision: missing an unquoted mention is far preferable to inventing or
+// mismatching one, same "never guess" principle as the rest of this app.
+const MUTEX_NAME_PATTERN = /\bmutex(?:es)?(?:\s+(?:named|called))?[^."'\n]{0,20}["“]([^"”]{2,80})["”]/gi;
+const SCHEDULED_TASK_NAME_PATTERN = /\bscheduled\s+tasks?[^."'\n]{0,20}["“]([^"”]{2,80})["”]/gi;
+const SERVICE_NAME_PATTERN = /\bservices?(?:\s+(?:named|called))?[^."'\n]{0,20}["“]([^"”]{2,80})["”]/gi;
+
 // Common enough to keep the domain regex's false-positive rate manageable
 // without requiring a full public-suffix-list dependency. Not exhaustive --
 // documented limitation, matching this app's existing "best-effort" style
@@ -100,6 +128,16 @@ export function extractEntities(rawText, { techniques = [], groups = [], malware
     emails: uniqueMatches(text, EMAIL_PATTERN).map((e) => e.toLowerCase()),
     yaraRuleNames: uniqueCapturedGroups(text, YARA_RULE_NAME_PATTERN),
     sigmaRuleIds: uniqueCapturedGroups(text, SIGMA_RULE_ID_PATTERN),
+    registryKeys: uniqueMatches(text, REGISTRY_KEY_PATTERN),
+    filePaths: uniqueMatches(text, WINDOWS_FILE_PATH_PATTERN),
+    fileNames: uniqueMatches(text, FILE_NAME_PATTERN),
+    ports: uniqueCapturedGroups(text, PORT_PATTERN),
+    eventIds: uniqueCapturedGroups(text, EVENT_ID_PATTERN),
+    namedPipes: uniqueMatches(text, NAMED_PIPE_PATTERN),
+    // Best-effort/low-recall by design -- see the pattern comments above.
+    mutexes: uniqueCapturedGroups(text, MUTEX_NAME_PATTERN),
+    scheduledTasks: uniqueCapturedGroups(text, SCHEDULED_TASK_NAME_PATTERN),
+    services: uniqueCapturedGroups(text, SERVICE_NAME_PATTERN),
     attackTechniques,
     attackTactics,
     threatActorNames,

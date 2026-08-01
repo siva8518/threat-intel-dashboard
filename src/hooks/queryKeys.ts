@@ -33,6 +33,7 @@ export const queryKeys = {
   campaignIntelligence: ["campaign-intelligence"] as const,
   darkWebIntelligence: ["darkweb-intelligence"] as const,
   aiThreatSummaries: ["ai-threat-summaries"] as const,
+  aiSummaryProvenance: ["ai-summary-provenance"] as const,
   emergingThreatsRanking: ["emerging-threats-ranking"] as const,
   watchlist: ["watchlist"] as const,
   flashReports: ["flash-reports"] as const,

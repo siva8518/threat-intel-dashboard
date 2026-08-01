@@ -881,18 +881,40 @@ export interface AiThreatSummaryCve {
   sourceUrl: string;
 }
 
-/** Grounded (regex-extracted, never model-generated) IOCs -- see server/aiThreatSummary.js#extractIocs. Categories with no reliable extraction path from article prose (mutex, registry keys, scheduled tasks, services, user agents, certificates) are deliberately omitted rather than risking invented values. */
+/** Grounded (regex-extracted, never model-generated) IOCs -- see server/aiThreatSummary.js#extractIocs. mutexes/scheduledTasks/services are best-effort, quote-anchored extraction (high precision, deliberately low recall -- see server/githubIntel/extractor.js's pattern comments); user agents, certificates, process command lines, and cloud/OAuth resource names have no reliable extraction path from article prose at all and are never included here (that narrative lives in technicalAnalysis/operationalActions instead, clearly distinct as AI-synthesized rather than extracted). */
 export interface AiThreatSummaryIocs {
   ipAddresses: string[];
   domains: string[];
   urls: string[];
   hashes: string[];
   emailAddresses: string[];
+  registryKeys: string[];
+  filePaths: string[];
+  fileNames: string[];
+  ports: string[];
+  eventIds: string[];
+  namedPipes: string[];
+  mutexes: string[];
+  scheduledTasks: string[];
+  services: string[];
+}
+
+/** One shared provenance block for the entire iocs section (not per-indicator) -- every value in AiThreatSummaryIocs is extracted directly from the article's own text via regex, so source/confidence/vendorConfirmed/firstSeen are identical for every indicator in the report by construction. See server/aiThreatSummary.js#buildIocProvenance. */
+export interface AiThreatSummaryIocProvenance {
+  source: string;
+  sourceUrl: string;
+  confidence: "Confirmed";
+  vendorConfirmed: true;
+  firstSeen: string;
+  extractionMethod: string;
 }
 
 export interface AiThreatSummaryMitreTechnique {
   technique: string;
   techniqueId: string | null;
+  /** A quote/close paraphrase from the article supporting this technique -- entries with no evidence are dropped entirely during parsing, never reach the frontend as "Not Reported". */
+  evidence: string;
+  confidence: "High" | "Medium" | "Low";
   reason: string;
   killChainPhase: string;
 }
@@ -905,6 +927,8 @@ export interface AiThreatSummaryReference {
 /** Business-facing impact -- executive/leadership-consumable, no technical jargon. */
 export interface AiThreatSummaryBusinessRisk {
   businessRisk: string;
+  /** Leveled verdict for the risk framing above -- should agree with aiRiskScoring.priority; server-side validation flags (but doesn't silently resolve) a sharp disagreement between the two. */
+  overallRiskLevel: "Critical" | "High" | "Medium" | "Low";
   operationalDisruption: string;
   likelihoodOfExploitation: string;
   impactIfUnpatched: string;
@@ -1085,6 +1109,8 @@ export interface AiThreatSummaryRecommendedAction {
 export interface AiThreatSummaryHuntHypothesis {
   hypothesis: string;
   dataSources: string[];
+  /** The ordered, concrete procedure a hunter follows to test this hypothesis -- distinct from dataSources (what to query), this is the how-to. */
+  investigationSteps: string[];
   positiveFindingLooksLike: string;
   falsePositiveNote: string;
 }
@@ -1111,6 +1137,13 @@ export interface AiThreatSummaryDetectionEngineer {
   existingRulesAvailable: string[];
   recommendedAction: string;
   yaraApplicable: string | null;
+  /** Named Microsoft Sentinel/Defender KQL query concepts specific to this threat -- [] if KQL isn't a fit. */
+  kqlOpportunities: string[];
+  /** Named Sigma rule concepts (logsource + detection logic) specific to this threat -- [] if not applicable. */
+  sigmaOpportunities: string[];
+  /** Named Splunk SPL search concepts specific to this threat -- [] if not applicable. */
+  splOpportunities: string[];
+  /** Any other detection logic that doesn't fit the three named platforms above (e.g. Elastic/EDR-native). */
   newDetectionLogic: string[];
   logSourcesRequired: string[];
   expectedFalsePositives: string;
@@ -1165,6 +1198,12 @@ export interface AiThreatSummaryOperationalActions {
   executiveLeadershipTakeaway: string;
 }
 
+/** The four provenance labels this app assigns to report sections -- see server/aiThreatSummary.js#REPORT_SECTION_PROVENANCE for why this is a static, code-determined classification rather than the model self-reporting it. */
+export type ReportSectionProvenanceLabel = "Vendor Confirmed Intelligence" | "AI Assessment" | "Analyst Recommendation" | "Future Outlook";
+
+/** GET /api/dashboard/ai-summaries-provenance -- a flat map of report field name (dot-notation for nested operationalActions.* fields) to its provenance label. Static; fetch once and cache indefinitely. */
+export type ReportSectionProvenanceMap = Record<string, ReportSectionProvenanceLabel>;
+
 export type OperationalRecommendationTeam = "Threat Intelligence" | "Threat Hunting" | "Detection Engineering" | "SOC Operations" | "Vulnerability Management" | "Incident Response";
 
 /** One row of the flat, prioritized cross-team checklist -- see server/aiThreatSummary.js's `safeOperationalRecommendations`. Distinct from AiThreatSummaryOperationalActions' deep per-team narrative sections: this is the scannable "what, in what order" view, not the "how exactly" detail. */
@@ -1195,6 +1234,7 @@ export interface AiThreatSummaryReport {
   severity: Severity;
   cves: AiThreatSummaryCve[];
   iocs: AiThreatSummaryIocs;
+  iocProvenance: AiThreatSummaryIocProvenance;
   references: AiThreatSummaryReference[];
   executiveHeadline: string;
   executiveSummary: string;
