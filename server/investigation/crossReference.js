@@ -35,6 +35,7 @@ function aiReportIocSet(iocs) {
  *   activeCampaigns: string[],
  *   matchingAiReports: Array<{id:string, articleTitle:string, articleLink:string, articleSource:string, publishedDate:string}>,
  *   relatedIocs: Array<{indicator:string, indicatorType:string, malwareFamily:string}>,
+ *   siblingIndicators: Array<{indicator:string, indicatorType:string, malwareFamily:string}>,
  * }}
  */
 export function crossReferenceIndicator(value) {
@@ -46,12 +47,26 @@ export function crossReferenceIndicator(value) {
 
   const matchedFamilies = new Set();
   const relatedIocs = [];
+  // "Related Indicators" (see server/investigation/ipModule.js) -- once this
+  // value matches a malware family, that family's OTHER indicators are
+  // genuinely "other indicators tied to the same campaign/actor" (campaign/
+  // actor are themselves derived from the family, same chain
+  // server/investigation/pivotChain.js already uses). Deduped by value since
+  // the same indicator can appear in both `iocs` and `articleIocs`.
+  const siblingIndicators = [];
+  const seenSiblings = new Set([target]);
   for (const entity of malwareEntities) {
     const allIocs = [...(entity.iocs ?? []), ...(entity.articleIocs ?? [])];
     const hit = allIocs.find((ioc) => norm(ioc.indicator) === target);
     if (hit) {
       matchedFamilies.add(entity.name);
       relatedIocs.push({ indicator: hit.indicator, indicatorType: hit.indicatorType, malwareFamily: entity.name, firstSeen: hit.firstSeen ?? null });
+      for (const sibling of allIocs) {
+        const key = norm(sibling.indicator);
+        if (seenSiblings.has(key) || siblingIndicators.length >= 20) continue;
+        seenSiblings.add(key);
+        siblingIndicators.push({ indicator: sibling.indicator, indicatorType: sibling.indicatorType, malwareFamily: entity.name });
+      }
     }
   }
 
@@ -88,6 +103,7 @@ export function crossReferenceIndicator(value) {
       publishedDate: r.publishedDate,
     })),
     relatedIocs: relatedIocs.slice(0, 20),
+    siblingIndicators,
   };
 }
 

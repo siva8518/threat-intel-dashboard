@@ -117,10 +117,22 @@ export async function checkIndicator(type, value) {
   const path = section === "file" ? `file/${value}` : `${section}/${value}`;
   const data = await fetchJson(`${OTX_BASE}/indicators/${path}/general`, { source: "OTX", headers });
 
+  const pulses = data.pulse_info?.pulses ?? [];
+  const mostRecentPulseDate = pulses.map((p) => p.created).filter(Boolean).sort().at(-1) ?? null;
+
   return {
     source: "OTX",
     pulseCount: data.pulse_info?.count ?? 0,
-    tags: data.pulse_info?.pulses?.flatMap((p) => p.tags ?? []).slice(0, 10) ?? [],
+    tags: pulses.flatMap((p) => p.tags ?? []).slice(0, 10) ?? [],
+    // Real per-pulse name/created date, already present on the same response
+    // this function already fetches -- previously only .tags was extracted.
+    // Feeds the Timeline sub-panel (each pulse is a real "added to this
+    // threat pulse on <date>" event) and firstLastSeenFor's lastSeen scan.
+    pulses: pulses
+      .filter((p) => p.name && p.created)
+      .slice(0, 5)
+      .map((p) => ({ name: p.name, created: p.created })),
+    lastSeen: mostRecentPulseDate,
     verdict: (data.pulse_info?.count ?? 0) > 0 ? "malicious" : "unknown",
   };
 }

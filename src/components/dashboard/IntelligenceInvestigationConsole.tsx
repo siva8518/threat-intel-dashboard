@@ -116,12 +116,45 @@ function VerdictBanner({ overview }: { overview: InvestigationResult["overview"]
   );
 }
 
-function whyShouldICare(overview: InvestigationResult["overview"]): string {
-  const parts = [`This indicator is currently rated ${overview.severity} severity with ${overview.riskLevel.toLowerCase()} risk (${overview.verdictLabel}).`];
-  parts.push(`Recommended priority: ${overview.recommendedPriority}.`);
+/** Concrete, cited evidence strings for ip/domain/url/hash types -- same source data buildKeyFacts() already reads, just phrased as evidence sentences instead of a label/value grid. Empty for a source that didn't fire or has nothing notable to report -- never a filler phrase. */
+function concreteEvidence(result: InvestigationResult): string[] {
+  const md = result.moduleData;
+  const lookups = md.lookupResults as IocLookupResult[] | undefined;
+  const find = (source: string) => lookups?.find((r) => r.source === source);
+  const evidence: string[] = [];
+
+  const abuseIpdb = find("AbuseIPDB");
+  if (abuseIpdb && Number(abuseIpdb.totalReports) > 0) evidence.push(`${abuseIpdb.totalReports} AbuseIPDB report(s) at ${abuseIpdb.abuseConfidenceScore}% confidence`);
+
+  const vt = find("VirusTotal");
+  if (vt && Number(vt.malicious) > 0) evidence.push(`${vt.malicious} VirusTotal engine(s) flag it malicious${vt.threatLabel ? ` (${vt.threatLabel})` : ""}`);
+
+  const pulsedive = find("Pulsedive");
+  if (pulsedive && Array.isArray(pulsedive.threats) && pulsedive.threats.length > 0) evidence.push(`Pulsedive flags: ${(pulsedive.threats as string[]).join(", ")}`);
+
+  const otx = find("OTX");
+  if (otx && Number(otx.pulseCount) > 0) evidence.push(`present in ${otx.pulseCount} OTX threat pulse(s)`);
+
+  const leakix = find("LeakIX");
+  if (leakix && Number(leakix.leakCount) > 0) evidence.push(`${leakix.leakCount} exposed leak(s) via LeakIX`);
+
+  const network = md.network as Record<string, unknown> | undefined;
+  if (network?.organization) evidence.push(`hosted on ${network.organization}${network.asn ? ` (AS${network.asn})` : ""}`);
+
+  const related = md.relatedIndicators as { sameCampaignOrActor?: unknown[]; sameAsn?: unknown[] } | undefined;
+  if (related?.sameCampaignOrActor && related.sameCampaignOrActor.length > 0) evidence.push(`linked to ${related.sameCampaignOrActor.length} other indicator(s) in this platform's own tracked data`);
+
+  return evidence;
+}
+
+function whyShouldICare(result: InvestigationResult): string {
+  const overview = result.overview;
+  const evidence = concreteEvidence(result);
+  const parts = [`This indicator is currently rated ${overview.severity} severity with ${overview.riskLevel.toLowerCase()} risk (${overview.verdictLabel}), recommended priority ${overview.recommendedPriority}.`];
+  if (evidence.length > 0) parts.push(`Evidence: ${evidence.join("; ")}.`);
   if (overview.associatedThreatActors.length > 0) parts.push(`Linked to tracked threat actor(s): ${overview.associatedThreatActors.join(", ")}.`);
   if (overview.activeCampaigns.length > 0) parts.push(`Associated with active campaign(s): ${overview.activeCampaigns.join(", ")}.`);
-  if (overview.overallVerdict === "unknown") parts.push("No configured source or internal data has meaningful signal on this indicator yet.");
+  if (overview.overallVerdict === "unknown" && evidence.length === 0) parts.push("No configured source or internal data has meaningful signal on this indicator yet.");
   return parts.join(" ");
 }
 
@@ -364,6 +397,7 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, 
   function runInvestigation(raw: string) {
     const query = raw.trim();
     if (!query) return;
+    setInput(query);
     setSubmittedQuery(query);
     investigateM.mutate(query);
     aiReportM.reset();
@@ -431,13 +465,15 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, 
             <VerdictBanner overview={result.overview} />
 
             <Section title="Should I Care?">
-              <p className="text-sm text-foreground">{whyShouldICare(result.overview)}</p>
+              <p className="text-sm text-foreground">{whyShouldICare(result)}</p>
             </Section>
 
             <KeyFactsPanel facts={buildKeyFacts(result)} />
 
             <Section title="Indicator-Specific Intelligence">
-              {family === "network" && result.type === "ip" && <IpIntelligenceSection data={result.moduleData as unknown as Parameters<typeof IpIntelligenceSection>[0]["data"]} />}
+              {family === "network" && result.type === "ip" && (
+                <IpIntelligenceSection data={result.moduleData as unknown as Parameters<typeof IpIntelligenceSection>[0]["data"]} onPivotToIndicator={runInvestigation} />
+              )}
               {family === "network" && result.type === "domain" && <DomainIntelligenceSection data={result.moduleData as unknown as Parameters<typeof DomainIntelligenceSection>[0]["data"]} />}
               {family === "network" && result.type === "url" && <UrlIntelligenceSection data={result.moduleData as unknown as Parameters<typeof UrlIntelligenceSection>[0]["data"]} />}
               {family === "hash" && <HashIntelligenceSection data={result.moduleData as unknown as Parameters<typeof HashIntelligenceSection>[0]["data"]} />}

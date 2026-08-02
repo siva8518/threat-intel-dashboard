@@ -44,5 +44,9 @@ export async function checkIndicator(type, value) {
     fileName: attributes.meaningful_name ?? null,
     threatLabel: attributes.popular_threat_classification?.suggested_threat_label ?? null,
     firstSubmitted: attributes.first_submission_date ? new Date(attributes.first_submission_date * 1000).toISOString() : null,
+    // IP/domain objects don't have first_submission_date (file-only, see
+    // above), but do have last_analysis_date -- real, feeds the Timeline
+    // sub-panel and firstLastSeenFor's lastSeen scan.
+    lastSeen: attributes.last_analysis_date ? new Date(attributes.last_analysis_date * 1000).toISOString() : null,
   };
 }

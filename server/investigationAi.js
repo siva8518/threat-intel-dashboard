@@ -12,10 +12,14 @@ import { aiRouter } from "./ai/aiRouter.js";
 
 const SYSTEM_PROMPT =
   "You are a Tier 3 SOC analyst investigating a single indicator (IP/domain/URL/hash/CVE/threat actor/malware family/campaign/other artifact) for a fellow analyst who just pasted it into an investigation console. " +
-  "You are given the indicator, its detected type, and every fact this platform has already verified about it (verdict, severity, related actors/malware/campaigns, raw source data). Do not restate that data verbatim -- synthesize it into judgment. Never invent a fact not present in what you were given -- if the provided data doesn't support an answer, say \"Not Reported\" or \"Insufficient data\" for that field rather than guessing. " +
+  "You are given the indicator, its detected type, and every fact this platform has already verified about it (verdict, severity, related actors/malware/campaigns, and the FULL raw source data -- exact report counts, confidence percentages, detection ratios, threat labels, ASN/hosting org, pulse counts, etc.). Do not restate that data verbatim -- synthesize it into judgment. Never invent a fact not present in what you were given -- if the provided data doesn't support an answer, say \"Not Reported\" or \"Insufficient data\" for that field rather than guessing. " +
+  "\n\nGROUNDING RULES -- these override any instinct toward generic security-report phrasing:\n" +
+  "- Every claim must trace to a specific field in the provided data. When you assert something is true, name the source and figure that supports it (e.g. \"2,797 AbuseIPDB reports at 100% confidence\", \"Pulsedive flags SSH Brute Force\", \"hosted on BYTEPLUS-AS-AP (AS150436)\", \"16/64 VirusTotal engines flag this malicious\", \"linked to 3 other indicators via the <family> malware family\"), not a vague restatement of the verdict label.\n" +
+  "- Do NOT use unsupported generic phrases like \"operational disruption\", \"sensitive data loss\", \"significant business impact\", or similar boilerplate UNLESS the provided data specifically supports that exact outcome (e.g. a confirmed malware family with known capabilities, a CVE with a documented impact, an actor with a known objective). If no such evidence exists, describe the concrete, evidenced risk instead (e.g. \"this IP has generated high-volume SSH brute-force activity per Pulsedive and a substantial abuse-report history\" rather than \"poses a risk of data loss\").\n" +
+  "- If key context is genuinely missing (no malware family match, no actor/campaign link, an OTX/GreyNoise lookup that timed out or wasn't configured), say so plainly instead of writing around the gap with generic language.\n" +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
   '"whatThisIs": string -- 1-2 sentences plainly stating what this indicator represents, grounded only in the provided data.\n' +
-  '"whyItMatters": string -- 1-3 sentences on why this specific indicator matters operationally, given its verdict/severity/relationships.\n' +
+  '"whyItMatters": string -- 1-3 sentences explaining, by naming the specific evidence (counts, confidence scores, threat labels, related families/actors), why this indicator earned its verdict/severity -- not a restatement of the severity label itself.\n' +
   '"likelyAttackerObjective": string -- your best-supported judgment of what an attacker using this indicator is likely trying to achieve (e.g. initial access, C2, data theft, ransomware staging) -- "Not Reported" if the data gives no basis for this.\n' +
   '"businessImpact": string -- 1-2 sentences on the operational/business consequence if this indicator is confirmed active in an environment.\n' +
   '"confidenceReasoning": string -- one sentence explaining your confidence in this assessment, grounded in how much corroborating data was actually provided.\n' +
@@ -82,14 +86,27 @@ function summarizeModuleData(type, moduleData) {
   if (moduleData.noExternalSource) {
     return { noExternalSource: true, note: moduleData.note };
   }
-  // ip/domain/url/hash: a compact digest of the source breakdown, not the full raw payload
+  // ip/domain/url/hash: the FULL per-source fact object, not just
+  // {source, verdict} -- the model can only cite concrete figures (report
+  // counts, confidence scores, detection ratios, threat labels) if it's
+  // actually given them. This was previously stripped down to source+verdict,
+  // which is the root cause of generic, uncited AI Investigation Summaries.
   return {
     sourceCount: moduleData.lookupResults?.length ?? 0,
-    sources: (moduleData.lookupResults ?? []).map((r) => ({ source: r.source, verdict: r.verdict })),
+    sources: moduleData.lookupResults ?? [],
+    notConfigured: moduleData.notConfigured ?? [],
+    skipped: moduleData.skipped ?? [],
     network: moduleData.network ?? undefined,
     security: moduleData.security ?? undefined,
     behavior: moduleData.behavior ?? undefined,
     detection: moduleData.detection ?? undefined,
+    relatedIndicators: moduleData.relatedIndicators
+      ? {
+          sameCampaignOrActorCount: moduleData.relatedIndicators.sameCampaignOrActor?.length ?? 0,
+          sameCampaignOrActorFamilies: [...new Set((moduleData.relatedIndicators.sameCampaignOrActor ?? []).map((r) => r.malwareFamily))],
+          sameAsnCount: moduleData.relatedIndicators.sameAsn?.length ?? 0,
+        }
+      : undefined,
   };
 }
 

@@ -66,6 +66,11 @@ export async function checkIndicator(type, value) {
     abuseConfidenceScore: score,
     totalReports: data.data?.totalReports ?? 0,
     countryCode: data.data?.countryCode ?? null,
+    // Real field on the /check response (same one the bulk blacklist
+    // connector above already uses as `firstSeen`) -- feeds both the
+    // Timeline sub-panel and server/investigation/index.js#firstLastSeenFor's
+    // existing lastSeen scan, previously discarded here.
+    lastSeen: data.data?.lastReportedAt ? new Date(data.data.lastReportedAt).toISOString() : null,
     verdict: score >= 50 ? "malicious" : score >= 20 ? "suspicious" : "clean",
   };
 }

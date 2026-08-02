@@ -130,6 +130,20 @@ export function NotConfiguredNotice({ notConfigured, rateLimited, skipped }: { n
   );
 }
 
+interface RelatedIndicatorEntry {
+  indicator: string;
+  indicatorType: string;
+  malwareFamily: string;
+  associatedThreatActors: string[];
+  activeCampaigns: string[];
+}
+
+interface SameAsnEntry {
+  indicator: string;
+  asn: string | number;
+  holder: string | null;
+}
+
 interface IpModuleData {
   lookupResults: IocLookupResult[];
   network: {
@@ -142,9 +156,98 @@ interface IpModuleData {
     country: string | null;
   };
   internalInvestigation: { connected: boolean; message: string };
+  relatedIndicators?: { sameCampaignOrActor: RelatedIndicatorEntry[]; sameAsn: SameAsnEntry[] };
 }
 
-export function IpIntelligenceSection({ data }: { data: IpModuleData }) {
+interface TimelineEvent {
+  date: string;
+  label: string;
+}
+
+/** Real, dated events only -- pulled from whichever sources actually returned a timestamp (see server/lookups/abuseipdb.js, virustotal.js, connectors/otx.js). A source with no date is simply omitted, never backfilled with a guess. */
+function buildIpTimeline(data: IpModuleData): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+  const find = (source: string) => data.lookupResults.find((r) => r.source === source);
+
+  const abuseIpdb = find("AbuseIPDB");
+  if (abuseIpdb?.lastSeen) events.push({ date: String(abuseIpdb.lastSeen), label: "Last reported to AbuseIPDB" });
+
+  const vt = find("VirusTotal");
+  if (vt?.lastSeen) events.push({ date: String(vt.lastSeen), label: "Last analyzed by VirusTotal" });
+
+  const otx = find("OTX");
+  if (Array.isArray(otx?.pulses)) {
+    for (const pulse of otx.pulses as Array<{ name: string; created: string }>) {
+      events.push({ date: pulse.created, label: `Added to OTX pulse: ${pulse.name}` });
+    }
+  }
+
+  return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}
+
+function RelatedIndicatorsSection({ data, onPivotToIndicator }: { data: IpModuleData; onPivotToIndicator: (value: string) => void }) {
+  const related = data.relatedIndicators;
+  if (!related) return null;
+  const actorsAndCampaigns = new Set<string>();
+  for (const r of related.sameCampaignOrActor) {
+    for (const a of r.associatedThreatActors) actorsAndCampaigns.add(a);
+    for (const c of r.activeCampaigns) actorsAndCampaigns.add(c);
+  }
+
+  return (
+    <Section title="Related Indicators">
+      <div className="space-y-3">
+        <div>
+          <p className="mb-1.5 text-xs font-semibold text-foreground">Same Malware Family / Campaign / Actor</p>
+          {related.sameCampaignOrActor.length === 0 ? (
+            <p className="text-xs text-muted">No other indicators in this platform's own tracked data share a malware family with this IP.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {related.sameCampaignOrActor.map((r) => (
+                <button
+                  key={r.indicator}
+                  type="button"
+                  title={`Via malware family: ${r.malwareFamily}`}
+                  onClick={() => onPivotToIndicator(r.indicator)}
+                  className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary hover:border-primary/50"
+                >
+                  {r.indicator} →
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <p className="mb-1.5 text-xs font-semibold text-foreground">Same ASN</p>
+          {related.sameAsn.length === 0 ? (
+            <p className="text-xs text-muted">
+              {related.sameCampaignOrActor.length === 0
+                ? "No sibling indicators to check for a shared ASN."
+                : "None of the checked sibling indicators share this IP's ASN."}
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {related.sameAsn.map((r) => (
+                <button
+                  key={r.indicator}
+                  type="button"
+                  title={`AS${r.asn}${r.holder ? ` — ${r.holder}` : ""}`}
+                  onClick={() => onPivotToIndicator(r.indicator)}
+                  className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary hover:border-primary/50"
+                >
+                  {r.indicator} →
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+export function IpIntelligenceSection({ data, onPivotToIndicator }: { data: IpModuleData; onPivotToIndicator: (value: string) => void }) {
+  const timeline = buildIpTimeline(data);
   return (
     <div className="space-y-4">
       <Section title="Network Intelligence">
@@ -188,6 +291,26 @@ export function IpIntelligenceSection({ data }: { data: IpModuleData }) {
           )
         ) : (
           <p className="text-xs text-muted">Not available — {data.network.passiveDns.reason}</p>
+        )}
+      </Section>
+
+      <RelatedIndicatorsSection data={data} onPivotToIndicator={onPivotToIndicator} />
+
+      <Section title="Timeline">
+        {timeline.length === 0 ? (
+          <p className="text-xs text-muted">No dated activity reported by any configured source for this indicator.</p>
+        ) : (
+          <ol className="space-y-2 border-l border-white/10 pl-3 text-xs">
+            {timeline.map((event, i) => (
+              <li key={`${event.date}-${i}`} className="relative">
+                <span className="absolute -left-[16px] top-1 h-1.5 w-1.5 rounded-full bg-primary" />
+                <div className="flex items-start justify-between gap-3">
+                  <span className="font-medium text-foreground">{event.label}</span>
+                  <span className="shrink-0 text-muted">{new Date(event.date).toLocaleString()}</span>
+                </div>
+              </li>
+            ))}
+          </ol>
         )}
       </Section>
 

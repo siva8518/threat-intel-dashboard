@@ -20,6 +20,13 @@ import { throttleAndCache } from "../lib/lookupLimiter.js";
 import { checkMispWarninglists } from "./mispCheck.js";
 import { reverseDns } from "../lib/dnsRecords.js";
 import { computeIocVerdict } from "./verdict.js";
+import { crossReferenceIndicator } from "./crossReference.js";
+
+// Hoisted (not inlined in LOOKUPS below) so "Related Indicators" -- Same ASN
+// (see gather()) can call it a second time, for a bounded set of sibling
+// IPs, sharing the exact same 10-min cache/rate-limit state in
+// lib/lookupLimiter.js rather than duplicating it.
+const checkRipestatThrottled = throttleAndCache("RIPEstat", 1_000, checkRipestat);
 
 const LOOKUPS = [
   checkOtx,
@@ -29,7 +36,7 @@ const LOOKUPS = [
   throttleAndCache("GreyNoise", 2_000, checkGreyNoise),
   throttleAndCache("Shodan", 1_000, checkShodan),
   throttleAndCache("LeakIX", 5_000, checkLeakix),
-  throttleAndCache("RIPEstat", 1_000, checkRipestat),
+  checkRipestatThrottled,
   throttleAndCache("Team Cymru", 1_000, checkTeamCymru),
   throttleAndCache("SANS ISC", 2_000, checkIsc),
   checkMispWarninglists,
@@ -77,6 +84,8 @@ export async function gather(value) {
       "Not Connected — this platform has no SIEM/log integration (Firewall, Proxy, DNS query logs, NetFlow, VPN, EDR). Configure a log source to surface internal sighting history here.",
   };
 
+  const relatedIndicators = await buildRelatedIndicators(value, network.asn);
+
   return {
     lookupResults: results,
     notConfigured,
@@ -84,6 +93,43 @@ export async function gather(value) {
     skipped,
     network,
     internalInvestigation,
+    relatedIndicators,
     verdict: computeIocVerdict(results),
   };
+}
+
+/**
+ * "Related Indicators" -- built entirely from indicators this app already
+ * has on file (see server/investigation/crossReference.js#siblingIndicators),
+ * not a fresh internet-wide search (no free source supports "list all IPs
+ * on ASN X" or "list all IPs in this campaign" as a bulk query). Same ASN is
+ * checked live against only this small sibling pool (capped at 5 RIPEstat
+ * calls, already cached/throttled) -- not the whole threat feed, which would
+ * mean hundreds of live lookups per search.
+ */
+async function buildRelatedIndicators(value, ownAsn) {
+  const crossRef = crossReferenceIndicator(value);
+  const siblings = crossRef.siblingIndicators;
+
+  const sameCampaignOrActor = siblings.map((s) => ({
+    indicator: s.indicator,
+    indicatorType: s.indicatorType,
+    malwareFamily: s.malwareFamily,
+    associatedThreatActors: crossRef.associatedThreatActors,
+    activeCampaigns: crossRef.activeCampaigns,
+  }));
+
+  const siblingIps = siblings.filter((s) => s.indicatorType === "ip").slice(0, 5);
+  const sameAsn = [];
+  if (ownAsn && siblingIps.length > 0) {
+    const asnResults = await Promise.allSettled(siblingIps.map((s) => checkRipestatThrottled("ip", s.indicator)));
+    for (let i = 0; i < siblingIps.length; i++) {
+      const outcome = asnResults[i];
+      if (outcome.status === "fulfilled" && outcome.value.asn && String(outcome.value.asn) === String(ownAsn)) {
+        sameAsn.push({ indicator: siblingIps[i].indicator, asn: outcome.value.asn, holder: outcome.value.holder ?? null });
+      }
+    }
+  }
+
+  return { sameCampaignOrActor, sameAsn };
 }
