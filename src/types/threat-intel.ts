@@ -688,6 +688,8 @@ export interface MalwareIntelligenceEntity {
   verified: boolean;
   iocSightings: number;
   iocs: MalwareIocRef[];
+  /** Indicators extracted directly from a linked article's own text (vendor/researcher-published, not from the bulk ThreatFox/URLHaus/MalwareBazaar feeds) -- accumulated and deduped across every article mentioning this family, never reset by a bulk-feed reconcile pass. See server/malwareIntelligence.js#addArticleIocs. */
+  articleIocs: MalwareIocRef[];
   firstSeen: string;
   lastSeen: string;
   mentionCount: number;

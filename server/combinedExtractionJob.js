@@ -18,6 +18,7 @@ import { splitFamilies, getCommonAttackToolNames } from "./correlationEngine.js"
 import { ransomwareCampaigns as getRansomwareCampaigns } from "./ransomwareCampaigns.js";
 import { getAllGithubRepos } from "./githubIntel/index.js";
 import { extractAllEntities } from "./combinedExtraction.js";
+import { extractIocs } from "./aiThreatSummary.js";
 import { validateCandidates as validateMalwareCandidates } from "./malwareExtraction.js";
 import { validateCandidates as validateActorCandidates } from "./threatActorExtraction.js";
 import { validateCandidates as validateCampaignCandidates } from "./campaignExtraction.js";
@@ -78,6 +79,23 @@ function buildExclusionSets(attackData) {
   for (const m of malwareIntel.getAllEntities()) for (const n of [m.name, ...m.aliases]) malwareNamesLower.add(n.toLowerCase());
 
   return { actorNamesLower, malwareNamesLower, toolNamesLower: getCommonAttackToolNames(attackData) };
+}
+
+// Restricted to the 4 canonical types this app already has UI/lookup
+// support for everywhere else (IOC Search, VirusTotal links, etc. -- see
+// src/types/threat-intel.ts's IocType) rather than the full category set
+// extractIocs() can produce -- registry keys/mutexes/etc. have no existing
+// home in the Malware Intelligence UI's indicator model, and stretching
+// IocType to cover them would ripple through every other IOC display in
+// this app for a category this specific feature doesn't need.
+function flattenArticleIocs(extracted) {
+  const records = [];
+  const push = (indicator, indicatorType) => records.push({ indicator, indicatorType });
+  for (const ip of extracted.ipAddresses ?? []) push(ip, "ip");
+  for (const d of extracted.domains ?? []) push(d, "domain");
+  for (const u of extracted.urls ?? []) push(u, "url");
+  for (const h of extracted.hashes ?? []) push(h, "hash");
+  return records;
 }
 
 function isUnprocessed(link) {
@@ -177,10 +195,18 @@ async function runCycle() {
       const nonSelfTools = tools.filter((name) => !selfTokens.has(name.toLowerCase()));
 
       const validMalware = validateMalwareCandidates(nonSelfMalware, { articleSource: article.source, knownActorNamesLower: actorNamesLower, knownToolNamesLower: toolNamesLower });
+      // Real IOCs a vendor/researcher published directly in the article's
+      // own text (title+summary -- this job doesn't fetch full article text,
+      // unlike server/aiThreatSummaryJob.js, to stay cheap across up to 40
+      // articles/cycle), attached to every malware family that article
+      // mentions -- distinct from and in addition to the bulk-feed-derived
+      // `iocs`/`iocSightings` below, which never look at article text at all.
+      const articleIocRecords = validMalware.length > 0 ? flattenArticleIocs(extractIocs(`${article.title}\n${article.summary ?? ""}`)) : [];
       for (const name of validMalware) {
-        const { isNew } = malwareIntel.upsertMention(name, article);
+        const { entity, isNew } = malwareIntel.upsertMention(name, article);
         if (isNew) newEntities += 1;
         else updatedEntities += 1;
+        if (articleIocRecords.length > 0) malwareIntel.addArticleIocs(entity.id, articleIocRecords, article);
       }
 
       const validActors = validateActorCandidates(nonSelfActors, { articleSource: article.source, knownMalwareNamesLower: malwareNamesLower, knownToolNamesLower: toolNamesLower });

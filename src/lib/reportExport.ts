@@ -137,7 +137,6 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     );
     parts.push(
       groupedListsSection("", [
-        ["Industries commonly targeted", risk.industriesCommonlyTargeted ?? []],
         ["Regions impacted", risk.regionsCommonlyTargeted ?? []],
         ["Technologies targeted", report.threatRelevance?.technologiesTargeted ?? []],
         ["Geographic focus", report.threatRelevance?.geographicFocus ?? []],
@@ -384,7 +383,12 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   // 9. Recommendations -- platform/tooling-specific guidance, distinct from
   //     the team-action table above.
   const plat = actions?.platformRecommendations;
-  if (plat && !Object.values(plat).every((list) => list.length === 0)) {
+  // userRecommendations deliberately excluded from this check -- it's no
+  // longer rendered within this section (see End User Recommendations
+  // below), so its presence alone shouldn't make an otherwise-empty
+  // Recommendations heading render with nothing under it.
+  const platSecurityTeamFields = plat ? Object.entries(plat).filter(([key]) => key !== "userRecommendations") : [];
+  if (plat && platSecurityTeamFields.some(([, list]) => list.length > 0)) {
     parts.push(heading(2, "Recommendations"));
     parts.push(
       groupedListsSection("", [
@@ -395,12 +399,19 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
         ["Email security (Defender for Office 365)", plat.emailSecurityRecommendations],
         ["Identity monitoring", plat.identityMonitoringRecommendations],
         ["EDR", plat.edrRecommendations],
-        ["User recommendations", plat.userRecommendations ?? []],
       ]),
     );
   }
 
-  // 10. Source -- last, always.
+  // 10. End User Recommendations -- its own section, deliberately last
+  //     before Source (mirrors AiSummarization.tsx) since it's addressed to
+  //     a different audience (employees, not security staff).
+  const userRecs = actions?.platformRecommendations?.userRecommendations ?? [];
+  if (userRecs.length > 0) {
+    parts.push(`${heading(2, "End User Recommendations")}<ul>${userRecs.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`);
+  }
+
+  // 11. Source -- last, always.
   if (report.references.length > 0) {
     const rows = report.references.map((ref) => `<li><a href="${esc(ref.url)}">${esc(ref.label)}</a></li>`).join("");
     parts.push(`${heading(2, "Source")}<ul>${rows}</ul>`);

@@ -483,15 +483,14 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                     ["Impact if unpatched", risk.impactIfUnpatched],
                   ]}
                 />
-                {/* threatRelevance.industriesAtRisk deliberately not shown
-                    here -- confirmed live it's almost always the same list
-                    as businessRisk.industriesCommonlyTargeted right above,
-                    since both answer "which sectors does this threat
-                    target." One list, not two saying the same thing. */}
+                {/* Neither threatRelevance.industriesAtRisk nor
+                    businessRisk.industriesCommonlyTargeted are shown here --
+                    both just restate the Affected Industries section further
+                    down, which already covers which sectors this threat
+                    targets (with relevance level, not just a bare list). */}
                 <GroupedLists
                   title=""
                   groups={[
-                    ["Industries commonly targeted", risk.industriesCommonlyTargeted ?? []],
                     ["Regions impacted", risk.regionsCommonlyTargeted ?? []],
                     ["Technologies targeted", relevance.technologiesTargeted],
                     ["Geographic focus", relevance.geographicFocus],
@@ -888,7 +887,11 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
           {(() => {
             const actions = report.operationalActions ?? EMPTY_OPERATIONAL_ACTIONS;
             const platformRecs = actions.platformRecommendations ?? EMPTY_PLATFORM_RECOMMENDATIONS;
-            if (Object.values(platformRecs).every((list) => list.length === 0)) return null;
+            // userRecommendations deliberately excluded -- it has its own
+            // section further down now, so its presence alone shouldn't
+            // render this heading with nothing under it.
+            const { userRecommendations: _userRecs, ...securityTeamRecs } = platformRecs;
+            if (Object.values(securityTeamRecs).every((list) => list.length === 0)) return null;
             return (
               <div>
                 <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Recommendations</h4>
@@ -902,14 +905,33 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                     ["Email security (Defender for Office 365)", platformRecs.emailSecurityRecommendations],
                     ["Identity monitoring", platformRecs.identityMonitoringRecommendations],
                     ["EDR", platformRecs.edrRecommendations],
-                    ["User recommendations", platformRecs.userRecommendations ?? []],
                   ]}
                 />
               </div>
             );
           })()}
 
-          {/* 11. Source -- last, always. */}
+          {/* 11. End User Recommendations -- its own section, deliberately
+              last before Source, since it's addressed to a different
+              audience (employees, not security staff) than everything
+              above it. Only populated when the attack vector genuinely
+              involves end-user action. */}
+          {(() => {
+            const userRecs = report.operationalActions?.platformRecommendations?.userRecommendations ?? [];
+            if (userRecs.length === 0) return null;
+            return (
+              <div>
+                <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">End User Recommendations</h4>
+                <ul className="list-disc space-y-1 pl-4 text-sm text-foreground">
+                  {userRecs.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
+
+          {/* 12. Source -- last, always. */}
           <div>
             <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Source</h4>
             <ul className="space-y-1">
