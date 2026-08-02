@@ -27,6 +27,7 @@ import { extractEntities } from "./githubIntel/extractor.js";
 import { detectionRulesFor } from "./correlate.js";
 import { fetchArticleText } from "./lib/articleText.js";
 import { log } from "./lib/log.js";
+import { getAllEntities as getCampaignIntelligenceEntities } from "./campaignIntelligence.js";
 import malwareAttackMap from "./data/malware-attack-map.json" with { type: "json" };
 
 // Real family names this app already curates (server/data/malware-attack-map.json),
@@ -52,13 +53,15 @@ const SYSTEM_PROMPT =
   '"businessRisk": {"businessRisk": string, "overallRiskLevel": "Critical"|"High"|"Medium"|"Low" (a single leveled verdict for the business-risk framing overall -- MUST agree with aiRiskScoring.priority below rather than contradicting it; this is the leveled label, businessRisk above is the free-text explanation of it), "operationalDisruption": string, "likelihoodOfExploitation": string, "impactIfUnpatched": string, "industriesCommonlyTargeted": string[], "regionsCommonlyTargeted": string[], "requiresExecutiveAttention": boolean, "topActions": string[] (the single most important 1-3 actions across every team -- not a repeat of every recommendation elsewhere, just the top priorities), "whatsMissing": string or null (what information a reader would want that this article/data genuinely doesn\'t provide -- null if nothing notable is missing)} -- regionsCommonlyTargeted: specific countries/regions the article says are impacted, targeted, or where victims/exploitation were observed, [] if the article doesn\'t specify geography -- never guess a region the article doesn\'t state. This is the executive-facing risk framing only -- do not restate these sentences in operationalImpact, which covers the separate SOC/analyst-facing operational reality.\n' +
   '"shouldICare": {"verdict": "YES"|"NO"|"UNKNOWN", "reasoning": string} -- this app has no knowledge of the specific reader\'s own environment, so answer as a conditional decision aid, not a personalized verdict: "YES" if the affected technology is so broadly deployed or the exploitation so indiscriminate that almost any reader should assume it applies to them (e.g. a mass-exploited, widely-used product/library, or active internet-wide scanning); "NO" if the described risk is narrow, theoretical, vendor-internal, or otherwise not something a typical reader needs to act on (e.g. an AI research announcement, a already-patched issue with no current relevance); "UNKNOWN" (the common case for a specific-product vulnerability) with reasoning that tells the reader exactly what to check, e.g. "YES if you run Fortinet FortiOS or Arista VeloCloud Orchestrator; otherwise this specific advisory does not apply to you directly." Ground the verdict only in what the article states about affected products/scope -- never guess at a reader\'s stack.\n' +
   '"exposureAssessment": {"applicable": boolean (true only when the article describes a risk tied to a specific, nameable product/software a reader could check for -- false for threat-actor/malware-only, research, or non-product news, in which case every other field here is "Not Applicable"), "product": string (the single most relevant product/software a reader should check for, exactly as named in the article, e.g. "Microsoft Exchange Server", "FortiOS", "Ivanti Connect Secure"), "howToCheckVersion": string (a concrete, specific command or UI path a reader can run right now to find their installed version, e.g. "Exchange Management Shell: Get-ExchangeServer | ft Name, AdminDisplayVersion" or "Help > About" -- generic advice like "check your version" is not acceptable), "affectedVersions": string (exactly what the article/advisory states is affected, e.g. "Exchange Server 2019 before CU15, 2016 before CU24"), "affectedGuidance": string (what to do if the reader confirms they are on an affected version -- concrete and prioritized, e.g. "Patch immediately to the fixed build; this is under active exploitation"), "notAffectedGuidance": string (what to do if the reader confirms they are on a version NOT listed as affected, e.g. "No immediate action required; continue routine patch cadence")} -- this is a self-service exposure check the reader runs against their own environment (this app has no visibility into what the reader actually has installed) -- supply the check itself, never guess whether the reader personally has this product or which version they run.\n' +
-  '"technicalAnalysis": {"whatHappened": string, "whyItMatters": string (technical/operational significance -- what an attacker gains, the blast radius -- distinct from the business-language executiveSummary), "whoIsAffected": string, "exploitationStatus": string (state plainly: confirmed active exploitation / public PoC only / theoretical, with the evidence), "attackVector": string[], "rootCause": string[], "exploitationDetails": string[], "technicalFindings": string[], "attackChain": string (1-2 sentence kill-chain overview), "initialAccess": string|null, "privilegeEscalation": string|null, "execution": string|null, "persistence": string|null, "defenseEvasion": string|null, "lateralMovement": string|null, "commandAndControl": string|null, "dataTheft": string|null, "ransomwareDeployment": string|null, "products": string[], "versions": string[], "operatingSystems": string[], "cloudServices": string[], "applications": string[], "vendorSeverity": string, "activeExploitation": string, "overallSocPriority": "Critical"|"High"|"Medium"|"Low"} -- kill-chain fields: null (not "Not Reported") for any stage not described in the article, do not fabricate a kill chain the article doesn\'t support. affectedProducts fields: exactly as named in the article. vendorSeverity is the vendor\'s own stated rating, not your own guess -- CVSS/EPSS/KEV are supplied separately, don\'t restate them here. Every bullet should read like it came from a technical researcher, not a press release -- name the specific thing, don\'t generalize it away.\n' +
+  '"technicalAnalysis": {"whatHappened": string, "whyItMatters": string (technical/operational significance -- what an attacker gains, the blast radius -- distinct from the business-language executiveSummary; if the article describes a named campaign/operation or ongoing threat-actor activity rather than a standalone vulnerability, this MUST also state why THIS campaign specifically matters -- what makes it notable versus routine activity from the same actor/family, e.g. new scale, new targeting, a new capability, or a first confirmed sighting -- not just a restatement of the technical mechanism), "whoIsAffected": string, "exploitationStatus": string (state plainly: confirmed active exploitation / public PoC only / theoretical, with the evidence), "attackVector": string[], "rootCause": string[], "exploitationDetails": string[], "technicalFindings": string[], "attackChain": string (1-2 sentence kill-chain overview), "initialAccess": string|null, "privilegeEscalation": string|null, "execution": string|null, "persistence": string|null, "defenseEvasion": string|null, "lateralMovement": string|null, "commandAndControl": string|null, "dataTheft": string|null, "ransomwareDeployment": string|null, "products": string[], "versions": string[], "operatingSystems": string[], "cloudServices": string[], "applications": string[], "vendorSeverity": string, "activeExploitation": string, "overallSocPriority": "Critical"|"High"|"Medium"|"Low"} -- kill-chain fields: null (not "Not Reported") for any stage not described in the article, do not fabricate a kill chain the article doesn\'t support. affectedProducts fields: exactly as named in the article. vendorSeverity is the vendor\'s own stated rating, not your own guess -- CVSS/EPSS/KEV are supplied separately, don\'t restate them here. Every bullet should read like it came from a technical researcher, not a press release -- name the specific thing, don\'t generalize it away.\n' +
   '"threatRelevance": {"industriesAtRisk": string[], "technologiesTargeted": string[], "geographicFocus": string[]} -- ground every field only in what the article states or directly implies; [] if unsupported. Do not restate MITRE technique IDs here -- those belong in mitreAttack below. Do NOT include who is likely targeted (technicalAnalysis.whoIsAffected already answers that) or how initial access is gained (technicalAnalysis.initialAccess in the kill chain already answers that) -- this field is only the aggregate targeting picture across industries/technologies/geography, never a second victim-profile or access-vector narrative.\n' +
   '"operationalImpact": {"businessImpact": string (the operational/systemic consequence for the SOC/analyst -- what actually breaks or is at risk operationally, not the executive risk framing already covered in businessRisk; do not restate businessRisk\'s or executiveSummary\'s sentences here), "detectionChallenges": string[] (specific, concrete reasons this activity is hard to detect with typical tooling -- e.g. "living-off-the-land binary abuse blends with legitimate admin activity", "C2 traffic uses valid TLS to a reputable CDN" -- never generic "hard to detect"), "evasionTechniques": string[] (specific evasion/anti-detection methods the article describes or that are well-documented for this technique/malware family -- name the actual method, not generic "obfuscation"), "attackerObjectives": string[] (what the attacker is actually trying to achieve here -- data theft, ransomware deployment, espionage, financial fraud, initial-access resale, etc., grounded in the article, not assumed)}\n' +
   '"industryRelevance": array of EXACTLY these 10 entries, one each, in this exact order and with these exact "industry" strings -- "Financial Services", "Consumer", "Technology, Media & Telecommunications", "Life Sciences & Health Care", "Manufacturing", "Energy & Utilities", "Government & Public Sector", "Retail & eCommerce", "Education", "Transportation & Logistics" -- each shaped {"industry": string (copied exactly from the list above), "relevance": "Critical"|"High"|"Medium"|"Low"|"Not Applicable", "confidence": "High"|"Medium"|"Low" (your confidence in the relevance call itself), "whyAffected": string (2-3 sentences: why attackers may target this sector, which business processes are at risk, which technologies common in this sector are relevant here, and why this sector is more or less applicable than others -- "Not Applicable" if relevance is Not Applicable), "potentialImpact": string[] (2-4 items, e.g. "Credential Theft", "Ransomware", "Business Email Compromise", "Customer Data Exposure" -- [] if Not Applicable), "likelyTargetAssets": string[] (2-4 items, e.g. "Active Directory", "SAP", "OT/ICS Systems", "VPN" -- [] if Not Applicable), "defensiveFocus": string[] (3-5 concrete, sector-specific recommendations, e.g. for Manufacturing: "Monitor OT/ICS segmentation", "Review engineering workstation access" -- never generic advice, [] if Not Applicable), "riskScore": integer 0-10, "priority": "Immediate"|"High"|"Normal"|"Low"} -- DO NOT rate every industry Critical or High: only assign Critical/High when there is a clear technical or operational reason grounded in what the article actually describes (the affected product/sector, the attack vector, who is named as a target); for the common case of a narrow, sector-agnostic vulnerability or an article that names no specific victim sector, most industries should be "Low" or "Not Applicable" -- a heatmap that is mostly Low/Not Applicable with 1-3 genuinely elevated sectors is correct, not incomplete. Ground every "why" in the article or in well-established sector/technology overlap (e.g. a vulnerability in a hospital-focused device is High for Life Sciences & Health Care) -- never invent a sector-specific detail the article doesn\'t support.\n' +
   '"mitreAttack": array of {"technique": string, "techniqueId": string or null, "evidence": string (a short direct quote or close paraphrase FROM THE ARTICLE that specifically supports this technique -- not a restatement of the technique\'s generic definition; an entry with no article-grounded evidence is discarded entirely, so leave this array empty rather than including a technique you cannot point to specific article text for), "confidence": "High"|"Medium"|"Low" (High only when the article explicitly names this technique or describes the exact behavior; Medium when it\'s a reasonable but not explicit inference; Low when it\'s a weak/generic association -- prefer omitting Low-confidence guesses entirely), "reason": string (why this technique applies, grounded in what the article describes), "killChainPhase": string} -- techniqueId MUST be copied exactly from the CANDIDATE MITRE ATT&CK TECHNIQUES list in the user message, or null if none genuinely apply. Never invent a technique ID that isn\'t in that list, even if it looks plausible. Only map techniques explicitly supported by the article -- do not add extra plausible-sounding techniques beyond what the article\'s own described behavior supports.\n' +
   '"threatActors": array of {"group": string, "aliases": string[], "motivation": string|null, "targetSectors": string[], "geography": string|null, "knownCampaigns": string[]} -- only actors explicitly named in the article.\n' +
   '"malware": array of {"family": string, "capabilities": string[], "persistence": string|null, "payload": string|null, "deliveryMechanism": string|null} -- only malware explicitly named in the article.\n' +
+  '"campaignName": string or null -- the specific named campaign/operation this activity is part of, copied exactly as the article names it (e.g. "Operation Triangulation", "SnatchCrypto"), or null if the article describes a vulnerability/technique/incident with no named campaign or operation attached. Never invent a campaign name -- a CVE advisory with no named operation should be null here, not a guess.\n' +
+  '"campaignEvolution": {"applicable": boolean, "previousActivity": string|null, "whatChanged": string|null, "why": string|null, "likelyNextStep": string|null} -- ONLY set applicable=true if the user message includes a "PRIOR CAMPAIGN CONTEXT" block; that block is this platform\'s own real, previously-tracked coverage of the same campaign, not something you should independently judge. If applicable: "previousActivity" is a 1-2 sentence summary of what was previously known, grounded ONLY in the titles/dates actually listed in that block -- never invent detail beyond what\'s given; "whatChanged" states specifically what is different in THIS article versus that prior activity (new targets, new technique, new infrastructure, escalation, etc.); "why" is your hedged analytic judgment for why the campaign evolved this way; "likelyNextStep" is a hedged, forward-looking judgment on what to expect next, same evidence-grounded-generalization discipline as intelligenceAssessment (never assert a specific unconfirmed fact about this campaign\'s future actions). If no PRIOR CAMPAIGN CONTEXT block was given, set applicable=false and every other field to null -- this is the normal, common case, not a failure.\n' +
   '"operationalActions": {\n' +
   '  "socAnalyst": {"telemetryToCheck": string[] (real, specific telemetry sources for THIS attack -- e.g. "Windows Event ID 4688 (process creation) for the child process spawned by the web service", "Sysmon Event ID 3 (network connection) for outbound C2 beacons", "Microsoft Defender for Endpoint DeviceProcessEvents / DeviceNetworkEvents advanced hunting tables", "firewall/proxy logs for requests to the vulnerable endpoint path" -- never just "logs" or "EDR telemetry" with no specifics), "whatToLookFor": string (the specific indicator/behavior that confirms this is happening in this environment), "immediateNextStep": string (the concrete next step if the indicator is found)},\n' +
   '  "recommendedActions": array of EXACTLY these 7 entries, one each, in this exact order and with these exact "action" strings -- "Block Firewall", "Block DNS", "Add to Defender IOC", "Create Sentinel Analytic Rule", "Hunt in MDE", "Search Proxy Logs", "Search Email Gateway" -- each shaped {"action": string (copied exactly from the list above), "applicable": boolean (true only if THIS article/data genuinely supports taking that specific action -- e.g. "Block Firewall" is only true if there are IP-based indicators worth blocking, "Search Email Gateway" is only true if the delivery mechanism described is phishing/email-based, "Create Sentinel Analytic Rule" is only true if there is a genuinely new, specific detection opportunity here, not for every report), "details": string (if applicable: the concrete thing to do -- which specific IPs/domains/hashes, which query, which technique, phrased as an instruction a Tier-1 analyst can execute immediately; if not applicable: "Not Applicable")} -- do not mark more than 2-3 as applicable unless the article genuinely supports it; a mostly-not-applicable checklist for a low-signal article is correct, not incomplete.\n' +
@@ -666,6 +669,29 @@ function safeAiRiskScoring(v) {
   };
 }
 
+// priorArticles is deliberately NEVER populated here -- it's attached
+// code-side in generateThreatSummary() directly from the matched
+// CampaignIntelligenceEntity's own real article history, the same
+// "code attaches the real citation, the model only writes the narrative
+// around it" pattern as buildIocProvenance/references elsewhere in this
+// file. Guarantees the article list a reader sees is always real even if
+// the model's own narrative fields are wrong.
+function safeCampaignEvolution(v) {
+  v ??= {};
+  const applicable = safeBoolean(v.applicable);
+  if (!applicable) {
+    return { applicable: false, previousActivity: null, whatChanged: null, why: null, likelyNextStep: null, priorArticles: [] };
+  }
+  return {
+    applicable: true,
+    previousActivity: safeNullableString(v.previousActivity),
+    whatChanged: safeNullableString(v.whatChanged),
+    why: safeNullableString(v.why),
+    likelyNextStep: safeNullableString(v.likelyNextStep),
+    priorArticles: [],
+  };
+}
+
 function parseModelReport(text, validTechniqueIds, techniqueNameToId, idToTechniqueName) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -691,6 +717,8 @@ function parseModelReport(text, validTechniqueIds, techniqueNameToId, idToTechni
       mitreAttack,
       threatActors: safeThreatActors(parsed.threatActors),
       malware: safeMalware(parsed.malware),
+      campaignName: safeNullableString(parsed.campaignName),
+      campaignEvolution: safeCampaignEvolution(parsed.campaignEvolution),
       operationalActions: safeOperationalActions(parsed.operationalActions),
       operationalRecommendations: safeOperationalRecommendations(parsed.operationalRecommendations),
       confidenceAssessment: safeConfidenceAssessment(parsed.confidenceAssessment),
@@ -810,6 +838,60 @@ function buildTechniqueCandidatesBlock(candidates) {
   }
   const lines = candidates.map((t) => `${t.id} -- ${t.name} (${t.tactic})`).join("\n");
   return `CANDIDATE MITRE ATT&CK TECHNIQUES (techniqueId must be copied exactly from this list, or null if none genuinely apply):\n${lines}`;
+}
+
+const MAX_PRIOR_CAMPAIGN_ARTICLES = 5;
+const MIN_CAMPAIGN_NAME_LENGTH = 4; // guards against a short/common alias (e.g. an acronym that's also an everyday word) matching article text coincidentally
+
+/**
+ * Finds a previously-tracked campaign this article is already about, by
+ * plain case-insensitive substring match of the campaign's own name/aliases
+ * (server/campaignIntelligence.js, itself built from real news extraction --
+ * never guessed here) against the article's own text. Picks the longest/
+ * most-specific matching name if more than one campaign's name appears,
+ * since a longer name match is less likely to be a coincidental substring
+ * hit. Returns null (the common case) when nothing matches -- most articles,
+ * especially single-CVE advisories, aren't about a named campaign at all.
+ */
+function matchCampaignEntity(sourceText, campaignEntities) {
+  const lower = sourceText.toLowerCase();
+  let best = null;
+  for (const entity of campaignEntities) {
+    for (const name of [entity.name, ...entity.aliases]) {
+      if (!name || name.length < MIN_CAMPAIGN_NAME_LENGTH) continue;
+      if (lower.includes(name.toLowerCase()) && (!best || name.length > best.matchedName.length)) {
+        best = { entity, matchedName: name };
+      }
+    }
+  }
+  return best?.entity ?? null;
+}
+
+/**
+ * Real, code-attached grounding context for campaignEvolution -- the model
+ * never sees or invents this article list, it's handed the real one and
+ * asked to synthesize only the narrative fields around it. Returns null
+ * (not an empty-context string) when no prior campaign matched, so
+ * generateThreatSummary can instruct the model plainly to set
+ * campaignEvolution.applicable=false rather than pad the prompt with an
+ * empty section.
+ */
+function buildCampaignContextBlock(matchedCampaign, currentArticleLink) {
+  if (!matchedCampaign) {
+    return { block: "No prior tracked campaign matched this article -- set campaignName appropriately but campaignEvolution.applicable=false and every other campaignEvolution field to null.\n", priorArticles: [] };
+  }
+  const priorArticles = (matchedCampaign.articles ?? [])
+    .filter((a) => a.link !== currentArticleLink)
+    .slice(0, MAX_PRIOR_CAMPAIGN_ARTICLES)
+    .map((a) => ({ title: a.title, link: a.link, publishedDate: a.publishedDate, source: a.source }));
+  if (priorArticles.length === 0) {
+    return { block: `This article discusses the previously-tracked campaign "${matchedCampaign.name}", but this platform has no distinct prior article on record for it yet -- set campaignName="${matchedCampaign.name}" but campaignEvolution.applicable=false (this is a first tracked instance, not evolution).\n`, priorArticles: [] };
+  }
+  const lines = priorArticles.map((a) => `- ${a.title} (${a.source}, ${new Date(a.publishedDate).toLocaleDateString()})`).join("\n");
+  return {
+    block: `PRIOR CAMPAIGN CONTEXT: This article discusses the previously-tracked campaign "${matchedCampaign.name}". This platform's own real, prior coverage of it (use ONLY this to ground campaignEvolution -- never invent detail beyond what's listed here):\n${lines}\nSet campaignName="${matchedCampaign.name}" and campaignEvolution.applicable=true.\n`,
+    priorArticles,
+  };
 }
 
 // Grounds the detection engineer's "existingRulesAvailable" field the same
@@ -973,6 +1055,8 @@ export const REPORT_SECTION_PROVENANCE = {
   mitreAttack: "AI Assessment", // technique IDs are catalog-validated, but the mapping/reason is the model's own judgment
   threatActors: "AI Assessment", // named only if explicitly in the article, but structured/synthesized by the model
   malware: "AI Assessment",
+  campaignName: "AI Assessment",
+  campaignEvolution: "AI Assessment", // narrative fields are the model's synthesis; priorArticles within it is code-attached real data, same split as mitreAttack's catalog-validated IDs vs. model-written reason
   confidenceAssessment: "AI Assessment",
   aiRiskScoring: "AI Assessment",
   "operationalActions.socAnalyst": "Analyst Recommendation",
@@ -1024,6 +1108,9 @@ export async function generateThreatSummary(article, grounded) {
   const techniqueNameToId = new Map(techniques.map((t) => [t.name.toLowerCase(), t.id]));
   const idToTechniqueName = new Map(techniques.map((t) => [t.id, t.name]));
 
+  const matchedCampaign = matchCampaignEntity(sourceText, getCampaignIntelligenceEntities());
+  const campaignContext = buildCampaignContextBlock(matchedCampaign, article.link);
+
   const userContent =
     `Source: ${article.source}\nHeadline: ${article.title}\n` +
     (articleText
@@ -1033,7 +1120,8 @@ export async function generateThreatSummary(article, grounded) {
         : "") +
     (cveContext ? `Verified CVE data for this article (use this, don't restate or contradict it): ${cveContext}\n` : "") +
     `Overall severity already computed for this article: ${grounded.severity}\n` +
-    `${buildTechniqueCandidatesBlock(candidateTechniques)}\n`;
+    `${buildTechniqueCandidatesBlock(candidateTechniques)}\n` +
+    campaignContext.block;
 
   // Routed through server/ai/aiRouter.js (Gemini -> Qwen -> Groq -> Cohere,
   // automatic failover on rate limits/quota/timeouts/5xx) rather than
@@ -1051,6 +1139,15 @@ export async function generateThreatSummary(article, grounded) {
 
   const modelReport = parseModelReport(response.summary ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);
   if (!modelReport) return null;
+
+  // Real, code-attached article citations -- never trust the model to
+  // report back its own grounding context accurately, same principle as
+  // buildIocProvenance/references below. If the model set applicable=false
+  // despite being given a context block (or the reverse), priorArticles
+  // still reflects what was actually matched, not what the model claimed.
+  if (modelReport.campaignEvolution.applicable) {
+    modelReport.campaignEvolution.priorArticles = campaignContext.priorArticles;
+  }
 
   const groundedReport = validateReport(groundRecommendedActions(groundExistingRules(modelReport, grounded.detectionRuleIndex), iocs), article.link);
 

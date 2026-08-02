@@ -1177,6 +1177,59 @@ export interface AiThreatSummaryMalware {
   deliveryMechanism: string | null;
 }
 
+/** A real prior article about the same tracked campaign -- code-attached from CampaignIntelligenceEntity's own article history, never model-authored (see server/aiThreatSummary.js#buildCampaignContextBlock). */
+export interface AiThreatSummaryPriorArticle {
+  title: string;
+  link: string;
+  publishedDate: string;
+  source?: string;
+}
+
+/**
+ * "Hunters investigate campaigns, not one-off vulnerabilities" -- captures
+ * what changed about a previously-tracked campaign, grounded ONLY in this
+ * platform's own real prior coverage of it (priorArticles). `applicable` is
+ * false (the common case) whenever no prior tracked instance of the same
+ * campaign exists yet -- a first sighting has nothing to compare against, so
+ * the honest answer is "not applicable," never an invented evolution
+ * narrative.
+ */
+export interface AiThreatSummaryCampaignEvolution {
+  applicable: boolean;
+  previousActivity: string | null;
+  whatChanged: string | null;
+  why: string | null;
+  likelyNextStep: string | null;
+  priorArticles: AiThreatSummaryPriorArticle[];
+}
+
+/** One indicator from this report that's also linked to a different tracked malware family/actor/campaign, or appears in a different AI Summarization report -- see server/infrastructureReuse.js. */
+export interface AiThreatSummaryReusedIndicator {
+  indicator: string;
+  indicatorType: string;
+  linkedMalwareFamilies: string[];
+  linkedThreatActors: string[];
+  linkedCampaigns: string[];
+  seenInOtherReports: AiThreatSummaryPriorArticle[];
+}
+
+/**
+ * Computed live at serve time (GET /api/dashboard/ai-summaries[/:id]), never
+ * persisted in the stored report JSON -- see server/infrastructureReuse.js.
+ * Built entirely from real cross-referenced data (the same
+ * crossReferenceIndicator() the Intelligence Investigation Console uses),
+ * never AI-generated. No "victims" field: this platform has no per-victim
+ * linkage for malware/actor IOCs, so rather than invent one, it's omitted.
+ */
+export interface AiThreatSummaryInfrastructureReuse {
+  hasReuse: boolean;
+  threatActors: string[];
+  relatedMalwareFamilies: string[];
+  relatedCampaigns: string[];
+  matchedIndicators: AiThreatSummaryReusedIndicator[];
+  timeline: Array<{ date: string; label: string; link: string | null }>;
+}
+
 export interface AiThreatSummaryConfidence {
   level: "High" | "Medium" | "Low";
   score: number | null;
@@ -1352,10 +1405,15 @@ export interface AiThreatSummaryReport {
   mitreAttack: AiThreatSummaryMitreTechnique[];
   threatActors: AiThreatSummaryActor[];
   malware: AiThreatSummaryMalware[];
+  /** The specific named campaign/operation this activity is part of, exactly as the article names it -- null for the common case of a standalone vulnerability/incident with no named operation. */
+  campaignName: string | null;
+  campaignEvolution: AiThreatSummaryCampaignEvolution;
   operationalActions: AiThreatSummaryOperationalActions;
   operationalRecommendations: OperationalRecommendation[];
   confidenceAssessment: AiThreatSummaryConfidence;
   aiRiskScoring: AiThreatSummaryRiskScoring;
+  /** Present only on responses from GET /api/dashboard/ai-summaries[/:id] -- computed live, not part of the persisted report, see AiThreatSummaryInfrastructureReuse. */
+  infrastructureReuse?: AiThreatSummaryInfrastructureReuse;
 }
 
 // --- Emerging Threats (Threat Priority Score ranking + aggregate industry

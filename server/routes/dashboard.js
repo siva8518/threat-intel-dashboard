@@ -47,6 +47,7 @@ import {
   setDraftArtifacts as setDetectionBacklogDraftArtifacts,
   DETECTION_BACKLOG_STATUSES,
 } from "../detectionBacklogTracker.js";
+import { buildInfrastructureReuse } from "../infrastructureReuse.js";
 
 export const router = Router();
 
@@ -389,14 +390,20 @@ router.get("/dashboard/darkweb-intelligence", (_req, res) => {
 
 // --- AI Summarization (SOC-analyst-style structured reports on major
 // vendor/CISA advisories -- see server/aiThreatSummaryJob.js) ---
+// infrastructureReuse is computed live here, never stored in the report's
+// own JSON -- see server/infrastructureReuse.js for why (the entity stores
+// it cross-references against keep growing after a report is generated, so
+// a reuse hit discovered later should surface next time the report is
+// viewed, not only if it existed at generation time).
 router.get("/dashboard/ai-summaries", (_req, res) => {
-  res.json({ reports: getAllAiThreatSummaries() });
+  const reports = getAllAiThreatSummaries().map((report) => ({ ...report, infrastructureReuse: buildInfrastructureReuse(report) }));
+  res.json({ reports });
 });
 
 router.get("/dashboard/ai-summaries/:id", (req, res) => {
   const report = getAiThreatSummaryById(decodeURIComponent(req.params.id));
   if (!report) return res.status(404).json({ error: "not found" });
-  res.json(report);
+  res.json({ ...report, infrastructureReuse: buildInfrastructureReuse(report) });
 });
 
 // Static (never changes at runtime) section-level classification of which

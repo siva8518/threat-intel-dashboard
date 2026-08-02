@@ -10,7 +10,7 @@ import { SeverityBadge } from "./SeverityBadge";
 import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { Table, TableHead, TableBody, TableRow, TableHeaderCell, TableCell } from "@/components/ui/table";
 import { useAiThreatSummaries, useAiSummaryProvenance } from "@/hooks/useAiThreatSummaries";
-import type { AiThreatSummaryReport, Severity } from "@/types/threat-intel";
+import type { AiThreatSummaryReport, Severity, AiThreatSummaryCampaignEvolution, AiThreatSummaryInfrastructureReuse } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 import { downloadReportAsPdf, downloadReportAsWord } from "@/lib/reportExport";
 import { buildOperationalGuidanceRows, EMPTY_OPERATIONAL_ACTIONS, EMPTY_PLATFORM_RECOMMENDATIONS } from "@/lib/operationalGuidance";
@@ -85,6 +85,36 @@ const EMPTY_OPERATIONAL_IMPACT = {
   evasionTechniques: [] as string[],
   attackerObjectives: [] as string[],
 };
+
+const EMPTY_CAMPAIGN_EVOLUTION: AiThreatSummaryCampaignEvolution = {
+  applicable: false,
+  previousActivity: null,
+  whatChanged: null,
+  why: null,
+  likelyNextStep: null,
+  priorArticles: [],
+};
+
+const EMPTY_INFRASTRUCTURE_REUSE: AiThreatSummaryInfrastructureReuse = {
+  hasReuse: false,
+  threatActors: [],
+  relatedMalwareFamilies: [],
+  relatedCampaigns: [],
+  matchedIndicators: [],
+  timeline: [],
+};
+
+/** "Hunters think in kill chains" -- surfaces which stages this report genuinely has no data for, distinct from the Kill Chain block above it (which shows what IS known). Built purely from fields the schema already marks null when unreported -- no new AI generation, no new backend field. */
+function buildIntelligenceGaps(tech: AiThreatSummaryReport["technicalAnalysis"], malware: AiThreatSummaryReport["malware"]) {
+  const namedMalware = malware.filter((m) => m.family !== "Not Reported");
+  const gaps: string[] = [];
+  if (!tech.initialAccess) gaps.push("Initial Access");
+  if (!tech.persistence) gaps.push("Persistence");
+  if (!tech.commandAndControl) gaps.push("Command & Control");
+  if (!tech.lateralMovement) gaps.push("Lateral Movement");
+  if (namedMalware.length === 0 || namedMalware.every((m) => !m.payload)) gaps.push("Payload");
+  return gaps;
+}
 
 function timeAgo(iso: string) {
   const ms = Date.now() - new Date(iso).getTime();
@@ -366,6 +396,10 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                   {kevCount} KEV
                 </Badge>
               )}
+              {/* Surfaces campaign identity at a glance in the collapsed row
+                  too -- otherwise a reader has to expand a report to learn
+                  it's part of a named operation at all. */}
+              {report.campaignName && <Badge variant="cyan">{report.campaignName}</Badge>}
               {report.shouldICare && (
                 <Badge
                   variant={report.shouldICare.verdict === "YES" ? "critical" : report.shouldICare.verdict === "NO" ? "low" : "medium"}
@@ -438,6 +472,83 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                   ]}
                 />
               </div>
+            );
+          })()}
+
+          {/* 1b. What Happened & Why It Matters -- pulled up front and given
+              its own prominent callout rather than left buried inside the
+              dense Technical Analysis section further down (removed from
+              that section's KeyValueBlock below to avoid showing the same
+              two answers twice). "Why It Matters" is deliberately
+              technicalAnalysis.whyItMatters, not intelligenceAssessment --
+              the former is worded to answer exactly this question
+              (including, per its own prompt instruction, explicit
+              campaign-level significance when the article describes a named
+              operation rather than a standalone vulnerability);
+              intelligenceAssessment is a distinct, deeper trajectory
+              judgment and keeps its own spot in Threat Assessment below. */}
+          {(() => {
+            const tech = report.technicalAnalysis ?? EMPTY_TECHNICAL_ANALYSIS;
+            if (tech.whatHappened === "Not Reported" && tech.whyItMatters === "Not Reported") return null;
+            return (
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <h5 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">What Happened?</h5>
+                    <p className="text-sm text-foreground">{tech.whatHappened}</p>
+                  </div>
+                  <div>
+                    <h5 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">
+                      {report.campaignName ? `Why Does "${report.campaignName}" Matter?` : "Why Does This Matter?"}
+                    </h5>
+                    <p className="text-sm text-foreground">{tech.whyItMatters}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 1c. Campaign Evolution -- "hunters investigate campaigns, not
+              one-off IOCs." Only renders when this platform has real prior
+              coverage of the same named campaign to compare against
+              (campaignEvolution.applicable); a first-ever sighting has
+              nothing to compare to, so it's correctly absent rather than
+              showing an invented "no prior activity" placeholder. */}
+          {(() => {
+            const evolution = report.campaignEvolution ?? EMPTY_CAMPAIGN_EVOLUTION;
+            if (!evolution.applicable) return null;
+            return (
+              <Section title={`Campaign Evolution${report.campaignName ? `: ${report.campaignName}` : ""}`}>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <KeyValueBlock title="Previous Campaign" pairs={[["Previously known", evolution.previousActivity]]} />
+                  <KeyValueBlock title="New Campaign" pairs={[["What's changed", evolution.whatChanged]]} />
+                </div>
+                <KeyValueBlock
+                  title=""
+                  pairs={[
+                    ["Why", evolution.why],
+                    ["Likely next step", evolution.likelyNextStep],
+                  ]}
+                />
+                {evolution.priorArticles.length > 0 && (
+                  <div className="mt-2">
+                    <h5 className="mb-1 text-xs font-semibold text-foreground">Prior Coverage</h5>
+                    <ul className="space-y-1">
+                      {evolution.priorArticles.map((a, i) => (
+                        <li key={i}>
+                          <a href={a.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                            {a.title} <ExternalLink className="h-3 w-3" />
+                          </a>
+                          <span className="ml-1 text-xs text-muted">
+                            ({a.source ? `${a.source}, ` : ""}
+                            {new Date(a.publishedDate).toLocaleDateString()})
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </Section>
             );
           })()}
 
@@ -579,11 +690,12 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             return (
               <div>
                 <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Technical Analysis, Attack Details, Kill Chain &amp; MITRE ATT&amp;CK Mapping</h4>
+                {/* whatHappened/whyItMatters are shown once already, in the
+                    prominent "What Happened & Why It Matters" callout near
+                    the top of the report -- not repeated here. */}
                 <KeyValueBlock
                   title="Technical Analysis"
                   pairs={[
-                    ["What happened", tech.whatHappened],
-                    ["Why it matters", tech.whyItMatters],
                     ["Who is affected", tech.whoIsAffected],
                     ["Active exploitation", tech.activeExploitation],
                   ]}
@@ -729,6 +841,31 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             );
           })()}
 
+          {/* 5b. Intelligence Gaps -- "very useful": what we don't know yet,
+              distinct from the Kill Chain block above it (which shows what
+              IS known). Purely derived from fields the schema already
+              leaves null when the article doesn't describe that stage -- no
+              new AI generation, this is just a dedicated view surfacing an
+              absence that was previously only visible by scanning the Kill
+              Chain block for missing rows. */}
+          {(() => {
+            const tech = report.technicalAnalysis ?? EMPTY_TECHNICAL_ANALYSIS;
+            const gaps = buildIntelligenceGaps(tech, report.malware);
+            if (gaps.length === 0) return null;
+            return (
+              <Section title="Intelligence Gaps">
+                <p className="mb-1.5 text-xs text-muted">Not described in this article -- absence of evidence, not evidence this stage didn't happen.</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {gaps.map((g) => (
+                    <Badge key={g} variant="muted">
+                      Unknown: {g}
+                    </Badge>
+                  ))}
+                </div>
+              </Section>
+            );
+          })()}
+
           {/* 6. Top Actions & What's Missing. */}
           {(() => {
             const risk = report.businessRisk ?? EMPTY_BUSINESS_RISK;
@@ -810,6 +947,75 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               </>
             )}
           </Section>
+
+          {/* 7b. Infrastructure Reuse -- hunters care whether THIS report's
+              indicators already showed up elsewhere this platform tracks.
+              Computed live server-side (server/infrastructureReuse.js) by
+              cross-referencing this report's own IOCs against every
+              malware/actor/campaign entity and every other AI Summarization
+              report -- real correlated data, never AI-generated, so this
+              only renders when a genuine hit exists. No "Victims" row: this
+              platform has no per-victim linkage for these IOCs, so rather
+              than invent one, it's simply not shown. */}
+          {(() => {
+            const reuse = report.infrastructureReuse ?? EMPTY_INFRASTRUCTURE_REUSE;
+            if (!reuse.hasReuse) return null;
+            return (
+              <Section title="Infrastructure Reuse">
+                <KeyValueBlock
+                  title=""
+                  pairs={[
+                    ["Threat actor(s)", reuse.threatActors.join(", ") || null],
+                    ["Related malware", reuse.relatedMalwareFamilies.join(", ") || null],
+                    ["Related campaign(s)", reuse.relatedCampaigns.join(", ") || null],
+                  ]}
+                />
+                <div className="mt-2 space-y-1.5">
+                  {reuse.matchedIndicators.map((m, i) => (
+                    <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs">
+                      <span className="font-mono font-semibold text-foreground">{m.indicator}</span>
+                      <span className="ml-1.5 text-muted">({m.indicatorType})</span>
+                      <div className="mt-1 space-y-0.5 text-muted">
+                        {m.linkedMalwareFamilies.length > 0 && <div>Malware: {m.linkedMalwareFamilies.join(", ")}</div>}
+                        {m.linkedThreatActors.length > 0 && <div>Threat actor: {m.linkedThreatActors.join(", ")}</div>}
+                        {m.linkedCampaigns.length > 0 && <div>Campaign: {m.linkedCampaigns.join(", ")}</div>}
+                        {m.seenInOtherReports.length > 0 && (
+                          <div>
+                            Also seen in:{" "}
+                            {m.seenInOtherReports.map((r, j) => (
+                              <a key={j} href={r.link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                                {j > 0 ? ", " : ""}
+                                {r.title}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {reuse.timeline.length > 1 && (
+                  <div className="mt-2">
+                    <h5 className="mb-1 text-xs font-semibold text-foreground">Timeline</h5>
+                    <ul className="space-y-1 text-xs">
+                      {reuse.timeline.map((t, i) => (
+                        <li key={i}>
+                          <span className="text-muted">{new Date(t.date).toLocaleDateString()}: </span>
+                          {t.link ? (
+                            <a href={t.link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                              {t.label}
+                            </a>
+                          ) : (
+                            <span className="text-foreground">{t.label}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </Section>
+            );
+          })()}
 
           {/* 8. Unified Operational Guidance -- one table replacing both the
               former flat "Operational Actions" priority table and the
@@ -937,7 +1143,8 @@ export function AiSummarization() {
         r.articleTitle.toLowerCase().includes(q) ||
         r.cves.some((c) => c.id.toLowerCase().includes(q)) ||
         r.threatActors.some((a) => a.group.toLowerCase().includes(q)) ||
-        r.malware.some((m) => m.family.toLowerCase().includes(q))
+        r.malware.some((m) => m.family.toLowerCase().includes(q)) ||
+        (r.campaignName?.toLowerCase().includes(q) ?? false)
       );
     });
   }, [reports, search, severityFilter, dateRange]);

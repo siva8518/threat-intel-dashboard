@@ -113,7 +113,7 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     `<p class="meta">${esc(report.articleSource)} &middot; ${esc(new Date(report.publishedDate).toLocaleDateString())} &middot; Severity: ${esc(report.severity)} &middot; ` +
       `AI Risk Priority: ${esc(report.aiRiskScoring.priority)} (${report.aiRiskScoring.score == null ? "—" : `${report.aiRiskScoring.score}/100`})${
         kevCount > 0 ? ` &middot; ${kevCount} Known Exploited Vulnerabilit${kevCount === 1 ? "y" : "ies"}` : ""
-      }</p>`,
+      }${report.campaignName ? ` &middot; Campaign: ${esc(report.campaignName)}` : ""}</p>`,
   );
   // Same clarification as the on-screen tab (AiSummarization.tsx) -- placed
   // right next to the risk/priority line, Confidence otherwise reads as
@@ -143,6 +143,39 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
         ["MITRE tactics", report.threatRelevance?.mitreTactics ?? []],
       ]),
     );
+  }
+
+  // 1b. What Happened & Why It Matters -- pulled up front (mirrors
+  //     AiSummarization.tsx), removed from the Technical Analysis section
+  //     further down to avoid showing the same two answers twice.
+  if (tech && (tech.whatHappened !== "Not Reported" || tech.whyItMatters !== "Not Reported")) {
+    parts.push(
+      keyValueSection("What Happened & Why It Matters", [
+        ["What happened", tech.whatHappened],
+        [report.campaignName ? `Why does "${report.campaignName}" matter` : "Why does this matter", tech.whyItMatters],
+      ]),
+    );
+  }
+
+  // 1c. Campaign Evolution -- only present when this platform has real
+  //     prior coverage of the same named campaign to compare against.
+  if (report.campaignEvolution?.applicable) {
+    const evo = report.campaignEvolution;
+    parts.push(heading(2, `Campaign Evolution${report.campaignName ? `: ${esc(report.campaignName)}` : ""}`));
+    parts.push(
+      keyValueSection("", [
+        ["Previously known", evo.previousActivity],
+        ["What's changed", evo.whatChanged],
+        ["Why", evo.why],
+        ["Likely next step", evo.likelyNextStep],
+      ]),
+    );
+    if (evo.priorArticles.length > 0) {
+      const rows = evo.priorArticles
+        .map((a) => `<li><a href="${esc(a.link)}">${esc(a.title)}</a> (${a.source ? `${esc(a.source)}, ` : ""}${esc(new Date(a.publishedDate).toLocaleDateString())})</li>`)
+        .join("");
+      parts.push(`${heading(3, "Prior Coverage")}<ul>${rows}</ul>`);
+    }
   }
 
   // 2. Threat Assessment
@@ -220,10 +253,10 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     parts.push(heading(2, "Technical Analysis, Attack Details, Kill Chain & MITRE ATT&CK Mapping"));
   }
   if (tech) {
+    // whatHappened/whyItMatters already shown once, in the "What Happened &
+    // Why It Matters" section near the top -- not repeated here.
     parts.push(
       keyValueSection("Technical Analysis", [
-        ["What happened", tech.whatHappened],
-        ["Why it matters", tech.whyItMatters],
         ["Who is affected", tech.whoIsAffected],
         ["Active exploitation", tech.activeExploitation],
       ]),
@@ -319,6 +352,24 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     parts.push(`${heading(3, "Malware")}<ul>${rows}</ul>`);
   }
 
+  // 5b. Intelligence Gaps -- what we don't know yet, mirrors
+  //     AiSummarization.tsx's buildIntelligenceGaps (duplicated here rather
+  //     than imported, same precedent as groupedListsSection above -- a
+  //     component file shouldn't be imported into this lib).
+  if (tech) {
+    const gaps: string[] = [];
+    if (!tech.initialAccess) gaps.push("Initial Access");
+    if (!tech.persistence) gaps.push("Persistence");
+    if (!tech.commandAndControl) gaps.push("Command & Control");
+    if (!tech.lateralMovement) gaps.push("Lateral Movement");
+    if (namedMalware.length === 0 || namedMalware.every((m) => !m.payload)) gaps.push("Payload");
+    if (gaps.length > 0) {
+      parts.push(heading(2, "Intelligence Gaps"));
+      parts.push(paragraph("Not described in this article -- absence of evidence, not evidence this stage didn't happen."));
+      parts.push(`<ul>${gaps.map((g) => `<li>Unknown: ${esc(g)}</li>`).join("")}</ul>`);
+    }
+  }
+
   // 6. Top Actions & What's Missing
   if ((risk?.topActions?.length ?? 0) > 0 || risk?.whatsMissing) {
     parts.push(heading(2, "Top Actions & What's Missing"));
@@ -370,6 +421,38 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
         iocRow("MITRE ATT&CK IDs (in article text)", report.iocs.attackTechniqueIds ?? []) +
         iocRow("Malware Names (in article text)", report.iocs.malwareNames ?? []),
     );
+  }
+
+  // 7b. Infrastructure Reuse -- real cross-referenced data (see
+  //     server/infrastructureReuse.js), only present when the caller passed
+  //     a report fetched from GET /dashboard/ai-summaries[/:id] (where it's
+  //     computed live) and a genuine reuse hit exists.
+  if (report.infrastructureReuse?.hasReuse) {
+    const reuse = report.infrastructureReuse;
+    parts.push(heading(2, "Infrastructure Reuse"));
+    parts.push(
+      keyValueSection("", [
+        ["Threat actor(s)", reuse.threatActors.join(", ") || null],
+        ["Related malware", reuse.relatedMalwareFamilies.join(", ") || null],
+        ["Related campaign(s)", reuse.relatedCampaigns.join(", ") || null],
+      ]),
+    );
+    const indicatorRows = reuse.matchedIndicators
+      .map((m) => {
+        const details = [
+          m.linkedMalwareFamilies.length > 0 ? `Malware: ${m.linkedMalwareFamilies.join(", ")}` : null,
+          m.linkedThreatActors.length > 0 ? `Threat actor: ${m.linkedThreatActors.join(", ")}` : null,
+          m.linkedCampaigns.length > 0 ? `Campaign: ${m.linkedCampaigns.join(", ")}` : null,
+          m.seenInOtherReports.length > 0 ? `Also seen in: ${m.seenInOtherReports.map((r) => r.title).join(", ")}` : null,
+        ].filter((x): x is string => Boolean(x));
+        return `<li><strong>${esc(m.indicator)}</strong> (${esc(m.indicatorType)})${details.length > 0 ? `<br/>${details.map(esc).join("<br/>")}` : ""}</li>`;
+      })
+      .join("");
+    if (indicatorRows) parts.push(`<ul>${indicatorRows}</ul>`);
+    if (reuse.timeline.length > 1) {
+      const timelineRows = reuse.timeline.map((t) => `<li>${esc(new Date(t.date).toLocaleDateString())}: ${esc(t.label)}</li>`).join("");
+      parts.push(`${heading(3, "Timeline")}<ul>${timelineRows}</ul>`);
+    }
   }
 
   // 8. Operational Guidance -- one table replacing both the former flat
