@@ -147,15 +147,19 @@ function concreteEvidence(result: InvestigationResult): string[] {
   return evidence;
 }
 
-function whyShouldICare(result: InvestigationResult): string {
+/** One entry per line -- rendered as separate paragraphs so "Evidence:" and its citations don't run on from the severity sentence. */
+function whyShouldICare(result: InvestigationResult): string[] {
   const overview = result.overview;
   const evidence = concreteEvidence(result);
-  const parts = [`This indicator is currently rated ${overview.severity} severity with ${overview.riskLevel.toLowerCase()} risk (${overview.verdictLabel}), recommended priority ${overview.recommendedPriority}.`];
-  if (evidence.length > 0) parts.push(`Evidence: ${evidence.join("; ")}.`);
-  if (overview.associatedThreatActors.length > 0) parts.push(`Linked to tracked threat actor(s): ${overview.associatedThreatActors.join(", ")}.`);
-  if (overview.activeCampaigns.length > 0) parts.push(`Associated with active campaign(s): ${overview.activeCampaigns.join(", ")}.`);
-  if (overview.overallVerdict === "unknown" && evidence.length === 0) parts.push("No configured source or internal data has meaningful signal on this indicator yet.");
-  return parts.join(" ");
+  const typeLabel = INDICATOR_TYPE_LABEL[result.type as IndicatorType];
+  const lines = [
+    `This indicator, which is ${typeLabel} ${result.indicator}, is currently rated ${overview.severity} severity with ${overview.riskLevel.toLowerCase()} risk (${overview.verdictLabel}), recommended priority ${overview.recommendedPriority}.`,
+  ];
+  if (evidence.length > 0) lines.push(`Evidence: ${evidence.join("; ")}.`);
+  if (overview.associatedThreatActors.length > 0) lines.push(`Linked to tracked threat actor(s): ${overview.associatedThreatActors.join(", ")}.`);
+  if (overview.activeCampaigns.length > 0) lines.push(`Associated with active campaign(s): ${overview.activeCampaigns.join(", ")}.`);
+  if (overview.overallVerdict === "unknown" && evidence.length === 0) lines.push("No configured source or internal data has meaningful signal on this indicator yet.");
+  return lines;
 }
 
 function safe(v: unknown): string {
@@ -465,7 +469,13 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, 
             <VerdictBanner overview={result.overview} />
 
             <Section title="Should I Care?">
-              <p className="text-sm text-foreground">{whyShouldICare(result)}</p>
+              <div className="space-y-1.5">
+                {whyShouldICare(result).map((line, i) => (
+                  <p key={i} className="text-sm text-foreground">
+                    {line}
+                  </p>
+                ))}
+              </div>
             </Section>
 
             <KeyFactsPanel facts={buildKeyFacts(result)} />
