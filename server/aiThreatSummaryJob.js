@@ -12,16 +12,23 @@
 // limited slots -- widening eligibility doesn't mean giving up on quality
 // prioritization, just removing the hard exclusion.
 //
-// Also drains two non-news platform sources through the SAME pipeline --
-// ransomware victim disclosures (ransomwareCandidates()) and high-signal
-// GitHub-discovered exploit repos (githubRepoCandidates()) -- so "AI
+// Also drains one non-news platform source through the SAME pipeline --
+// ransomware victim disclosures (ransomwareCandidates()) -- so "AI
 // Summarization covers everything this platform tracks" doesn't stop at RSS
-// news. Neither has real article prose, so each is turned into a genuine
-// (never fabricated) title/summary built only from that record's own real
-// fields, then run through generateThreatSummary() unchanged -- the
-// existing "say Not Reported rather than guess" grounding discipline
-// naturally produces a correspondingly thin report for these rather than
-// needing a second report schema.
+// news. It has no real article prose, so it's turned into a genuine (never
+// fabricated) title/summary built only from that record's own real fields,
+// then run through generateThreatSummary() unchanged -- the existing "say
+// Not Reported rather than guess" grounding discipline naturally produces a
+// correspondingly thin report for these rather than needing a second report
+// schema.
+//
+// GitHub-discovered exploit repos (githubRepoCandidates(), previously also
+// drained here) were removed from the candidate pool: confirmed live these
+// "New GitHub repository: ..." reports had come to dominate the stored
+// report list, crowding out real vendor/CISA/NVD-tied news coverage, which
+// is what this feature is actually for. GitHub Intel still tracks and
+// enriches these repos on its own dedicated tab -- this job just no longer
+// generates a full AI Summarization report for each one.
 //
 // The full enterprise-report schema (25+ sections, several with
 // per-platform hunting-query arrays) is far heavier to generate than the
@@ -43,7 +50,6 @@ import { threatFeedIocs } from "./threatFeed.js";
 import { ransomwareCampaigns as getRansomwareCampaigns } from "./ransomwareCampaigns.js";
 import { getAllEntities as getMalwareIntelligenceEntities } from "./malwareIntelligence.js";
 import { getAllEntities as getThreatActorIntelligenceEntities } from "./threatActorIntelligence.js";
-import { getAllGithubRepos } from "./githubIntel/index.js";
 import { generateThreatSummary } from "./aiThreatSummary.js";
 import { isArticleProcessed, markArticleProcessed, addReport, getLastCycleAt, setLastCycleAt } from "./aiThreatSummaryStore.js";
 import { queryCves } from "./connectors/nvd.js";
@@ -256,34 +262,11 @@ function ransomwareCandidates(campaigns) {
     }));
 }
 
-// Restricted to already-enriched, genuinely high-signal repos (a real CVE
-// match, or a meaningfully-scored threat classification) -- most of the
-// GitHub Intel backlog is still pending enrichment or low-signal (a personal
-// dotfiles repo that merely matched a broad search query), and would
-// otherwise flood this job's limited daily batch with noise the way the
-// pre-widening `#/dashboard/github-intel` backlog itself once did. link is
-// the repo's own real GitHub URL, so fetchArticleText() can genuinely pull
-// its README as source text, same as a real news article.
-const GITHUB_MIN_THREAT_SCORE = 40;
-function githubRepoCandidates(repos) {
-  return (repos ?? [])
-    .filter((r) => r.lastEnrichedAt && ((r.extracted?.cveIds?.length ?? 0) > 0 || (r.threatScore?.score ?? 0) >= GITHUB_MIN_THREAT_SCORE))
-    .map((r) => ({
-      title: `New GitHub repository: ${r.fullName}`,
-      summary:
-        (r.description || "No description provided.") +
-        (r.extracted?.cveIds?.length ? ` References: ${r.extracted.cveIds.join(", ")}.` : ""),
-      link: r.url,
-      source: "GitHub Intel",
-      publishedDate: r.discoveredAt,
-    }));
-}
-
 async function runCycle() {
   if (!cache.getEntry("news").data) throw new NewsCacheNotReadyError("News cache has not synced yet");
 
   const newsItems = cache.getEntry("news").data?.items ?? [];
-  const allCandidateSources = [...newsItems, ...ransomwareCandidates(getRansomwareCampaigns()), ...githubRepoCandidates(getAllGithubRepos())];
+  const allCandidateSources = [...newsItems, ...ransomwareCandidates(getRansomwareCampaigns())];
   const candidates = allCandidateSources.filter((item) => isRecent(item.publishedDate) && !isArticleProcessed(item.link));
   if (candidates.length === 0) throw new NoEligibleCandidatesError("No eligible candidates in this check");
 
@@ -345,6 +328,13 @@ async function runCycle() {
       // file comment) shouldn't mean giving up this quality priority.
       const vendorDiff = Number(isMajorVendorOrCisa(b.source)) - Number(isMajorVendorOrCisa(a.source));
       if (vendorDiff !== 0) return vendorDiff;
+      // An article that already resolves to a real NVD/CVE record gets
+      // priority within its tier too -- this is exactly the "Vendor
+      // Confirmed Intelligence" content the report's IOC/CVE sections are
+      // built to ground against, so it produces a fuller report than an
+      // article with no CVE tie at all.
+      const cveDiff = Number((b.tags?.cveIds?.length ?? 0) > 0) - Number((a.tags?.cveIds?.length ?? 0) > 0);
+      if (cveDiff !== 0) return cveDiff;
       return new Date(b.publishedDate) - new Date(a.publishedDate);
     });
   const batch = buildBatch(eligible);

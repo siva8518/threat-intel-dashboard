@@ -9,6 +9,7 @@ import { ErrorState, EmptyState } from "./ErrorState";
 import { SeverityBadge } from "./SeverityBadge";
 import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { IndustryHeatmap } from "./IndustryHeatmap";
+import { Table, TableHead, TableBody, TableRow, TableHeaderCell, TableCell } from "@/components/ui/table";
 import { useAiThreatSummaries, useAiSummaryProvenance } from "@/hooks/useAiThreatSummaries";
 import type { AiThreatSummaryIndustryRelevance, AiThreatSummaryReport, IndustryName, Severity } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
@@ -399,32 +400,35 @@ const OPERATIONAL_RECOMMENDATION_TEAMS = ["Threat Intelligence", "Threat Hunting
  */
 function OperationalRecommendationsTable({ recommendations }: { recommendations: Array<{ team: string; priority: string; recommendation: string; rationale: string }> }) {
   if (recommendations.length === 0) return null;
+  // Rows are pre-grouped by team (not sorted flat) so the table reads as
+  // "here's SOC's list, here's Threat Hunting's list, ..." rather than an
+  // interleaved priority sort that would force a reader to hunt for their
+  // own team's rows.
+  const rows = OPERATIONAL_RECOMMENDATION_TEAMS.flatMap((team) => recommendations.filter((r) => r.team === team));
   return (
-    <Section title="Operational Recommendations">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {OPERATIONAL_RECOMMENDATION_TEAMS.map((team) => {
-          const rows = recommendations.filter((r) => r.team === team);
-          if (rows.length === 0) return null;
-          return (
-            <div key={team} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
-              <h5 className="mb-1.5 text-xs font-semibold text-foreground">{team}</h5>
-              <ul className="space-y-2">
-                {rows.map((r, i) => (
-                  <li key={i} className="text-xs">
-                    <div className="flex items-start gap-1.5">
-                      <Badge variant={priorityVariant(r.priority)} className="mt-0.5 shrink-0">
-                        {r.priority}
-                      </Badge>
-                      <span className="font-medium text-foreground">{r.recommendation}</span>
-                    </div>
-                    <p className="mt-0.5 pl-1 text-muted">{r.rationale}</p>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
-      </div>
+    <Section title="Operational Actions">
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableHeaderCell className="w-[14%]">Team</TableHeaderCell>
+            <TableHeaderCell className="w-[10%]">Priority</TableHeaderCell>
+            <TableHeaderCell className="w-[38%]">Action</TableHeaderCell>
+            <TableHeaderCell>Rationale</TableHeaderCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((r, i) => (
+            <TableRow key={i}>
+              <TableCell className="text-xs font-semibold text-foreground">{r.team}</TableCell>
+              <TableCell>
+                <Badge variant={priorityVariant(r.priority)}>{r.priority}</Badge>
+              </TableCell>
+              <TableCell className="text-xs font-medium text-foreground">{r.recommendation}</TableCell>
+              <TableCell className="text-xs text-muted">{r.rationale}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </Section>
   );
 }
@@ -588,7 +592,68 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
 
       {expanded && (
         <div className="space-y-5 border-t border-white/[0.06] px-3 pb-4 pt-3 text-sm">
+          {/* Comes first, always -- the reader needs to know how to read
+              everything below before seeing any of it. */}
+          <ProvenanceLegend />
+
+          {/* 1. Executive Summary + Business Risk + Threat Relevance -- the
+              "what happened, what's the business exposure, who's likely
+              targeted" trio, grouped since they're all situational reads a
+              leader or triage-first analyst wants in one pass. */}
+          {(() => {
+            const risk = report.businessRisk ?? EMPTY_BUSINESS_RISK;
+            const relevance = report.threatRelevance ?? EMPTY_THREAT_RELEVANCE;
+            return (
+              <div>
+                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Summary</h4>
+                {report.executiveHeadline && <p className="mb-1.5 text-base font-semibold text-foreground">{report.executiveHeadline}</p>}
+                <p className="text-foreground">{report.executiveSummary}</p>
+
+                {risk.overallRiskLevel && (
+                  <div className="mt-3">
+                    <Badge variant={priorityVariant(risk.overallRiskLevel)}>Overall Risk: {risk.overallRiskLevel}</Badge>
+                    {risk.requiresExecutiveAttention && (
+                      <Badge variant="critical" className="ml-1.5">
+                        Requires executive attention
+                      </Badge>
+                    )}
+                  </div>
+                )}
+                <KeyValueBlock
+                  title=""
+                  pairs={[
+                    ["Business risk", risk.businessRisk],
+                    ["Operational disruption", risk.operationalDisruption],
+                    ["Likelihood of exploitation", risk.likelihoodOfExploitation],
+                    ["Impact if unpatched", risk.impactIfUnpatched],
+                    ["Victim profile", relevance.victimProfile],
+                    ["Initial access vector", relevance.initialAccessVector],
+                  ]}
+                />
+                <GroupedLists
+                  title=""
+                  groups={[
+                    ["Industries commonly targeted", risk.industriesCommonlyTargeted ?? []],
+                    ["Regions impacted", risk.regionsCommonlyTargeted ?? []],
+                    ["Industries at risk", relevance.industriesAtRisk],
+                    ["Technologies targeted", relevance.technologiesTargeted],
+                    ["Geographic focus", relevance.geographicFocus],
+                    ["MITRE tactics", relevance.mitreTactics],
+                  ]}
+                />
+              </div>
+            );
+          })()}
+
+          {/* 2. Threat Assessment -- every scoring/judgment signal in one
+              place: the two headline gauges, the analyst's own written
+              opinion, and the full factor-by-factor reasoning behind both
+              scores (previously a separate "Confidence & Risk Reasoning"
+              section near the bottom -- consolidated here since it's the
+              same "how sure are we, and why" question as the gauges above
+              it). */}
           <div>
+            <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Threat Assessment</h4>
             <div className="flex flex-wrap gap-2">
               <ScoreGauge
                 label="Risk Score"
@@ -604,91 +669,102 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               />
             </div>
             {/* Confirmed live this reads as a contradiction otherwise -- "Confidence" sits right next to a risk/priority score, so a reader assumes it's on the same severity scale. It isn't: it's the model's own certainty that *this report* accurately reflects the source article, completely independent of how severe the underlying threat is. "Medium priority, High confidence" means "I'm quite sure this really is Medium," not "actually High." */}
-            <p className="mt-1.5 text-[11px] text-muted">Analysis Confidence is the model's certainty that this report reflects the source article -- not a severity signal. See "Overall SOC priority" below for the vendor-context assessment.</p>
-          </div>
+            <p className="mt-1.5 text-[11px] text-muted">Analysis Confidence is the model's certainty that this report reflects the source article -- not a severity signal.</p>
 
-          <ProvenanceLegend />
-
-          <div>
-            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Summary</h4>
-            {report.executiveHeadline && <p className="mb-1.5 text-base font-semibold text-foreground">{report.executiveHeadline}</p>}
-            <p className="text-foreground">{report.executiveSummary}</p>
-          </div>
-
-          {report.intelligenceAssessment && report.intelligenceAssessment !== "Not Reported" && (
-            <div>
-              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Intelligence Assessment</h4>
-              <div className="space-y-2 text-foreground">
+            {report.intelligenceAssessment && report.intelligenceAssessment !== "Not Reported" && (
+              <div className="mt-3 space-y-2 text-foreground">
                 {report.intelligenceAssessment.split(/\n{2,}/).map((paragraph, i) => (
                   <p key={i}>{paragraph}</p>
                 ))}
               </div>
-            </div>
-          )}
+            )}
 
-          {report.shouldICare && (
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Should I Care?</h4>
-              <p className="text-foreground">
-                <span className="font-semibold">{report.shouldICare.verdict}.</span> {report.shouldICare.reasoning}
-              </p>
-            </div>
-          )}
-
-          <ExposureAssessment exposure={report.exposureAssessment ?? EMPTY_EXPOSURE_ASSESSMENT} />
-
-          {(() => {
-            const risk = report.businessRisk ?? EMPTY_BUSINESS_RISK;
-            return (
-              <>
-                {risk.overallRiskLevel && (
-                  <div className="-mb-3">
-                    <Badge variant={priorityVariant(risk.overallRiskLevel)}>Overall Risk: {risk.overallRiskLevel}</Badge>
-                  </div>
+            <p className="mt-3 text-xs text-muted">
+              <span className="font-semibold text-foreground">Risk score reasoning:</span> {report.aiRiskScoring.reasoning}
+            </p>
+            {(report.confidenceAssessment.factorsPresent?.length > 0 || report.confidenceAssessment.factorsMissing?.length > 0) && (
+              <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {report.confidenceAssessment.factorsPresent?.length > 0 && (
+                  <ul className="space-y-0.5 text-xs text-muted">
+                    {report.confidenceAssessment.factorsPresent.map((f, i) => (
+                      <li key={i} className="text-low">
+                        ✓ {f}
+                      </li>
+                    ))}
+                  </ul>
                 )}
-                <KeyValueBlock
-                  title="Business Risk"
-                  pairs={[
-                    ["Business risk", risk.businessRisk],
-                    ["Operational disruption", risk.operationalDisruption],
-                    ["Likelihood of exploitation", risk.likelihoodOfExploitation],
-                    ["Impact if unpatched", risk.impactIfUnpatched],
-                  ]}
-                />
-                {risk.requiresExecutiveAttention && (
-                  <div className="-mt-3">
-                    <Badge variant="critical">Requires executive attention</Badge>
-                  </div>
+                {report.confidenceAssessment.factorsMissing?.length > 0 && (
+                  <ul className="space-y-0.5 text-xs text-muted">
+                    {report.confidenceAssessment.factorsMissing.map((f, i) => (
+                      <li key={i}>– {f}</li>
+                    ))}
+                  </ul>
                 )}
-                <GroupedLists
-                  title="Affected Industries"
-                  groups={[
-                    ["Industries commonly targeted", risk.industriesCommonlyTargeted ?? []],
-                    ["Regions impacted", risk.regionsCommonlyTargeted ?? []],
-                  ]}
-                />
-                <FieldList title="Top Actions" items={risk.topActions ?? []} />
-                {risk.whatsMissing && (
-                  <div className="-mt-3 text-xs text-muted">
-                    <span className="font-semibold text-foreground">What's missing: </span>
-                    {risk.whatsMissing}
-                  </div>
-                )}
-              </>
-            );
-          })()}
+              </div>
+            )}
+          </div>
 
+          {/* 3. Should I Care + Exposure Assessment + affected technologies/
+              products/versions -- the self-service "does this apply to me,
+              and specifically what should I check" bundle. */}
           {(() => {
             const tech = report.technicalAnalysis ?? EMPTY_TECHNICAL_ANALYSIS;
             return (
-              <>
+              <div>
+                <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Should I Care &amp; Exposure</h4>
+                {report.shouldICare && (
+                  <div className="mb-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <p className="text-foreground">
+                      <span className="font-semibold">{report.shouldICare.verdict}.</span> {report.shouldICare.reasoning}
+                    </p>
+                  </div>
+                )}
+                <ExposureAssessment exposure={report.exposureAssessment ?? EMPTY_EXPOSURE_ASSESSMENT} />
+                <GroupedLists
+                  title="Affected Technologies & Products"
+                  groups={[
+                    ["Products", tech.products],
+                    ["Versions", tech.versions],
+                    ["Operating systems", tech.operatingSystems],
+                    ["Cloud services", tech.cloudServices],
+                    ["Applications", tech.applications],
+                  ]}
+                />
+              </div>
+            );
+          })()}
+
+          {/* 4. Affected Industries -- IndustryHeatmap's own collapsed row
+              already shows exactly industry + relevance + risk score +
+              priority (click a row for the full per-sector detail), so no
+              separate simplified table is needed here. */}
+          <Section title="Affected Industries">
+            <IndustryHeatmap rows={report.industryRelevance ?? EMPTY_INDUSTRY_RELEVANCE} />
+          </Section>
+
+          {/* 5. Technical Analysis, Attack Details, Kill Chain & MITRE
+              ATT&CK Mapping -- one heading, since these all answer the same
+              underlying "how does this attack actually work" question at
+              increasing levels of structure (narrative -> categorized
+              bullets -> ordered kill-chain stages -> catalog-validated
+              technique IDs). Named threat actors/malware are folded in here
+              too, right after the technique mapping, since they're the
+              "who/what" half of the same technical picture. */}
+          {(() => {
+            const tech = report.technicalAnalysis ?? EMPTY_TECHNICAL_ANALYSIS;
+            return (
+              <div>
+                <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Technical Analysis, Attack Details, Kill Chain &amp; MITRE ATT&amp;CK Mapping</h4>
                 <KeyValueBlock
-                  title="Technical Analysis"
+                  title=""
                   pairs={[
                     ["What happened", tech.whatHappened],
                     ["Why it matters", tech.whyItMatters],
                     ["Who is affected", tech.whoIsAffected],
                     ["Exploitation status", tech.exploitationStatus],
+                    ["Vendor severity", tech.vendorSeverity],
+                    ["Active exploitation", tech.activeExploitation],
+                    ["Overall SOC priority", tech.overallSocPriority],
                   ]}
                 />
                 <GroupedLists
@@ -715,172 +791,117 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                     ["Ransomware deployment", tech.ransomwareDeployment],
                   ]}
                 />
-                <GroupedLists
-                  title="Affected Products"
-                  groups={[
-                    ["Products", tech.products],
-                    ["Versions", tech.versions],
-                    ["Operating systems", tech.operatingSystems],
-                    ["Cloud services", tech.cloudServices],
-                    ["Applications", tech.applications],
-                  ]}
-                />
-                <KeyValueBlock
-                  title="Severity Assessment"
-                  pairs={[
-                    ["Vendor severity", tech.vendorSeverity],
-                    ["Active exploitation", tech.activeExploitation],
-                    ["Overall SOC priority", tech.overallSocPriority],
-                  ]}
-                />
-              </>
+                {report.mitreAttack.length > 0 && (
+                  <div className="mt-3">
+                    <h5 className="mb-1 text-xs font-semibold text-foreground">MITRE ATT&amp;CK Mapping</h5>
+                    <div className="space-y-1.5">
+                      {report.mitreAttack.map((t, i) => (
+                        <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="cyan" className="font-mono">
+                              {t.techniqueId ?? "T????"}
+                            </Badge>
+                            <span className="font-semibold text-foreground">{t.technique}</span>
+                            <span className="text-muted">· {t.killChainPhase}</span>
+                            {t.confidence && (
+                              <Badge variant={priorityVariant(t.confidence)} className="ml-auto">
+                                {t.confidence} confidence
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="mt-1 text-muted">{t.reason}</p>
+                          {t.evidence && <p className="mt-1 border-l-2 border-white/10 pl-2 italic text-muted">Evidence: &ldquo;{t.evidence}&rdquo;</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {namedThreatActors.length > 0 && (
+                  <div className="mt-3">
+                    <h5 className="mb-1 text-xs font-semibold text-foreground">Threat Actors</h5>
+                    <div className="space-y-2">
+                      {namedThreatActors.map((a, i) => (
+                        <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs">
+                          <div className="font-semibold text-foreground">
+                            {a.group}
+                            {a.aliases.length > 0 && <span className="font-normal text-muted"> (aka {a.aliases.join(", ")})</span>}
+                          </div>
+                          <div className="mt-1 space-y-0.5 text-muted">
+                            {a.motivation && <div>Motivation: {a.motivation}</div>}
+                            {a.geography && <div>Geography: {a.geography}</div>}
+                            {a.targetSectors.length > 0 && <div>Target sectors: {a.targetSectors.join(", ")}</div>}
+                            {a.knownCampaigns.length > 0 && <div>Known campaigns: {a.knownCampaigns.join(", ")}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {namedMalware.length > 0 && (
+                  <div className="mt-3">
+                    <h5 className="mb-1 text-xs font-semibold text-foreground">Malware</h5>
+                    <div className="space-y-2">
+                      {namedMalware.map((m, i) => (
+                        <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs">
+                          <div className="font-semibold text-foreground">{m.family}</div>
+                          <div className="mt-1 space-y-0.5 text-muted">
+                            {m.capabilities.length > 0 && <div>Capabilities: {m.capabilities.join(", ")}</div>}
+                            {m.persistence && <div>Persistence: {m.persistence}</div>}
+                            {m.payload && <div>Payload: {m.payload}</div>}
+                            {m.deliveryMechanism && <div>Delivery: {m.deliveryMechanism}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             );
           })()}
 
+          {/* 6. Top Actions & What's Missing. */}
           {(() => {
-            const relevance = report.threatRelevance ?? EMPTY_THREAT_RELEVANCE;
+            const risk = report.businessRisk ?? EMPTY_BUSINESS_RISK;
+            if ((risk.topActions?.length ?? 0) === 0 && !risk.whatsMissing) return null;
             return (
-              <>
-                <KeyValueBlock
-                  title="Threat Relevance"
-                  pairs={[
-                    ["Victim profile", relevance.victimProfile],
-                    ["Initial access vector", relevance.initialAccessVector],
-                  ]}
-                />
-                <GroupedLists
-                  title=""
-                  groups={[
-                    ["Industries at risk", relevance.industriesAtRisk],
-                    ["Technologies targeted", relevance.technologiesTargeted],
-                    ["Geographic focus", relevance.geographicFocus],
-                    ["MITRE tactics", relevance.mitreTactics],
-                  ]}
-                />
-              </>
+              <div>
+                <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Top Actions &amp; What's Missing</h4>
+                <FieldList title="" items={risk.topActions ?? []} />
+                {risk.whatsMissing && (
+                  <div className="mt-2 text-xs text-muted">
+                    <span className="font-semibold text-foreground">What's missing: </span>
+                    {risk.whatsMissing}
+                  </div>
+                )}
+              </div>
             );
           })()}
 
-          {(() => {
-            const impact = report.operationalImpact ?? EMPTY_OPERATIONAL_IMPACT;
-            return (
-              <>
-                <KeyValueBlock
-                  title="Operational Impact"
-                  pairs={[
-                    ["Business impact", impact.businessImpact],
-                    ["Risk level", report.aiRiskScoring.priority],
-                  ]}
-                />
-                <GroupedLists
-                  title=""
-                  groups={[
-                    ["Detection challenges", impact.detectionChallenges],
-                    ["Evasion techniques", impact.evasionTechniques],
-                    ["Attacker objectives", impact.attackerObjectives],
-                  ]}
-                />
-              </>
-            );
-          })()}
-
-          <Section title="Industry Relevance">
-            <IndustryHeatmap rows={report.industryRelevance ?? EMPTY_INDUSTRY_RELEVANCE} />
-          </Section>
-
-          {report.cves.length > 0 && (
-            <Section title="CVEs (verified CVSS/EPSS/KEV)">
-              <div className="space-y-1.5">
-                {report.cves.map((cve) => (
-                  <a
-                    key={cve.id}
-                    href={cve.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs text-foreground hover:text-primary hover:underline"
-                  >
-                    <span className="font-mono font-semibold">{cve.id}</span>
-                    <SeverityBadge severity={cve.severity as never} />
-                    {cve.cvssScore != null && <span className="text-muted">CVSS {cve.cvssScore}</span>}
-                    {cve.epssScore != null && <span className="text-muted">EPSS {(cve.epssScore * 100).toFixed(1)}%</span>}
-                    {cve.knownExploited && <Badge variant="critical">KEV</Badge>}
-                  </a>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {report.mitreAttack.length > 0 && (
-            <Section title="MITRE ATT&CK Mapping">
-              <div className="space-y-1.5">
-                {report.mitreAttack.map((t, i) => (
-                  <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="cyan" className="font-mono">
-                        {t.techniqueId ?? "T????"}
-                      </Badge>
-                      <span className="font-semibold text-foreground">{t.technique}</span>
-                      <span className="text-muted">· {t.killChainPhase}</span>
-                      {t.confidence && (
-                        <Badge variant={priorityVariant(t.confidence)} className="ml-auto">
-                          {t.confidence} confidence
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="mt-1 text-muted">{t.reason}</p>
-                    {t.evidence && (
-                      <p className="mt-1 border-l-2 border-white/10 pl-2 italic text-muted">
-                        Evidence: &ldquo;{t.evidence}&rdquo;
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {namedThreatActors.length > 0 && (
-            <Section title="Threat Actors">
-              <div className="space-y-2">
-                {namedThreatActors.map((a, i) => (
-                  <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs">
-                    <div className="font-semibold text-foreground">
-                      {a.group}
-                      {a.aliases.length > 0 && <span className="font-normal text-muted"> (aka {a.aliases.join(", ")})</span>}
-                    </div>
-                    <div className="mt-1 space-y-0.5 text-muted">
-                      {a.motivation && <div>Motivation: {a.motivation}</div>}
-                      {a.geography && <div>Geography: {a.geography}</div>}
-                      {a.targetSectors.length > 0 && <div>Target sectors: {a.targetSectors.join(", ")}</div>}
-                      {a.knownCampaigns.length > 0 && <div>Known campaigns: {a.knownCampaigns.join(", ")}</div>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {namedMalware.length > 0 && (
-            <Section title="Malware">
-              <div className="space-y-2">
-                {namedMalware.map((m, i) => (
-                  <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs">
-                    <div className="font-semibold text-foreground">{m.family}</div>
-                    <div className="mt-1 space-y-0.5 text-muted">
-                      {m.capabilities.length > 0 && <div>Capabilities: {m.capabilities.join(", ")}</div>}
-                      {m.persistence && <div>Persistence: {m.persistence}</div>}
-                      {m.payload && <div>Payload: {m.payload}</div>}
-                      {m.deliveryMechanism && <div>Delivery: {m.deliveryMechanism}</div>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {totalIocs > 0 && (
+          {/* 7. IOCs -- CVEs shown alongside since both are the same
+              "Vendor Confirmed Intelligence" category from the legend
+              above, never model-generated. */}
+          {(report.cves.length > 0 || totalIocs > 0) && (
             <Section title="Indicators of Compromise (verified, extracted from source text)">
-              {report.iocProvenance && (
+              {report.cves.length > 0 && (
+                <div className="mb-2.5 space-y-1.5">
+                  {report.cves.map((cve) => (
+                    <a
+                      key={cve.id}
+                      href={cve.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs text-foreground hover:text-primary hover:underline"
+                    >
+                      <span className="font-mono font-semibold">{cve.id}</span>
+                      <SeverityBadge severity={cve.severity as never} />
+                      {cve.cvssScore != null && <span className="text-muted">CVSS {cve.cvssScore}</span>}
+                      {cve.epssScore != null && <span className="text-muted">EPSS {(cve.epssScore * 100).toFixed(1)}%</span>}
+                      {cve.knownExploited && <Badge variant="critical">KEV</Badge>}
+                    </a>
+                  ))}
+                </div>
+              )}
+              {report.iocProvenance && totalIocs > 0 && (
                 <p className="mb-2.5 text-[11px] text-muted">
                   Every indicator below is {report.iocProvenance.confidence.toLowerCase()} -- extracted directly from{" "}
                   <a href={report.iocProvenance.sourceUrl} target="_blank" rel="noreferrer" className="underline hover:text-primary">
@@ -908,31 +929,47 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             </Section>
           )}
 
+          {/* 8. Operational Impact. */}
+          {(() => {
+            const impact = report.operationalImpact ?? EMPTY_OPERATIONAL_IMPACT;
+            return (
+              <div>
+                <KeyValueBlock
+                  title="Operational Impact"
+                  pairs={[
+                    ["Business impact", impact.businessImpact],
+                    ["Risk level", report.aiRiskScoring.priority],
+                  ]}
+                />
+                <GroupedLists
+                  title=""
+                  groups={[
+                    ["Detection challenges", impact.detectionChallenges],
+                    ["Evasion techniques", impact.evasionTechniques],
+                    ["Attacker objectives", impact.attackerObjectives],
+                  ]}
+                />
+              </div>
+            );
+          })()}
+
+          {/* 9. Operational Actions -- a genuine per-team table (the
+              scannable "who does what, in what order" view) first, with the
+              deep per-team narrative (real telemetry, KQL/Sigma/SPL queries,
+              hunting hypotheses/investigation steps, IR steps) as
+              elaboration below it, not a replacement for it. */}
+          <OperationalRecommendationsTable recommendations={report.operationalRecommendations ?? []} />
+
           {(() => {
             const actions = report.operationalActions ?? EMPTY_OPERATIONAL_ACTIONS;
             const vm = actions.vulnerabilityManagement;
-            // actions itself can predate this specific nested field even when
-            // operationalActions as a whole exists (reports generated between
-            // the "always-visible sections" round and this one) -- fall back
-            // per-field, not just at the top level, same immutable-report
-            // convention as everywhere else in this file.
-            const platformRecs = actions.platformRecommendations ?? EMPTY_PLATFORM_RECOMMENDATIONS;
             const behavioralIndicators = actions.threatHunter.behavioralIndicators ?? EMPTY_BEHAVIORAL_INDICATORS;
             const likelyManifestation = actions.detectionEngineer.likelyManifestation ?? "Not Reported";
             const behavioralDetectionOpportunities = actions.detectionEngineer.behavioralDetectionOpportunities ?? [];
             return (
-              <>
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">Operational Actions</h4>
-
-                {/* Every team section below always renders, even when the model had little to say for that
-                    specific article -- "Not Reported" is the same explicit placeholder convention used
-                    throughout this report (see server/aiThreatSummary.js's grounding rules), not a real
-                    absence. Confirmed live: hiding a whole section whenever its content was thin read as
-                    "this data doesn't exist" rather than "nothing applicable for this article," which is
-                    misleading for a low-signal (e.g. non-attack) article that still deserves a SOC Analyst/
-                    Detection Engineer section, just a sparse one. */}
-                <div className="-mt-3">
-                  <h4 className="mb-1 text-xs font-semibold text-foreground">SOC Analyst</h4>
+              <div className="space-y-4">
+                <div>
+                  <h5 className="mb-1 text-xs font-semibold text-foreground">SOC Analyst -- Detailed Guidance</h5>
                   <RecommendedActionsChecklist actions={actions.recommendedActions} />
                   <GroupedCodeLists title="Telemetry to Check" groups={[["Sources", actions.socAnalyst.telemetryToCheck]]} />
                   {actions.socAnalyst.telemetryToCheck.length === 0 && <p className="text-xs text-muted">Telemetry to check: Not Reported</p>}
@@ -949,26 +986,7 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                 </div>
 
                 <div>
-                  <h4 className="mb-1 text-xs font-semibold text-foreground">Platform Recommendations</h4>
-                  <GroupedLists
-                    title=""
-                    groups={[
-                      ["Log sources to review", platformRecs.logSourcesToReview],
-                      ["Microsoft Defender XDR", platformRecs.microsoftDefenderRecommendations],
-                      ["Microsoft Sentinel", platformRecs.microsoftSentinelRecommendations],
-                      ["Firewall / DNS", platformRecs.firewallDnsRecommendations],
-                      ["Email security (Defender for Office 365)", platformRecs.emailSecurityRecommendations],
-                      ["Identity monitoring", platformRecs.identityMonitoringRecommendations],
-                      ["EDR", platformRecs.edrRecommendations],
-                    ]}
-                  />
-                  {Object.values(platformRecs).every((list) => list.length === 0) && (
-                    <p className="text-xs text-muted">Platform recommendations: Not Reported</p>
-                  )}
-                </div>
-
-                <div>
-                  <h4 className="mb-1 text-xs font-semibold text-foreground">Threat Hunter</h4>
+                  <h5 className="mb-1 text-xs font-semibold text-foreground">Threat Hunter -- Detailed Guidance</h5>
                   {actions.threatHunter.hypotheses.length > 0 ? (
                     <HypothesisList hypotheses={actions.threatHunter.hypotheses} />
                   ) : (
@@ -990,7 +1008,7 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                 </div>
 
                 <div>
-                  <h4 className="mb-1 text-xs font-semibold text-foreground">Detection Engineer</h4>
+                  <h5 className="mb-1 text-xs font-semibold text-foreground">Detection Engineer -- Detailed Guidance</h5>
                   <dl className="space-y-1 text-sm">
                     <div>
                       <dt className="inline font-semibold text-foreground">Likely manifestation: </dt>
@@ -1040,7 +1058,7 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                 </div>
 
                 <div>
-                  <h4 className="mb-1 text-xs font-semibold text-foreground">Vulnerability Management</h4>
+                  <h5 className="mb-1 text-xs font-semibold text-foreground">Vulnerability Management -- Detailed Guidance</h5>
                   {!vm.applicable && <p className="text-xs text-muted">Not Applicable -- this article does not involve a specific CVE.</p>}
                   {vm.applicable && (
                     <>
@@ -1061,66 +1079,50 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                   )}
                 </div>
 
-                <GroupedLists
-                  title="Incident Response"
-                  groups={[
-                    ["Immediate triage steps", actions.incidentResponse.immediateTriageSteps],
-                    ["Containment actions", actions.incidentResponse.containmentActions],
-                    ["Recovery actions", actions.incidentResponse.recoveryActions],
-                  ]}
-                />
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Intelligence Takeaway</h4>
-                    <p className="text-foreground">{actions.threatIntelTakeaway}</p>
-                  </div>
-                  <div>
-                    <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Executive Leadership Takeaway</h4>
-                    <p className="text-foreground">{actions.executiveLeadershipTakeaway}</p>
-                  </div>
+                <div>
+                  <h5 className="mb-1 text-xs font-semibold text-foreground">Incident Response -- Detailed Guidance</h5>
+                  <GroupedLists
+                    title=""
+                    groups={[
+                      ["Immediate triage steps", actions.incidentResponse.immediateTriageSteps],
+                      ["Containment actions", actions.incidentResponse.containmentActions],
+                      ["Recovery actions", actions.incidentResponse.recoveryActions],
+                    ]}
+                  />
                 </div>
-              </>
+              </div>
             );
           })()}
 
-          <OperationalRecommendationsTable recommendations={report.operationalRecommendations ?? []} />
-
-          <div>
-            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Confidence & Risk Reasoning</h4>
-            <p className="text-xs text-muted">
-              <span className="font-semibold text-foreground">
-                Confidence ({report.confidenceAssessment.level}{report.confidenceAssessment.score != null ? `, ${report.confidenceAssessment.score}%` : ""}):
-              </span>{" "}
-              {report.confidenceAssessment.reasoning}
-            </p>
-            {(report.confidenceAssessment.factorsPresent?.length > 0 || report.confidenceAssessment.factorsMissing?.length > 0) && (
-              <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {report.confidenceAssessment.factorsPresent?.length > 0 && (
-                  <ul className="space-y-0.5 text-xs text-muted">
-                    {report.confidenceAssessment.factorsPresent.map((f, i) => (
-                      <li key={i} className="text-low">
-                        ✓ {f}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {report.confidenceAssessment.factorsMissing?.length > 0 && (
-                  <ul className="space-y-0.5 text-xs text-muted">
-                    {report.confidenceAssessment.factorsMissing.map((f, i) => (
-                      <li key={i}>– {f}</li>
-                    ))}
-                  </ul>
-                )}
+          {/* 10. Recommendations -- platform/tooling-specific guidance,
+              distinct from the team-action table above ("what to do" vs.
+              "which platform feature to configure"). */}
+          {(() => {
+            const actions = report.operationalActions ?? EMPTY_OPERATIONAL_ACTIONS;
+            const platformRecs = actions.platformRecommendations ?? EMPTY_PLATFORM_RECOMMENDATIONS;
+            if (Object.values(platformRecs).every((list) => list.length === 0)) return null;
+            return (
+              <div>
+                <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Recommendations</h4>
+                <GroupedLists
+                  title=""
+                  groups={[
+                    ["Log sources to review", platformRecs.logSourcesToReview],
+                    ["Microsoft Defender XDR", platformRecs.microsoftDefenderRecommendations],
+                    ["Microsoft Sentinel", platformRecs.microsoftSentinelRecommendations],
+                    ["Firewall / DNS", platformRecs.firewallDnsRecommendations],
+                    ["Email security (Defender for Office 365)", platformRecs.emailSecurityRecommendations],
+                    ["Identity monitoring", platformRecs.identityMonitoringRecommendations],
+                    ["EDR", platformRecs.edrRecommendations],
+                  ]}
+                />
               </div>
-            )}
-            <p className="mt-1.5 text-xs text-muted">
-              <span className="font-semibold text-foreground">Risk score reasoning:</span> {report.aiRiskScoring.reasoning}
-            </p>
-          </div>
+            );
+          })()}
 
+          {/* 11. Source -- last, always. */}
           <div>
-            <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">References</h4>
+            <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Source</h4>
             <ul className="space-y-1">
               {report.references.map((ref, i) => (
                 <li key={i}>
