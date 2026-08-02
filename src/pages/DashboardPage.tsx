@@ -38,7 +38,7 @@ import { SelectionProvider } from "@/context/SelectionContext";
 import type { Severity } from "@/types/threat-intel";
 
 const TABS = [
-  { id: "triage", label: "Intelligence Investigation Console", icon: Siren },
+  { id: "triage", label: "Triage Console", icon: Siren },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "cves", label: "Latest CVEs", icon: ShieldAlert },
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },

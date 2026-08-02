@@ -339,7 +339,7 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign }
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base font-semibold text-foreground">Intelligence Investigation Console</CardTitle>
+        <CardTitle className="text-base font-semibold text-foreground">Triage Console</CardTitle>
         <p className="mt-1 text-xs text-muted">
           Paste anything from an alert — an IP, domain, URL, file hash, CVE ID, email, file/process name, registry key, user agent, or a malware/actor/campaign
           name — and get a full investigation instead of a raw source dump. Type is auto-detected, no manual selection needed.
