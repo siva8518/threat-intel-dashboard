@@ -51,7 +51,7 @@ import { ransomwareCampaigns as getRansomwareCampaigns } from "./ransomwareCampa
 import { getAllEntities as getMalwareIntelligenceEntities } from "./malwareIntelligence.js";
 import { getAllEntities as getThreatActorIntelligenceEntities } from "./threatActorIntelligence.js";
 import { generateThreatSummary } from "./aiThreatSummary.js";
-import { isArticleProcessed, markArticleProcessed, addReport, getLastCycleAt, setLastCycleAt } from "./aiThreatSummaryStore.js";
+import { isArticleProcessed, markArticleProcessed, addReport, getLastCycleAt, setLastCycleAt, getCoveredCveIds } from "./aiThreatSummaryStore.js";
 import { queryCves } from "./connectors/nvd.js";
 import { AllProvidersFailedError } from "./ai/aiRouter.js";
 import { log } from "./lib/log.js";
@@ -317,7 +317,28 @@ async function runCycle() {
   // articles always get to the front of the queue rather than being left to
   // chance -- it doesn't shrink the backlog, but it fixes *which* articles
   // get covered first.
-  const eligible = tagged
+  // Multiple vendors/outlets routinely publish separate full articles on the
+  // exact same CVE within hours of each other (confirmed live: The Cyber
+  // Express and Horizon3.ai both wrote full articles on CVE-2026-20316,
+  // producing two near-duplicate reports in the tab) -- once any existing
+  // report already covers a CVE, a second article whose ONLY CVE tag(s) are
+  // already covered adds no real new coverage, just visual duplication.
+  // Scoped strictly to CVE ID overlap (a precise, verifiable key already
+  // computed by NVD/KEV grounding) rather than fuzzy title/topic similarity,
+  // which risks wrongly merging two genuinely different stories -- an
+  // article with no CVE tag at all, or one that also covers a CVE nothing
+  // has reported on yet, is never affected by this filter. Marked processed
+  // immediately (not just skipped) so it doesn't keep occupying a scarce
+  // batch slot -- or get reconsidered -- every future cycle either.
+  const coveredCveIds = getCoveredCveIds();
+  const dedupedByTopic = tagged.filter((item) => {
+    const cveIds = item.tags?.cveIds ?? [];
+    const isDuplicateTopic = cveIds.length > 0 && cveIds.every((id) => coveredCveIds.has(id));
+    if (isDuplicateTopic) markArticleProcessed(item.link);
+    return !isDuplicateTopic;
+  });
+
+  const eligible = dedupedByTopic
     .map((item) => ({ ...item, severity: item.severity.toUpperCase() }))
     .filter((item) => ELIGIBLE_SEVERITIES.has(item.severity))
     .sort((a, b) => {
@@ -341,6 +362,16 @@ async function runCycle() {
   if (batch.length === 0) return;
 
   for (const item of batch) {
+    // Same CVE-topic guard as above, re-checked per item: two articles about
+    // the same brand-new CVE (not yet covered by any PRIOR report, so both
+    // passed the pre-batch filter) can still both land in one cycle's batch
+    // -- this catches that case using the same working set, extended below
+    // as each item's own report actually lands.
+    const itemCveIds = item.tags.cveIds ?? [];
+    if (itemCveIds.length > 0 && itemCveIds.every((id) => coveredCveIds.has(id))) {
+      markArticleProcessed(item.link);
+      continue;
+    }
     try {
       const cveEnrichment = await enrichCveIds(item.tags.cveIds, kevEntries, epssScores);
       const report = await generateThreatSummary(item, {
@@ -352,6 +383,7 @@ async function runCycle() {
       });
       if (report) {
         addReport(report);
+        for (const id of itemCveIds) coveredCveIds.add(id);
       } else {
         markArticleProcessed(item.link);
       }

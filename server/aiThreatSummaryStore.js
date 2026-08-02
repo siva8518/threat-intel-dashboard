@@ -63,6 +63,24 @@ export function getAllReports() {
   return state.reports;
 }
 
+/**
+ * Every CVE ID already covered by an existing report -- used by
+ * aiThreatSummaryJob.js to skip generating a second full report for the same
+ * vulnerability just because a different vendor/outlet also wrote about it
+ * (confirmed live: The Cyber Express and Horizon3.ai both produced full
+ * separate articles on CVE-2026-20316 within hours of each other). Recomputed
+ * on demand from `reports` rather than tracked as a separate persisted set --
+ * report count is small (bounded by MAX_REPORTS) so this scan is cheap, and
+ * it can never drift out of sync with what's actually in the store.
+ */
+export function getCoveredCveIds() {
+  const ids = new Set();
+  for (const report of state.reports) {
+    for (const cve of report.cves ?? []) ids.add(cve.id);
+  }
+  return ids;
+}
+
 export function getReportById(id) {
   return state.reports.find((r) => r.id === id) ?? null;
 }
