@@ -8,12 +8,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { SeverityBadge } from "./SeverityBadge";
 import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
-import { IndustryHeatmap } from "./IndustryHeatmap";
 import { Table, TableHead, TableBody, TableRow, TableHeaderCell, TableCell } from "@/components/ui/table";
 import { useAiThreatSummaries, useAiSummaryProvenance } from "@/hooks/useAiThreatSummaries";
-import type { AiThreatSummaryIndustryRelevance, AiThreatSummaryReport, IndustryName, Severity } from "@/types/threat-intel";
+import type { AiThreatSummaryReport, Severity } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 import { downloadReportAsPdf, downloadReportAsWord } from "@/lib/reportExport";
+import { buildOperationalGuidanceRows, EMPTY_OPERATIONAL_ACTIONS, EMPTY_PLATFORM_RECOMMENDATIONS } from "@/lib/operationalGuidance";
 
 // Reports generated before the v2 schema (businessRisk/technicalAnalysis/
 // operationalActions replacing the old flat section list) won't have these
@@ -75,8 +75,6 @@ const EMPTY_THREAT_RELEVANCE = {
   industriesAtRisk: [] as string[],
   technologiesTargeted: [] as string[],
   geographicFocus: [] as string[],
-  victimProfile: "Not Reported",
-  initialAccessVector: "Not Reported",
   mitreTactics: [] as string[],
 };
 
@@ -85,90 +83,6 @@ const EMPTY_OPERATIONAL_IMPACT = {
   detectionChallenges: [] as string[],
   evasionTechniques: [] as string[],
   attackerObjectives: [] as string[],
-};
-
-// Mirrors INDUSTRY_CATALOG in server/aiThreatSummary.js -- no shared client/
-// server code layer in this app, so kept in sync manually (same precedent as
-// MAJOR_VENDOR_SOURCES's own mirrored copy in SecurityNews.tsx).
-const INDUSTRY_CATALOG: IndustryName[] = [
-  "Financial Services",
-  "Consumer",
-  "Technology, Media & Telecommunications",
-  "Life Sciences & Health Care",
-  "Manufacturing",
-  "Energy & Utilities",
-  "Government & Public Sector",
-  "Retail & eCommerce",
-  "Education",
-  "Transportation & Logistics",
-];
-
-const EMPTY_INDUSTRY_RELEVANCE: AiThreatSummaryIndustryRelevance[] = INDUSTRY_CATALOG.map((industry) => ({
-  industry,
-  relevance: "Not Applicable",
-  confidence: "Low",
-  whyAffected: "Not Applicable",
-  potentialImpact: [],
-  likelyTargetAssets: [],
-  defensiveFocus: [],
-  riskScore: 0,
-  priority: "Low",
-}));
-
-const EMPTY_BEHAVIORAL_INDICATORS = {
-  networkBehaviors: [] as string[],
-  processBehaviors: [] as string[],
-  authenticationAnomalies: [] as string[],
-  dnsActivity: [] as string[],
-  powershellActivity: [] as string[],
-  scheduledTasks: [] as string[],
-  registryModifications: [] as string[],
-  persistenceIndicators: [] as string[],
-};
-
-const EMPTY_PLATFORM_RECOMMENDATIONS = {
-  logSourcesToReview: [] as string[],
-  microsoftDefenderRecommendations: [] as string[],
-  microsoftSentinelRecommendations: [] as string[],
-  firewallDnsRecommendations: [] as string[],
-  emailSecurityRecommendations: [] as string[],
-  identityMonitoringRecommendations: [] as string[],
-  edrRecommendations: [] as string[],
-};
-
-const EMPTY_OPERATIONAL_ACTIONS = {
-  socAnalyst: { telemetryToCheck: [] as string[], whatToLookFor: "Not Reported", immediateNextStep: "Not Reported" },
-  recommendedActions: [] as Array<{ action: string; applicable: boolean; details: string }>,
-  platformRecommendations: EMPTY_PLATFORM_RECOMMENDATIONS,
-  threatHunter: {
-    hypotheses: [] as Array<{ hypothesis: string; dataSources: string[]; positiveFindingLooksLike: string; falsePositiveNote: string }>,
-    behavioralIndicators: EMPTY_BEHAVIORAL_INDICATORS,
-  },
-  detectionEngineer: {
-    existingRulesAvailable: [] as string[],
-    recommendedAction: "Not Reported",
-    yaraApplicable: null as string | null,
-    newDetectionLogic: [] as string[],
-    logSourcesRequired: [] as string[],
-    expectedFalsePositives: "Not Reported",
-    detectionGaps: [] as string[],
-    likelyManifestation: "Not Reported",
-    behavioralDetectionOpportunities: [] as string[],
-  },
-  vulnerabilityManagement: {
-    applicable: false,
-    affectedAssetsSummary: "Not Applicable",
-    internetFacing: "Not Applicable",
-    exploitMaturity: "Not Applicable",
-    patchPriority: "Not Applicable",
-    maintenanceWindowRecommendation: "Not Applicable",
-    businessCriticality: "Not Applicable",
-    compensatingControls: [] as string[],
-    knownWorkaround: null as string | null,
-  },
-  incidentResponse: { immediateTriageSteps: [] as string[], containmentActions: [] as string[], recoveryActions: [] as string[] },
-  threatIntelTakeaway: "Not Reported",
-  executiveLeadershipTakeaway: "Not Reported",
 };
 
 function timeAgo(iso: string) {
@@ -267,30 +181,6 @@ function KeyValueBlock({ title, pairs }: { title: string; pairs: Array<[string, 
   );
 }
 
-/** Groups of string[] keyed by a human label, e.g. per-platform hunting queries -- renders code-styled entries, skips empty groups entirely. */
-function GroupedCodeLists({ title, groups }: { title: string; groups: Array<[string, string[]]> }) {
-  const nonEmpty = groups.filter(([, items]) => items.length > 0);
-  if (nonEmpty.length === 0) return null;
-  return (
-    <Section title={title}>
-      <div className="space-y-3">
-        {nonEmpty.map(([label, items]) => (
-          <div key={label}>
-            <div className="mb-1 text-xs font-semibold text-foreground">{label}</div>
-            <ul className="space-y-1">
-              {items.map((item, i) => (
-                <li key={i} className="rounded-md border border-white/[0.06] bg-black/20 px-2 py-1 font-mono text-xs text-foreground">
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
 function GroupedLists({ title, groups }: { title: string; groups: Array<[string, string[]]> }) {
   const nonEmpty = groups.filter(([, items]) => items.length > 0);
   if (nonEmpty.length === 0) return null;
@@ -356,75 +246,73 @@ function IocRow({ label, values }: { label: string; values: string[] }) {
   );
 }
 
-/**
- * Concrete SOC response actions for this specific article -- a fixed 7-item
- * catalog (Block Firewall/DNS, Add to Defender IOC, Create Sentinel
- * Analytic Rule, Hunt in MDE, Search Proxy Logs/Email Gateway), each marked
- * applicable/not by the model and, for the IOC-dependent rows, re-verified
- * server-side against the actual extracted indicators (server/
- * aiThreatSummary.js#groundRecommendedActions) rather than trusted outright.
- * Replaces vague "monitor for malicious activity" advice with a checklist a
- * Tier-1 analyst can act on immediately.
- */
-function RecommendedActionsChecklist({ actions }: { actions: Array<{ action: string; applicable: boolean; details: string }> }) {
-  if (actions.length === 0) return null;
+/** Renders a short bulleted list inside a table cell -- "Not Available in Source" (not a blank cell) when a team genuinely has nothing here, per the review spec's explicit instruction not to fabricate guidance to fill a cell. */
+function CellList({ items }: { items: string[] }) {
+  if (items.length === 0) return <span className="text-muted">Not Available in Source</span>;
   return (
-    <Section title="Recommended Actions">
-      <ul className="space-y-1.5">
-        {actions.map((a, i) => (
-          <li key={i} className={cn("rounded-lg border px-2.5 py-1.5 text-xs", a.applicable ? "border-low/30 bg-low/5" : "border-white/[0.06] bg-white/[0.02]")}>
-            <div className={cn("flex items-center gap-1.5 font-semibold", a.applicable ? "text-low" : "text-muted")}>
-              <span aria-hidden="true">{a.applicable ? "✓" : "–"}</span>
-              <span className={a.applicable ? "text-foreground" : "text-muted"}>{a.action}</span>
-            </div>
-            {a.applicable && <p className="mt-0.5 pl-4 text-foreground">{a.details}</p>}
-          </li>
-        ))}
-      </ul>
-    </Section>
+    <ul className="list-disc space-y-0.5 pl-3.5">
+      {items.map((item, i) => (
+        <li key={i}>{item}</li>
+      ))}
+    </ul>
   );
 }
 
-const OPERATIONAL_RECOMMENDATION_TEAMS = ["Threat Intelligence", "Threat Hunting", "Detection Engineering", "SOC Operations", "Vulnerability Management", "Incident Response"] as const;
+function CellText({ text }: { text: string | null | undefined }) {
+  if (!text || text === "Not Reported" || text === "Not Applicable") return <span className="text-muted">Not Available in Source</span>;
+  return <>{text}</>;
+}
 
 /**
- * The flat, prioritized cross-team checklist (server/aiThreatSummary.js's
- * operationalRecommendations) -- distinct from the "Operational Actions"
- * section below it, which is the deep per-team narrative this table
- * distills from. Grouped by team in a fixed reading order regardless of
- * what order the API returned entries in (the backend already sorts this
- * way too; re-grouping here is just defensive against older cached
- * responses). A team with no article-supported action still renders its own
- * "No additional actions identified" row rather than disappearing, so the
- * six-team checklist always reads as complete, not partially missing.
+ * Single 8-column table replacing the former separate "Operational Actions"
+ * priority table AND the five standalone per-team detailed-guidance blocks
+ * below it -- one row per team (SOC Analyst, Threat Intelligence, Threat
+ * Hunter, Detection Engineer, Vulnerability Management, Incident Response),
+ * every column an analyst actually needs without paging through five
+ * separate sections to assemble it.
  */
-function OperationalRecommendationsTable({ recommendations }: { recommendations: Array<{ team: string; priority: string; recommendation: string; rationale: string }> }) {
-  if (recommendations.length === 0) return null;
-  // Rows are pre-grouped by team (not sorted flat) so the table reads as
-  // "here's SOC's list, here's Threat Hunting's list, ..." rather than an
-  // interleaved priority sort that would force a reader to hunt for their
-  // own team's rows.
-  const rows = OPERATIONAL_RECOMMENDATION_TEAMS.flatMap((team) => recommendations.filter((r) => r.team === team));
+function OperationalGuidanceTable({ report }: { report: AiThreatSummaryReport }) {
+  const rows = buildOperationalGuidanceRows(report);
   return (
-    <Section title="Operational Actions">
+    <Section title="Operational Guidance">
       <Table>
         <TableHead>
           <TableRow>
-            <TableHeaderCell className="w-[14%]">Team</TableHeaderCell>
-            <TableHeaderCell className="w-[10%]">Priority</TableHeaderCell>
-            <TableHeaderCell className="w-[38%]">Action</TableHeaderCell>
+            <TableHeaderCell className="w-[9%]">Team</TableHeaderCell>
+            <TableHeaderCell className="w-[7%]">Priority</TableHeaderCell>
+            <TableHeaderCell className="w-[14%]">Recommended Action</TableHeaderCell>
+            <TableHeaderCell className="w-[14%]">Detailed Guidance</TableHeaderCell>
+            <TableHeaderCell className="w-[13%]">Telemetry / Log Sources</TableHeaderCell>
+            <TableHeaderCell className="w-[14%]">Detection / Hunting Opportunities</TableHeaderCell>
+            <TableHeaderCell className="w-[14%]">Immediate Next Steps</TableHeaderCell>
             <TableHeaderCell>Rationale</TableHeaderCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {rows.map((r, i) => (
-            <TableRow key={i}>
+          {rows.map((r) => (
+            <TableRow key={r.team}>
               <TableCell className="text-xs font-semibold text-foreground">{r.team}</TableCell>
               <TableCell>
                 <Badge variant={priorityVariant(r.priority)}>{r.priority}</Badge>
               </TableCell>
-              <TableCell className="text-xs font-medium text-foreground">{r.recommendation}</TableCell>
-              <TableCell className="text-xs text-muted">{r.rationale}</TableCell>
+              <TableCell className="text-xs text-foreground">
+                <CellList items={r.actions} />
+              </TableCell>
+              <TableCell className="text-xs text-foreground">
+                <CellList items={r.detailedGuidance} />
+              </TableCell>
+              <TableCell className="text-xs text-foreground">
+                <CellList items={r.telemetry} />
+              </TableCell>
+              <TableCell className="text-xs text-foreground">
+                <CellList items={r.detectionOpportunities} />
+              </TableCell>
+              <TableCell className="text-xs text-foreground">
+                <CellText text={r.nextSteps} />
+              </TableCell>
+              <TableCell className="text-xs text-muted">
+                <CellList items={r.rationale} />
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -504,39 +392,6 @@ function ExposureAssessment({ exposure }: { exposure: typeof EMPTY_EXPOSURE_ASSE
         </div>
       )}
     </div>
-  );
-}
-
-/** Named threat-hunting hypotheses (operationalActions.threatHunter.hypotheses) -- each is a specific, testable claim, not a generic "hunt for suspicious activity" bullet. */
-function HypothesisList({ hypotheses }: { hypotheses: Array<{ hypothesis: string; dataSources: string[]; investigationSteps?: string[]; positiveFindingLooksLike: string; falsePositiveNote: string }> }) {
-  if (hypotheses.length === 0) return null;
-  return (
-    <Section title="Threat Hunter -- Hypotheses">
-      <div className="space-y-2.5">
-        {hypotheses.map((h, i) => (
-          <div key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2 text-xs">
-            <div className="font-semibold text-foreground">
-              Hypothesis {i + 1}: {h.hypothesis}
-            </div>
-            <div className="mt-1 space-y-0.5 text-muted">
-              {h.dataSources.length > 0 && <div>Data sources: {h.dataSources.join(", ")}</div>}
-              {(h.investigationSteps?.length ?? 0) > 0 && (
-                <div>
-                  Investigation steps:
-                  <ol className="ml-4 mt-0.5 list-decimal space-y-0.5">
-                    {h.investigationSteps!.map((step, j) => (
-                      <li key={j}>{step}</li>
-                    ))}
-                  </ol>
-                </div>
-              )}
-              {h.positiveFindingLooksLike && h.positiveFindingLooksLike !== "Not Reported" && <div>Positive finding looks like: {h.positiveFindingLooksLike}</div>}
-              {h.falsePositiveNote && h.falsePositiveNote !== "Not Reported" && <div>False-positive note: {h.falsePositiveNote}</div>}
-            </div>
-          </div>
-        ))}
-      </div>
-    </Section>
   );
 }
 
@@ -626,8 +481,6 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                     ["Operational disruption", risk.operationalDisruption],
                     ["Likelihood of exploitation", risk.likelihoodOfExploitation],
                     ["Impact if unpatched", risk.impactIfUnpatched],
-                    ["Victim profile", relevance.victimProfile],
-                    ["Initial access vector", relevance.initialAccessVector],
                   ]}
                 />
                 <GroupedLists
@@ -679,27 +532,33 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               </div>
             )}
 
-            <p className="mt-3 text-xs text-muted">
-              <span className="font-semibold text-foreground">Risk score reasoning:</span> {report.aiRiskScoring.reasoning}
-            </p>
+            {/* Evidence supporting the confidence score above, in place of a
+                free-text "reasoning" paragraph -- concrete, checkable facts
+                (Official Vendor Advisory, CISA KEV, Active Exploitation
+                Confirmed, NVD Reference, ...) read as more trustworthy than
+                a restated sentence, and this is exactly what
+                confidenceAssessment.factorsPresent already is. */}
             {(report.confidenceAssessment.factorsPresent?.length > 0 || report.confidenceAssessment.factorsMissing?.length > 0) && (
-              <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {report.confidenceAssessment.factorsPresent?.length > 0 && (
-                  <ul className="space-y-0.5 text-xs text-muted">
-                    {report.confidenceAssessment.factorsPresent.map((f, i) => (
-                      <li key={i} className="text-low">
-                        ✓ {f}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {report.confidenceAssessment.factorsMissing?.length > 0 && (
-                  <ul className="space-y-0.5 text-xs text-muted">
-                    {report.confidenceAssessment.factorsMissing.map((f, i) => (
-                      <li key={i}>– {f}</li>
-                    ))}
-                  </ul>
-                )}
+              <div className="mt-3">
+                <h5 className="mb-1 text-xs font-semibold text-foreground">Evidence Supporting Confidence</h5>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {report.confidenceAssessment.factorsPresent?.length > 0 && (
+                    <ul className="space-y-0.5 text-xs text-muted">
+                      {report.confidenceAssessment.factorsPresent.map((f, i) => (
+                        <li key={i} className="text-low">
+                          ✓ {f}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {report.confidenceAssessment.factorsMissing?.length > 0 && (
+                    <ul className="space-y-0.5 text-xs text-muted">
+                      {report.confidenceAssessment.factorsMissing.map((f, i) => (
+                        <li key={i}>– {f}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -734,13 +593,35 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
             );
           })()}
 
-          {/* 4. Affected Industries -- IndustryHeatmap's own collapsed row
-              already shows exactly industry + relevance + risk score +
-              priority (click a row for the full per-sector detail), so no
-              separate simplified table is needed here. */}
-          <Section title="Affected Industries">
-            <IndustryHeatmap rows={report.industryRelevance ?? EMPTY_INDUSTRY_RELEVANCE} />
-          </Section>
+          {/* 4. Affected Industries -- a single concise list of only the
+              sectors the article genuinely supports flagging (relevance !==
+              "Not Applicable"), not the full 10-row scored heatmap. This
+              per-report view intentionally doesn't infer or pad -- an
+              article naming no sector shows the explicit fallback line
+              rather than a table implying every industry was assessed. The
+              full scored heatmap (all 10 sectors, risk scores, defensive
+              guidance) still exists in the Emerging Threats tab's aggregate
+              view (IndustryHeatmap), which is a genuinely different use case
+              (cross-report trend, not a single article's read). */}
+          {(() => {
+            const flagged = (report.industryRelevance ?? []).filter((r) => r.relevance !== "Not Applicable");
+            return (
+              <Section title="Affected Industries">
+                {flagged.length === 0 ? (
+                  <p className="text-sm text-muted">Affected Industries: Not specifically identified by the vendor.</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {flagged.map((r) => (
+                      <li key={r.industry} className="flex items-center gap-2 text-sm">
+                        <Badge variant={priorityVariant(r.relevance)}>{r.relevance}</Badge>
+                        <span className="font-medium text-foreground">{r.industry}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Section>
+            );
+          })()}
 
           {/* 5. Technical Analysis, Attack Details, Kill Chain & MITRE
               ATT&CK Mapping -- one heading, since these all answer the same
@@ -756,7 +637,7 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
               <div>
                 <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Technical Analysis, Attack Details, Kill Chain &amp; MITRE ATT&amp;CK Mapping</h4>
                 <KeyValueBlock
-                  title=""
+                  title="Technical Analysis"
                   pairs={[
                     ["What happened", tech.whatHappened],
                     ["Why it matters", tech.whyItMatters],
@@ -776,6 +657,26 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                     ["Technical findings", tech.technicalFindings],
                   ]}
                 />
+                {/* Why this attack is hard to detect/evade -- relocated here
+                    from the former standalone "Operational Impact" section
+                    (removed: its businessImpact field duplicated businessRisk
+                    above, and detectionChallenges/evasionTechniques/
+                    attackerObjectives are technical attacker-behavior detail
+                    that belongs alongside Attack Details, not a section of
+                    their own). */}
+                {(() => {
+                  const impact = report.operationalImpact ?? EMPTY_OPERATIONAL_IMPACT;
+                  return (
+                    <GroupedLists
+                      title="Detection Challenges & Evasion"
+                      groups={[
+                        ["Detection challenges", impact.detectionChallenges],
+                        ["Evasion techniques", impact.evasionTechniques],
+                        ["Attacker objectives", impact.attackerObjectives],
+                      ]}
+                    />
+                  );
+                })()}
                 <KeyValueBlock
                   title="Kill Chain"
                   pairs={[
@@ -879,220 +780,77 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
 
           {/* 7. IOCs -- CVEs shown alongside since both are the same
               "Vendor Confirmed Intelligence" category from the legend
-              above, never model-generated. */}
-          {(report.cves.length > 0 || totalIocs > 0) && (
-            <Section title="Indicators of Compromise (verified, extracted from source text)">
-              {report.cves.length > 0 && (
-                <div className="mb-2.5 space-y-1.5">
-                  {report.cves.map((cve) => (
-                    <a
-                      key={cve.id}
-                      href={cve.sourceUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs text-foreground hover:text-primary hover:underline"
-                    >
-                      <span className="font-mono font-semibold">{cve.id}</span>
-                      <SeverityBadge severity={cve.severity as never} />
-                      {cve.cvssScore != null && <span className="text-muted">CVSS {cve.cvssScore}</span>}
-                      {cve.epssScore != null && <span className="text-muted">EPSS {(cve.epssScore * 100).toFixed(1)}%</span>}
-                      {cve.knownExploited && <Badge variant="critical">KEV</Badge>}
-                    </a>
-                  ))}
-                </div>
-              )}
-              {report.iocProvenance && totalIocs > 0 && (
-                <p className="mb-2.5 text-[11px] text-muted">
-                  Every indicator below is {report.iocProvenance.confidence.toLowerCase()} -- extracted directly from{" "}
-                  <a href={report.iocProvenance.sourceUrl} target="_blank" rel="noreferrer" className="underline hover:text-primary">
-                    {report.iocProvenance.source}
+              above, never model-generated. Always renders (not gated on
+              totalIocs > 0) so a genuinely IOC-free article shows the
+              explicit fallback line rather than the whole section silently
+              vanishing. */}
+          <Section title="Indicators of Compromise (verified, extracted from source text)">
+            {report.cves.length > 0 && (
+              <div className="mb-2.5 space-y-1.5">
+                {report.cves.map((cve) => (
+                  <a
+                    key={cve.id}
+                    href={cve.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs text-foreground hover:text-primary hover:underline"
+                  >
+                    <span className="font-mono font-semibold">{cve.id}</span>
+                    <SeverityBadge severity={cve.severity as never} />
+                    {cve.cvssScore != null && <span className="text-muted">CVSS {cve.cvssScore}</span>}
+                    {cve.epssScore != null && <span className="text-muted">EPSS {(cve.epssScore * 100).toFixed(1)}%</span>}
+                    {cve.knownExploited && <Badge variant="critical">KEV</Badge>}
                   </a>
-                  's own text, never model-generated. Vendor confirmed. First seen {new Date(report.iocProvenance.firstSeen).toLocaleDateString()}.
-                </p>
-              )}
-              <div className="space-y-2.5">
-                <IocRow label="IP Addresses" values={report.iocs.ipAddresses} />
-                <IocRow label="Domains" values={report.iocs.domains} />
-                <IocRow label="URLs" values={report.iocs.urls} />
-                <IocRow label="Hashes" values={report.iocs.hashes} />
-                <IocRow label="Email Addresses" values={report.iocs.emailAddresses} />
-                <IocRow label="Registry Keys" values={report.iocs.registryKeys ?? []} />
-                <IocRow label="File Paths" values={report.iocs.filePaths ?? []} />
-                <IocRow label="File Names" values={report.iocs.fileNames ?? []} />
-                <IocRow label="Ports" values={report.iocs.ports ?? []} />
-                <IocRow label="Event IDs" values={report.iocs.eventIds ?? []} />
-                <IocRow label="Named Pipes" values={report.iocs.namedPipes ?? []} />
-                <IocRow label="Mutexes" values={report.iocs.mutexes ?? []} />
-                <IocRow label="Scheduled Tasks" values={report.iocs.scheduledTasks ?? []} />
-                <IocRow label="Services" values={report.iocs.services ?? []} />
+                ))}
               </div>
-            </Section>
-          )}
-
-          {/* 8. Operational Impact. */}
-          {(() => {
-            const impact = report.operationalImpact ?? EMPTY_OPERATIONAL_IMPACT;
-            return (
-              <div>
-                <KeyValueBlock
-                  title="Operational Impact"
-                  pairs={[
-                    ["Business impact", impact.businessImpact],
-                    ["Risk level", report.aiRiskScoring.priority],
-                  ]}
-                />
-                <GroupedLists
-                  title=""
-                  groups={[
-                    ["Detection challenges", impact.detectionChallenges],
-                    ["Evasion techniques", impact.evasionTechniques],
-                    ["Attacker objectives", impact.attackerObjectives],
-                  ]}
-                />
-              </div>
-            );
-          })()}
-
-          {/* 9. Operational Actions -- a genuine per-team table (the
-              scannable "who does what, in what order" view) first, with the
-              deep per-team narrative (real telemetry, KQL/Sigma/SPL queries,
-              hunting hypotheses/investigation steps, IR steps) as
-              elaboration below it, not a replacement for it. */}
-          <OperationalRecommendationsTable recommendations={report.operationalRecommendations ?? []} />
-
-          {(() => {
-            const actions = report.operationalActions ?? EMPTY_OPERATIONAL_ACTIONS;
-            const vm = actions.vulnerabilityManagement;
-            const behavioralIndicators = actions.threatHunter.behavioralIndicators ?? EMPTY_BEHAVIORAL_INDICATORS;
-            const likelyManifestation = actions.detectionEngineer.likelyManifestation ?? "Not Reported";
-            const behavioralDetectionOpportunities = actions.detectionEngineer.behavioralDetectionOpportunities ?? [];
-            return (
-              <div className="space-y-4">
-                <div>
-                  <h5 className="mb-1 text-xs font-semibold text-foreground">SOC Analyst -- Detailed Guidance</h5>
-                  <RecommendedActionsChecklist actions={actions.recommendedActions} />
-                  <GroupedCodeLists title="Telemetry to Check" groups={[["Sources", actions.socAnalyst.telemetryToCheck]]} />
-                  {actions.socAnalyst.telemetryToCheck.length === 0 && <p className="text-xs text-muted">Telemetry to check: Not Reported</p>}
-                  <dl className="mt-1.5 space-y-1 text-sm">
-                    <div>
-                      <dt className="inline font-semibold text-foreground">What to look for: </dt>
-                      <dd className="inline text-foreground">{actions.socAnalyst.whatToLookFor}</dd>
-                    </div>
-                    <div>
-                      <dt className="inline font-semibold text-foreground">Immediate next step: </dt>
-                      <dd className="inline text-foreground">{actions.socAnalyst.immediateNextStep}</dd>
-                    </div>
-                  </dl>
+            )}
+            {totalIocs === 0 ? (
+              <p className="text-sm text-muted">No Indicators of Compromise were published by the vendor.</p>
+            ) : (
+              <>
+                {report.iocProvenance && (
+                  <p className="mb-2.5 text-[11px] text-muted">
+                    Every indicator below is {report.iocProvenance.confidence.toLowerCase()} -- extracted directly from{" "}
+                    <a href={report.iocProvenance.sourceUrl} target="_blank" rel="noreferrer" className="underline hover:text-primary">
+                      {report.iocProvenance.source}
+                    </a>
+                    's own text, never model-generated. Vendor confirmed. First seen {new Date(report.iocProvenance.firstSeen).toLocaleDateString()}.
+                  </p>
+                )}
+                <div className="space-y-2.5">
+                  <IocRow label="IP Addresses" values={report.iocs.ipAddresses} />
+                  <IocRow label="Domains" values={report.iocs.domains} />
+                  <IocRow label="URLs" values={report.iocs.urls} />
+                  <IocRow label="Hashes" values={report.iocs.hashes} />
+                  <IocRow label="Email Addresses" values={report.iocs.emailAddresses} />
+                  <IocRow label="Registry Keys" values={report.iocs.registryKeys ?? []} />
+                  <IocRow label="File Paths" values={report.iocs.filePaths ?? []} />
+                  <IocRow label="File Names" values={report.iocs.fileNames ?? []} />
+                  <IocRow label="Ports" values={report.iocs.ports ?? []} />
+                  <IocRow label="Event IDs" values={report.iocs.eventIds ?? []} />
+                  <IocRow label="Named Pipes" values={report.iocs.namedPipes ?? []} />
+                  <IocRow label="Mutexes" values={report.iocs.mutexes ?? []} />
+                  <IocRow label="Scheduled Tasks" values={report.iocs.scheduledTasks ?? []} />
+                  <IocRow label="Services" values={report.iocs.services ?? []} />
+                  <IocRow label="CWE IDs" values={report.iocs.cweIds ?? []} />
+                  <IocRow label="CLI / PowerShell Commands" values={report.iocs.cliCommands ?? []} />
+                  <IocRow label="User Agents" values={report.iocs.userAgents ?? []} />
+                  <IocRow label="MITRE ATT&CK IDs (in article text)" values={report.iocs.attackTechniqueIds ?? []} />
+                  <IocRow label="Malware Names (in article text)" values={report.iocs.malwareNames ?? []} />
                 </div>
+              </>
+            )}
+          </Section>
 
-                <div>
-                  <h5 className="mb-1 text-xs font-semibold text-foreground">Threat Hunter -- Detailed Guidance</h5>
-                  {actions.threatHunter.hypotheses.length > 0 ? (
-                    <HypothesisList hypotheses={actions.threatHunter.hypotheses} />
-                  ) : (
-                    <p className="text-xs text-muted">No specific hunting hypotheses reported for this article.</p>
-                  )}
-                  <GroupedLists
-                    title="Behavioral Hunting Indicators"
-                    groups={[
-                      ["Network behaviors", behavioralIndicators.networkBehaviors],
-                      ["Process behaviors", behavioralIndicators.processBehaviors],
-                      ["Authentication anomalies", behavioralIndicators.authenticationAnomalies],
-                      ["DNS activity", behavioralIndicators.dnsActivity],
-                      ["PowerShell activity", behavioralIndicators.powershellActivity],
-                      ["Scheduled tasks", behavioralIndicators.scheduledTasks],
-                      ["Registry modifications", behavioralIndicators.registryModifications],
-                      ["Persistence indicators", behavioralIndicators.persistenceIndicators],
-                    ]}
-                  />
-                </div>
-
-                <div>
-                  <h5 className="mb-1 text-xs font-semibold text-foreground">Detection Engineer -- Detailed Guidance</h5>
-                  <dl className="space-y-1 text-sm">
-                    <div>
-                      <dt className="inline font-semibold text-foreground">Likely manifestation: </dt>
-                      <dd className="inline text-foreground">{likelyManifestation}</dd>
-                    </div>
-                  </dl>
-                  <GroupedCodeLists
-                    title="Rules"
-                    groups={[
-                      ["Existing rules available", actions.detectionEngineer.existingRulesAvailable],
-                      ["New detection logic to build", actions.detectionEngineer.newDetectionLogic],
-                    ]}
-                  />
-                  {actions.detectionEngineer.existingRulesAvailable.length === 0 && actions.detectionEngineer.newDetectionLogic.length === 0 && (
-                    <p className="text-xs text-muted">Rules: Not Reported</p>
-                  )}
-                  <GroupedCodeLists
-                    title="Query Opportunities by Platform"
-                    groups={[
-                      ["KQL (Sentinel / Defender)", actions.detectionEngineer.kqlOpportunities ?? []],
-                      ["Sigma", actions.detectionEngineer.sigmaOpportunities ?? []],
-                      ["Splunk SPL", actions.detectionEngineer.splOpportunities ?? []],
-                    ]}
-                  />
-                  <dl className="mt-1.5 space-y-1 text-sm">
-                    <div>
-                      <dt className="inline font-semibold text-foreground">Recommended action: </dt>
-                      <dd className="inline text-foreground">{actions.detectionEngineer.recommendedAction}</dd>
-                    </div>
-                    <div>
-                      <dt className="inline font-semibold text-foreground">YARA: </dt>
-                      <dd className="inline text-foreground">{actions.detectionEngineer.yaraApplicable ?? "Not Applicable"}</dd>
-                    </div>
-                    <div>
-                      <dt className="inline font-semibold text-foreground">Expected false positives: </dt>
-                      <dd className="inline text-foreground">{actions.detectionEngineer.expectedFalsePositives}</dd>
-                    </div>
-                  </dl>
-                  <GroupedLists
-                    title="Detection Engineering Notes"
-                    groups={[
-                      ["Behavioral detection opportunities", behavioralDetectionOpportunities],
-                      ["Log sources required", actions.detectionEngineer.logSourcesRequired],
-                      ["Detection gaps / blind spots", actions.detectionEngineer.detectionGaps],
-                    ]}
-                  />
-                </div>
-
-                <div>
-                  <h5 className="mb-1 text-xs font-semibold text-foreground">Vulnerability Management -- Detailed Guidance</h5>
-                  {!vm.applicable && <p className="text-xs text-muted">Not Applicable -- this article does not involve a specific CVE.</p>}
-                  {vm.applicable && (
-                    <>
-                      <KeyValueBlock
-                        title=""
-                        pairs={[
-                          ["Affected assets", vm.affectedAssetsSummary],
-                          ["Internet facing", vm.internetFacing],
-                          ["Exploit maturity", vm.exploitMaturity],
-                          ["Patch priority", vm.patchPriority],
-                          ["Maintenance window", vm.maintenanceWindowRecommendation],
-                          ["Business criticality", vm.businessCriticality],
-                          ["Known workaround", vm.knownWorkaround],
-                        ]}
-                      />
-                      <FieldList title="Compensating Controls" items={vm.compensatingControls} />
-                    </>
-                  )}
-                </div>
-
-                <div>
-                  <h5 className="mb-1 text-xs font-semibold text-foreground">Incident Response -- Detailed Guidance</h5>
-                  <GroupedLists
-                    title=""
-                    groups={[
-                      ["Immediate triage steps", actions.incidentResponse.immediateTriageSteps],
-                      ["Containment actions", actions.incidentResponse.containmentActions],
-                      ["Recovery actions", actions.incidentResponse.recoveryActions],
-                    ]}
-                  />
-                </div>
-              </div>
-            );
-          })()}
+          {/* 8. Unified Operational Guidance -- one table replacing both the
+              former flat "Operational Actions" priority table and the
+              five separate per-team detailed-guidance blocks below it.
+              See buildOperationalGuidanceRows for how each team's row is
+              composed from operationalRecommendations (priority/action/
+              rationale) plus that team's own operationalActions sub-object
+              (detailed guidance/telemetry/detection opportunities/next
+              steps) -- genuinely merged, not just visually adjacent. */}
+          <OperationalGuidanceTable report={report} />
 
           {/* 10. Recommendations -- platform/tooling-specific guidance,
               distinct from the team-action table above ("what to do" vs.

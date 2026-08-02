@@ -8,19 +8,8 @@
 // how many enterprise "export to Word" features have worked for two decades,
 // not a hack). Both share one HTML-building pass over the report so the
 // two output formats can never drift out of sync with each other.
-import type { AiThreatSummaryReport, OperationalRecommendationTeam } from "@/types/threat-intel";
-
-// Fixed reading order, mirrors src/components/dashboard/AiSummarization.tsx's
-// OperationalRecommendationsTable -- keeps the exported document's section
-// order identical to what the tab itself shows.
-const OPERATIONAL_RECOMMENDATION_TEAMS: OperationalRecommendationTeam[] = [
-  "Threat Intelligence",
-  "Threat Hunting",
-  "Detection Engineering",
-  "SOC Operations",
-  "Vulnerability Management",
-  "Incident Response",
-];
+import type { AiThreatSummaryReport } from "@/types/threat-intel";
+import { buildOperationalGuidanceRows } from "@/lib/operationalGuidance";
 
 function esc(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -67,19 +56,38 @@ function iocRow(label: string, values: string[]): string {
   return `<p><strong>${esc(label)} (${values.length}):</strong> ${values.map(esc).join(", ")}</p>`;
 }
 
-/** Real HTML <table>, grouped by team in the same fixed order as the on-screen OperationalRecommendationsTable. */
-function operationalRecommendationsTable(recommendations: AiThreatSummaryReport["operationalRecommendations"]): string {
-  if (!recommendations || recommendations.length === 0) return "";
-  const rows = OPERATIONAL_RECOMMENDATION_TEAMS.flatMap((team) => recommendations.filter((r) => r.team === team));
+const NOT_AVAILABLE = "Not Available in Source";
+
+function cellList(items: string[]): string {
+  if (items.length === 0) return `<em>${NOT_AVAILABLE}</em>`;
+  return `<ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>`;
+}
+
+function cellText(text: string | null | undefined): string {
+  if (!text || text === "Not Reported" || text === "Not Applicable") return `<em>${NOT_AVAILABLE}</em>`;
+  return esc(text);
+}
+
+/**
+ * Real HTML <table>, one row per team, built from the same shared
+ * buildOperationalGuidanceRows() as the on-screen OperationalGuidanceTable
+ * (src/components/dashboard/AiSummarization.tsx) -- both consume identical
+ * row data, so this can never drift from what the tab itself shows.
+ */
+function operationalGuidanceTable(report: AiThreatSummaryReport): string {
+  const rows = buildOperationalGuidanceRows(report);
   const body = rows
     .map(
       (r) =>
-        `<tr><td>${esc(r.team)}</td><td>${esc(r.priority)}</td><td>${esc(r.recommendation)}</td><td>${esc(r.rationale)}</td></tr>`,
+        `<tr><td><strong>${esc(r.team)}</strong></td><td>${esc(r.priority)}</td><td>${cellList(r.actions)}</td><td>${cellList(r.detailedGuidance)}</td>` +
+        `<td>${cellList(r.telemetry)}</td><td>${cellList(r.detectionOpportunities)}</td><td>${cellText(r.nextSteps)}</td><td>${cellList(r.rationale)}</td></tr>`,
     )
     .join("");
   return (
-    `${heading(2, "Operational Actions")}` +
-    `<table class="ops-table"><thead><tr><th>Team</th><th>Priority</th><th>Action</th><th>Rationale</th></tr></thead><tbody>${body}</tbody></table>`
+    `${heading(2, "Operational Guidance")}` +
+    `<table class="ops-table"><thead><tr><th>Team</th><th>Priority</th><th>Recommended Action</th><th>Detailed Guidance</th>` +
+    `<th>Telemetry / Log Sources</th><th>Detection / Hunting Opportunities</th><th>Immediate Next Steps</th><th>Rationale</th></tr></thead>` +
+    `<tbody>${body}</tbody></table>`
   );
 }
 
@@ -125,8 +133,6 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
         ["Operational disruption", risk.operationalDisruption],
         ["Likelihood of exploitation", risk.likelihoodOfExploitation],
         ["Impact if unpatched", risk.impactIfUnpatched],
-        ["Victim profile", report.threatRelevance?.victimProfile ?? null],
-        ["Initial access vector", report.threatRelevance?.initialAccessVector ?? null],
       ]),
     );
     parts.push(
@@ -151,13 +157,18 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   if (report.intelligenceAssessment && report.intelligenceAssessment !== "Not Reported") {
     parts.push(report.intelligenceAssessment.split(/\n{2,}/).map((p) => paragraph(p)).join(""));
   }
-  parts.push(paragraph(`Risk score reasoning: ${report.aiRiskScoring.reasoning}`));
-  parts.push(paragraph(`Confidence reasoning: ${report.confidenceAssessment.reasoning}`));
-  if (report.confidenceAssessment.factorsPresent?.length > 0) {
-    parts.push(`<ul>${report.confidenceAssessment.factorsPresent.map((f) => `<li>&check; ${esc(f)}</li>`).join("")}</ul>`);
-  }
-  if (report.confidenceAssessment.factorsMissing?.length > 0) {
-    parts.push(`<p><em>Missing:</em></p><ul>${report.confidenceAssessment.factorsMissing.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`);
+  // Evidence supporting the confidence score above, in place of a free-text
+  // "reasoning" paragraph -- mirrors AiSummarization.tsx's Threat Assessment
+  // section (concrete, checkable facts read as more trustworthy than a
+  // restated sentence).
+  if (report.confidenceAssessment.factorsPresent?.length > 0 || report.confidenceAssessment.factorsMissing?.length > 0) {
+    parts.push(heading(3, "Evidence Supporting Confidence"));
+    if (report.confidenceAssessment.factorsPresent?.length > 0) {
+      parts.push(`<ul>${report.confidenceAssessment.factorsPresent.map((f) => `<li>&check; ${esc(f)}</li>`).join("")}</ul>`);
+    }
+    if (report.confidenceAssessment.factorsMissing?.length > 0) {
+      parts.push(`<p><em>Missing:</em></p><ul>${report.confidenceAssessment.factorsMissing.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`);
+    }
   }
 
   // 3. Should I Care + Exposure Assessment + affected technologies/products
@@ -190,13 +201,18 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     }
   }
 
-  // 4. Affected Industries
-  if (report.industryRelevance?.length > 0) {
+  // 4. Affected Industries -- only industries the article genuinely supports
+  //    flagging, not the full 10-sector scored heatmap (mirrors
+  //    AiSummarization.tsx's simplified per-report view).
+  {
+    const flagged = (report.industryRelevance ?? []).filter((r) => r.relevance !== "Not Applicable");
     parts.push(heading(2, "Affected Industries"));
-    const rows = report.industryRelevance
-      .map((r) => `<li><strong>${esc(r.industry)}</strong> -- ${esc(r.relevance)} (risk ${r.riskScore}/10, priority ${esc(r.priority)})</li>`)
-      .join("");
-    parts.push(`<ul>${rows}</ul>`);
+    if (flagged.length === 0) {
+      parts.push(paragraph("Affected Industries: Not specifically identified by the vendor."));
+    } else {
+      const rows = flagged.map((r) => `<li><strong>${esc(r.relevance)}</strong> -- ${esc(r.industry)}</li>`).join("");
+      parts.push(`<ul>${rows}</ul>`);
+    }
   }
 
   // 5. Technical Analysis, Attack Details, Kill Chain & MITRE ATT&CK Mapping
@@ -207,7 +223,7 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
   }
   if (tech) {
     parts.push(
-      keyValueSection("", [
+      keyValueSection("Technical Analysis", [
         ["What happened", tech.whatHappened],
         ["Why it matters", tech.whyItMatters],
         ["Who is affected", tech.whoIsAffected],
@@ -225,6 +241,19 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
         ["Technical findings", tech.technicalFindings],
       ]),
     );
+    // Relocated here from the former standalone "Operational Impact" section
+    // (removed -- its businessImpact field duplicated businessRisk, and this
+    // is technical attacker-behavior detail that belongs alongside Attack
+    // Details, not a section of its own).
+    if (report.operationalImpact) {
+      parts.push(
+        groupedListsSection("Detection Challenges & Evasion", [
+          ["Detection challenges", report.operationalImpact.detectionChallenges],
+          ["Evasion techniques", report.operationalImpact.evasionTechniques],
+          ["Attacker objectives", report.operationalImpact.attackerObjectives],
+        ]),
+      );
+    }
     parts.push(
       keyValueSection("Kill Chain", [
         ["Attack chain", tech.attackChain],
@@ -290,178 +319,61 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     if (risk?.whatsMissing) parts.push(`<p><em>What's missing: ${esc(risk.whatsMissing)}</em></p>`);
   }
 
-  // 7. IOCs (CVEs shown alongside -- same "Vendor Confirmed Intelligence" category)
-  if (report.cves.length > 0 || totalIocs > 0) {
-    parts.push(heading(2, "Indicators of Compromise (verified, extracted from source text)"));
-    if (report.cves.length > 0) {
-      const rows = report.cves
-        .map(
-          (cve) =>
-            `<li><strong>${esc(cve.id)}</strong> -- ${esc(cve.severity)}${cve.cvssScore != null ? `, CVSS ${cve.cvssScore}` : ""}${
-              cve.epssScore != null ? `, EPSS ${(cve.epssScore * 100).toFixed(1)}%` : ""
-            }${cve.knownExploited ? ", Known Exploited (KEV)" : ""}</li>`,
-        )
-        .join("");
-      parts.push(`${heading(3, "CVEs (verified CVSS/EPSS/KEV)")}<ul>${rows}</ul>`);
-    }
-    if (totalIocs > 0) {
-      const provenanceNote = report.iocProvenance
-        ? paragraph(`All indicators below are ${report.iocProvenance.confidence.toLowerCase()} -- extracted directly from ${esc(report.iocProvenance.source)}'s own text, never model-generated. First seen ${new Date(report.iocProvenance.firstSeen).toLocaleDateString()}.`)
-        : "";
-      parts.push(
-        provenanceNote +
-          iocRow("IP Addresses", report.iocs.ipAddresses) +
-          iocRow("Domains", report.iocs.domains) +
-          iocRow("URLs", report.iocs.urls) +
-          iocRow("Hashes", report.iocs.hashes) +
-          iocRow("Email Addresses", report.iocs.emailAddresses) +
-          iocRow("Registry Keys", report.iocs.registryKeys ?? []) +
-          iocRow("File Paths", report.iocs.filePaths ?? []) +
-          iocRow("File Names", report.iocs.fileNames ?? []) +
-          iocRow("Ports", report.iocs.ports ?? []) +
-          iocRow("Event IDs", report.iocs.eventIds ?? []) +
-          iocRow("Named Pipes", report.iocs.namedPipes ?? []) +
-          iocRow("Mutexes", report.iocs.mutexes ?? []) +
-          iocRow("Scheduled Tasks", report.iocs.scheduledTasks ?? []) +
-          iocRow("Services", report.iocs.services ?? []),
-      );
-    }
+  // 7. IOCs (CVEs shown alongside -- same "Vendor Confirmed Intelligence"
+  //    category) -- always renders (not gated on totalIocs > 0) so a
+  //    genuinely IOC-free article shows the explicit fallback line rather
+  //    than the whole section silently vanishing.
+  parts.push(heading(2, "Indicators of Compromise (verified, extracted from source text)"));
+  if (report.cves.length > 0) {
+    const rows = report.cves
+      .map(
+        (cve) =>
+          `<li><strong>${esc(cve.id)}</strong> -- ${esc(cve.severity)}${cve.cvssScore != null ? `, CVSS ${cve.cvssScore}` : ""}${
+            cve.epssScore != null ? `, EPSS ${(cve.epssScore * 100).toFixed(1)}%` : ""
+          }${cve.knownExploited ? ", Known Exploited (KEV)" : ""}</li>`,
+      )
+      .join("");
+    parts.push(`${heading(3, "CVEs (verified CVSS/EPSS/KEV)")}<ul>${rows}</ul>`);
   }
-
-  // 8. Operational Impact
-  if (report.operationalImpact) {
-    const impact = report.operationalImpact;
-    parts.push(heading(2, "Operational Impact"));
+  if (totalIocs === 0) {
+    parts.push(paragraph("No Indicators of Compromise were published by the vendor."));
+  } else {
+    const provenanceNote = report.iocProvenance
+      ? paragraph(`All indicators below are ${report.iocProvenance.confidence.toLowerCase()} -- extracted directly from ${esc(report.iocProvenance.source)}'s own text, never model-generated. First seen ${new Date(report.iocProvenance.firstSeen).toLocaleDateString()}.`)
+      : "";
     parts.push(
-      keyValueSection("", [
-        ["Business impact", impact.businessImpact],
-        ["Risk level", report.aiRiskScoring.priority],
-      ]),
-    );
-    parts.push(
-      groupedListsSection("", [
-        ["Detection challenges", impact.detectionChallenges],
-        ["Evasion techniques", impact.evasionTechniques],
-        ["Attacker objectives", impact.attackerObjectives],
-      ]),
+      provenanceNote +
+        iocRow("IP Addresses", report.iocs.ipAddresses) +
+        iocRow("Domains", report.iocs.domains) +
+        iocRow("URLs", report.iocs.urls) +
+        iocRow("Hashes", report.iocs.hashes) +
+        iocRow("Email Addresses", report.iocs.emailAddresses) +
+        iocRow("Registry Keys", report.iocs.registryKeys ?? []) +
+        iocRow("File Paths", report.iocs.filePaths ?? []) +
+        iocRow("File Names", report.iocs.fileNames ?? []) +
+        iocRow("Ports", report.iocs.ports ?? []) +
+        iocRow("Event IDs", report.iocs.eventIds ?? []) +
+        iocRow("Named Pipes", report.iocs.namedPipes ?? []) +
+        iocRow("Mutexes", report.iocs.mutexes ?? []) +
+        iocRow("Scheduled Tasks", report.iocs.scheduledTasks ?? []) +
+        iocRow("Services", report.iocs.services ?? []) +
+        iocRow("CWE IDs", report.iocs.cweIds ?? []) +
+        iocRow("CLI / PowerShell Commands", report.iocs.cliCommands ?? []) +
+        iocRow("User Agents", report.iocs.userAgents ?? []) +
+        iocRow("MITRE ATT&CK IDs (in article text)", report.iocs.attackTechniqueIds ?? []) +
+        iocRow("Malware Names (in article text)", report.iocs.malwareNames ?? []),
     );
   }
 
-  // 9. Operational Actions -- team table first, deep per-team narrative as
-  //    supporting detail (Intelligence/Executive Takeaway intentionally
-  //    dropped -- repeated the same points already covered above).
-  parts.push(operationalRecommendationsTable(report.operationalRecommendations));
+  // 8. Operational Guidance -- one table replacing both the former flat
+  //    "Operational Actions" priority table and the five separate per-team
+  //    detailed-guidance sections (Intelligence/Executive Takeaway
+  //    intentionally dropped from display -- repeated points already
+  //    covered above; threatIntelTakeaway itself still feeds the Threat
+  //    Intelligence row's Detailed Guidance column).
+  parts.push(operationalGuidanceTable(report));
 
-  if (actions) {
-    const soc = actions.socAnalyst;
-    // Every team section below always renders, even when the model had
-    // little to say for that specific article -- "Not Reported" is the same
-    // explicit placeholder convention used throughout this report, not a
-    // real absence. Confirmed live: hiding a whole section whenever its
-    // content was thin read as "this data doesn't exist" rather than
-    // "nothing applicable for this article."
-    parts.push(heading(3, "SOC Analyst"));
-    if (actions.recommendedActions?.length > 0) {
-      const rows = actions.recommendedActions
-        .map((a) => `<li>${a.applicable ? "&check;" : "&ndash;"} <strong>${esc(a.action)}</strong>${a.applicable ? ` -- ${esc(a.details)}` : ""}</li>`)
-        .join("");
-      parts.push(`${heading(4, "Recommended Actions")}<ul>${rows}</ul>`);
-    }
-    parts.push(groupedListsSection("", [["Telemetry to check", soc.telemetryToCheck]]));
-    if (soc.telemetryToCheck.length === 0) parts.push(paragraph("Telemetry to check: Not Reported"));
-    parts.push(paragraph(`What to look for: ${soc.whatToLookFor}`));
-    parts.push(paragraph(`Immediate next step: ${soc.immediateNextStep}`));
-
-    parts.push(heading(3, "Threat Hunter"));
-    if (actions.threatHunter.hypotheses.length > 0) {
-      const rows = actions.threatHunter.hypotheses
-        .map((h, i) => {
-          const details = [
-            h.dataSources.length > 0 ? `Data sources: ${h.dataSources.join(", ")}` : null,
-            (h.investigationSteps?.length ?? 0) > 0 ? `Investigation steps: ${h.investigationSteps!.join(" ")}` : null,
-            h.positiveFindingLooksLike !== "Not Reported" ? `Positive finding looks like: ${h.positiveFindingLooksLike}` : null,
-            h.falsePositiveNote !== "Not Reported" ? `False-positive note: ${h.falsePositiveNote}` : null,
-          ].filter((x): x is string => Boolean(x));
-          return `<li><strong>Hypothesis ${i + 1}: ${esc(h.hypothesis)}</strong>${details.length > 0 ? `<br/>${details.map(esc).join("<br/>")}` : ""}</li>`;
-        })
-        .join("");
-      parts.push(`<ul>${rows}</ul>`);
-    } else {
-      parts.push(paragraph("No specific hunting hypotheses reported for this article."));
-    }
-    if (actions.threatHunter.behavioralIndicators) {
-      const bi = actions.threatHunter.behavioralIndicators;
-      parts.push(
-        groupedListsSection("Behavioral Hunting Indicators", [
-          ["Network behaviors", bi.networkBehaviors],
-          ["Process behaviors", bi.processBehaviors],
-          ["Authentication anomalies", bi.authenticationAnomalies],
-          ["DNS activity", bi.dnsActivity],
-          ["PowerShell activity", bi.powershellActivity],
-          ["Scheduled tasks", bi.scheduledTasks],
-          ["Registry modifications", bi.registryModifications],
-          ["Persistence indicators", bi.persistenceIndicators],
-        ]),
-      );
-    }
-
-    const de = actions.detectionEngineer;
-    parts.push(heading(3, "Detection Engineer"));
-    if (de.likelyManifestation) parts.push(paragraph(`Likely manifestation: ${de.likelyManifestation}`));
-    parts.push(
-      groupedListsSection("", [
-        ["Existing rules available", de.existingRulesAvailable],
-        ["New detection logic to build", de.newDetectionLogic],
-      ]),
-    );
-    if (de.existingRulesAvailable.length === 0 && de.newDetectionLogic.length === 0) parts.push(paragraph("Rules: Not Reported"));
-    parts.push(
-      groupedListsSection("Query Opportunities by Platform", [
-        ["KQL (Sentinel / Defender)", de.kqlOpportunities ?? []],
-        ["Sigma", de.sigmaOpportunities ?? []],
-        ["Splunk SPL", de.splOpportunities ?? []],
-      ]),
-    );
-    parts.push(paragraph(`Recommended action: ${de.recommendedAction}`));
-    parts.push(paragraph(`YARA applicable: ${de.yaraApplicable ?? "Not Applicable"}`));
-    parts.push(paragraph(`Expected false positives: ${de.expectedFalsePositives}`));
-    parts.push(
-      groupedListsSection("", [
-        ["Behavioral detection opportunities", de.behavioralDetectionOpportunities ?? []],
-        ["Log sources required", de.logSourcesRequired],
-        ["Detection gaps / blind spots", de.detectionGaps],
-      ]),
-    );
-
-    const vm = actions.vulnerabilityManagement;
-    parts.push(heading(3, "Vulnerability Management"));
-    if (!vm.applicable) {
-      parts.push(paragraph("Not Applicable -- this article does not involve a specific CVE."));
-    } else {
-      parts.push(
-        keyValueSection("", [
-          ["Affected assets", vm.affectedAssetsSummary],
-          ["Internet facing", vm.internetFacing],
-          ["Exploit maturity", vm.exploitMaturity],
-          ["Patch priority", vm.patchPriority],
-          ["Maintenance window", vm.maintenanceWindowRecommendation],
-          ["Business criticality", vm.businessCriticality],
-          ["Known workaround", vm.knownWorkaround],
-        ]),
-      );
-      parts.push(groupedListsSection("", [["Compensating controls", vm.compensatingControls]]));
-    }
-
-    parts.push(
-      groupedListsSection("Incident Response", [
-        ["Immediate triage steps", actions.incidentResponse.immediateTriageSteps],
-        ["Containment actions", actions.incidentResponse.containmentActions],
-        ["Recovery actions", actions.incidentResponse.recoveryActions],
-      ]),
-    );
-  }
-
-  // 10. Recommendations -- platform/tooling-specific guidance, distinct from
+  // 9. Recommendations -- platform/tooling-specific guidance, distinct from
   //     the team-action table above.
   const plat = actions?.platformRecommendations;
   if (plat && !Object.values(plat).every((list) => list.length === 0)) {
@@ -479,7 +391,7 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     );
   }
 
-  // 11. Source -- last, always.
+  // 10. Source -- last, always.
   if (report.references.length > 0) {
     const rows = report.references.map((ref) => `<li><a href="${esc(ref.url)}">${esc(ref.label)}</a></li>`).join("");
     parts.push(`${heading(2, "Source")}<ul>${rows}</ul>`);
@@ -499,6 +411,11 @@ const SHARED_STYLES = `
   ul { margin-top: 4px; }
   li { margin-bottom: 4px; }
   a { color: #1a5fb4; }
+  table.ops-table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 9pt; }
+  table.ops-table th, table.ops-table td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; }
+  table.ops-table th { background: #f0f0f0; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.03em; }
+  table.ops-table td ul { margin: 0; padding-left: 16px; }
+  table.ops-table td li { margin-bottom: 2px; }
 `;
 
 function triggerDownload(blob: Blob, filename: string) {

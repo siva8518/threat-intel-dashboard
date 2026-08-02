@@ -7,10 +7,46 @@
 // cutting false positives cheaply.
 
 const CVE_PATTERN = /CVE-\d{4}-\d{4,7}/gi;
+const CWE_PATTERN = /CWE-\d{1,4}/gi;
 const SHA256_PATTERN = /\b[a-fA-F0-9]{64}\b/g;
 const SHA1_PATTERN = /\b[a-fA-F0-9]{40}\b/g;
 const MD5_PATTERN = /\b[a-fA-F0-9]{32}\b/g;
 const IPV4_PATTERN = /\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g;
+// A dotted-quad shaped string is exactly as likely to be a software version
+// (e.g. "7.3.1.2") as a real IP address -- vendor advisories constantly list
+// version numbers in this exact shape. Two signals reliably tell them apart
+// without needing an allowlist: (1) a version-context word within a short
+// window before the match ("version", "release", "build", "before", "prior
+// to", "fixed in", "through", "firmware"), or (2) the match sitting inside a
+// version RANGE -- two dotted-quads joined by a dash/en-dash, which is how
+// every vendor advisory in this app writes "affected versions" but is not
+// how real malicious IPs are ever reported in prose (a CIDR block uses "/24"
+// notation, not two dotted quads joined by a hyphen).
+const VERSION_CONTEXT_PATTERN = /\b(version|versions|release|releases|build|builds|firmware|before|prior to|through|fixed in|patched in|upgrade to|update to)\b/i;
+const VERSION_RANGE_SHAPE_PATTERN = /(?:\d{1,3}\.){1,3}\d{1,3}\s*[-–—]\s*(?:\d{1,3}\.){1,3}\d{1,3}/;
+const IPV4_CONTEXT_WINDOW = 25;
+
+function isLikelyVersionNumber(text, match, index) {
+  const windowStart = Math.max(0, index - IPV4_CONTEXT_WINDOW);
+  const before = text.slice(windowStart, index);
+  const after = text.slice(index + match.length, index + match.length + IPV4_CONTEXT_WINDOW);
+  if (VERSION_CONTEXT_PATTERN.test(before)) return true;
+  const rangeWindowStart = Math.max(0, index - 20);
+  const rangeWindow = text.slice(rangeWindowStart, index + match.length + 20);
+  if (VERSION_RANGE_SHAPE_PATTERN.test(rangeWindow)) return true;
+  return false;
+}
+
+function extractIpv4(text) {
+  const results = new Set();
+  let match;
+  const re = new RegExp(IPV4_PATTERN);
+  while ((match = re.exec(text)) !== null) {
+    if (!isLikelyVersionNumber(text, match[0], match.index)) results.add(match[0]);
+    if (match.index === re.lastIndex) re.lastIndex++;
+  }
+  return Array.from(results);
+}
 // Full (uncompressed) form only -- misses "::" shorthand. A known, documented
 // limitation rather than shipping a multi-hundred-character "complete" IPv6
 // regex that's still an approximation anyway.
@@ -62,6 +98,41 @@ const DOMAIN_PATTERN = new RegExp(
   `\\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+(?:${COMMON_TLDS.join("|")})\\b`,
   "gi",
 );
+
+// Standards-body, vendor-reference, and citation domains that appear
+// constantly in threat-intel prose ("per NVD...", "see cve.org...") but are
+// never themselves the malicious indicator being reported -- confirmed live
+// a Cisco advisory report classified "cve.org" as a domain IOC purely
+// because the article cited it as a reference, which is exactly the false
+// positive this list exists to prevent. Not an allowlist of "safe internet"
+// (that's not this app's job) -- just the small, stable set of citation
+// infrastructure this app's own sources routinely reference.
+const REFERENCE_DOMAIN_EXCLUSIONS = new Set([
+  "cve.org", "nvd.nist.gov", "nist.gov", "cisa.gov", "mitre.org", "attack.mitre.org",
+  "cwe.mitre.org", "capec.mitre.org", "first.org", "cve.mitre.org",
+]);
+
+// Windows drive-letter paths have their own pattern above; this covers the
+// separate absolute-Unix-path syntax vendor advisories/IR writeups quote
+// directly (e.g. "/var/tmp/license.tmp", "/var/log/messages") -- anchored on
+// a closed list of real top-level directories so a stray "/" in prose (a
+// date, a fraction, "and/or") is never mistaken for a path.
+const LINUX_PATH_ROOTS = ["var", "etc", "tmp", "usr", "home", "root", "opt", "bin", "sbin", "dev", "proc", "lib", "srv", "boot", "mnt"];
+const LINUX_PATH_PATTERN = new RegExp(`\\B/(?:${LINUX_PATH_ROOTS.join("|")})(?:/[\\w.-]+)+`, "g");
+
+// Deliberately narrow, precision-over-recall: only matches text the article
+// itself already marked as a literal command -- inline Markdown code spans
+// (`` `cmd` ``) or a quoted string that opens with a real command-line verb.
+// Free-text prose describing a command in words ("run a grep for license")
+// is not captured; that trade-off is intentional, same as the mutex/service
+// patterns above -- a wrong command extraction is worse than a missed one.
+const CLI_VERB_PATTERN = "cat|grep|ls|dir|netstat|reg|regedit|powershell|pwsh|certutil|wmic|schtasks|sc|net|wget|curl|python3?|bash|sh|cmd|whoami|tasklist|taskkill|rundll32|mshta|cscript|wscript|nslookup|ping|ssh|scp|chmod|chown|systemctl|service|Get-\\w+|Invoke-\\w+|Set-\\w+|New-\\w+";
+const CODE_SPAN_PATTERN = /`([^`\n]{2,200})`/g;
+const QUOTED_COMMAND_PATTERN = new RegExp(`["“']((?:${CLI_VERB_PATTERN})\\b[^"”'\\n]{0,180})["”']`, "gi");
+
+// "User-Agent: Mozilla/5.0 ..." style header lines, or a quoted UA string
+// explicitly introduced as one -- both syntactically unambiguous.
+const USER_AGENT_PATTERN = /user[-\s]?agent[:\s]+["“]?([^"”\n]{5,200}?)["”]?(?:\n|$|\.\s)/gi;
 
 // The 14 Enterprise ATT&CK tactics (stable, official -- attack.mitre.org/tactics/enterprise).
 const ATTACK_TACTICS = [
@@ -116,24 +187,34 @@ export function extractEntities(rawText, { techniques = [], groups = [], malware
 
   const malwareFamilyMatches = malwareFamilies.filter((family) => lower.includes(family.toLowerCase()));
 
+  const cliCommands = Array.from(
+    new Set([...uniqueCapturedGroups(text, CODE_SPAN_PATTERN), ...uniqueCapturedGroups(text, QUOTED_COMMAND_PATTERN)].map((c) => c.trim())),
+  );
+
   return {
     cveIds: uniqueMatches(text, CVE_PATTERN).map((id) => id.toUpperCase()),
+    cweIds: uniqueMatches(text, CWE_PATTERN).map((id) => id.toUpperCase()),
     sha256: uniqueMatches(text, SHA256_PATTERN),
     sha1: uniqueMatches(text, SHA1_PATTERN),
     md5: uniqueMatches(text, MD5_PATTERN),
-    ipv4: uniqueMatches(text, IPV4_PATTERN),
+    ipv4: extractIpv4(text),
     ipv6: uniqueMatches(text, IPV6_PATTERN),
-    domains: uniqueMatches(text, DOMAIN_PATTERN).map((d) => d.toLowerCase()),
+    domains: uniqueMatches(text, DOMAIN_PATTERN)
+      .map((d) => d.toLowerCase())
+      .filter((d) => !REFERENCE_DOMAIN_EXCLUSIONS.has(d)),
     urls: uniqueMatches(text, URL_PATTERN),
     emails: uniqueMatches(text, EMAIL_PATTERN).map((e) => e.toLowerCase()),
     yaraRuleNames: uniqueCapturedGroups(text, YARA_RULE_NAME_PATTERN),
     sigmaRuleIds: uniqueCapturedGroups(text, SIGMA_RULE_ID_PATTERN),
     registryKeys: uniqueMatches(text, REGISTRY_KEY_PATTERN),
     filePaths: uniqueMatches(text, WINDOWS_FILE_PATH_PATTERN),
+    linuxPaths: uniqueMatches(text, LINUX_PATH_PATTERN),
     fileNames: uniqueMatches(text, FILE_NAME_PATTERN),
     ports: uniqueCapturedGroups(text, PORT_PATTERN),
     eventIds: uniqueCapturedGroups(text, EVENT_ID_PATTERN),
     namedPipes: uniqueMatches(text, NAMED_PIPE_PATTERN),
+    userAgents: uniqueCapturedGroups(text, USER_AGENT_PATTERN).map((ua) => ua.trim()),
+    cliCommands,
     // Best-effort/low-recall by design -- see the pattern comments above.
     mutexes: uniqueCapturedGroups(text, MUTEX_NAME_PATTERN),
     scheduledTasks: uniqueCapturedGroups(text, SCHEDULED_TASK_NAME_PATTERN),

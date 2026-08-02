@@ -27,6 +27,15 @@ import { extractEntities } from "./githubIntel/extractor.js";
 import { detectionRulesFor } from "./correlate.js";
 import { fetchArticleText } from "./lib/articleText.js";
 import { log } from "./lib/log.js";
+import malwareAttackMap from "./data/malware-attack-map.json" with { type: "json" };
+
+// Real family names this app already curates (server/data/malware-attack-map.json),
+// reused here purely as a name list -- not for its technique mappings (those
+// stay the model's own synthesis in the `malware` field). Passing this into
+// extractEntities gives a second, code-verified "is this family name
+// literally present in the article's own text" signal, distinct from and a
+// cross-check against the model's own `malware` array.
+const KNOWN_MALWARE_FAMILY_NAMES = Object.keys(malwareAttackMap).filter((k) => k !== "_comment");
 
 const SYSTEM_PROMPT =
   "You are a Principal Cyber Threat Intelligence Analyst supporting an enterprise SOC, Detection Engineering, Incident Response, Threat Hunting, and Security Leadership. " +
@@ -44,7 +53,7 @@ const SYSTEM_PROMPT =
   '"shouldICare": {"verdict": "YES"|"NO"|"UNKNOWN", "reasoning": string} -- this app has no knowledge of the specific reader\'s own environment, so answer as a conditional decision aid, not a personalized verdict: "YES" if the affected technology is so broadly deployed or the exploitation so indiscriminate that almost any reader should assume it applies to them (e.g. a mass-exploited, widely-used product/library, or active internet-wide scanning); "NO" if the described risk is narrow, theoretical, vendor-internal, or otherwise not something a typical reader needs to act on (e.g. an AI research announcement, a already-patched issue with no current relevance); "UNKNOWN" (the common case for a specific-product vulnerability) with reasoning that tells the reader exactly what to check, e.g. "YES if you run Fortinet FortiOS or Arista VeloCloud Orchestrator; otherwise this specific advisory does not apply to you directly." Ground the verdict only in what the article states about affected products/scope -- never guess at a reader\'s stack.\n' +
   '"exposureAssessment": {"applicable": boolean (true only when the article describes a risk tied to a specific, nameable product/software a reader could check for -- false for threat-actor/malware-only, research, or non-product news, in which case every other field here is "Not Applicable"), "product": string (the single most relevant product/software a reader should check for, exactly as named in the article, e.g. "Microsoft Exchange Server", "FortiOS", "Ivanti Connect Secure"), "howToCheckVersion": string (a concrete, specific command or UI path a reader can run right now to find their installed version, e.g. "Exchange Management Shell: Get-ExchangeServer | ft Name, AdminDisplayVersion" or "Help > About" -- generic advice like "check your version" is not acceptable), "affectedVersions": string (exactly what the article/advisory states is affected, e.g. "Exchange Server 2019 before CU15, 2016 before CU24"), "affectedGuidance": string (what to do if the reader confirms they are on an affected version -- concrete and prioritized, e.g. "Patch immediately to the fixed build; this is under active exploitation"), "notAffectedGuidance": string (what to do if the reader confirms they are on a version NOT listed as affected, e.g. "No immediate action required; continue routine patch cadence")} -- this is a self-service exposure check the reader runs against their own environment (this app has no visibility into what the reader actually has installed) -- supply the check itself, never guess whether the reader personally has this product or which version they run.\n' +
   '"technicalAnalysis": {"whatHappened": string, "whyItMatters": string (technical/operational significance -- what an attacker gains, the blast radius -- distinct from the business-language executiveSummary), "whoIsAffected": string, "exploitationStatus": string (state plainly: confirmed active exploitation / public PoC only / theoretical, with the evidence), "attackVector": string[], "rootCause": string[], "exploitationDetails": string[], "technicalFindings": string[], "attackChain": string (1-2 sentence kill-chain overview), "initialAccess": string|null, "privilegeEscalation": string|null, "execution": string|null, "persistence": string|null, "defenseEvasion": string|null, "lateralMovement": string|null, "commandAndControl": string|null, "dataTheft": string|null, "ransomwareDeployment": string|null, "products": string[], "versions": string[], "operatingSystems": string[], "cloudServices": string[], "applications": string[], "vendorSeverity": string, "activeExploitation": string, "overallSocPriority": "Critical"|"High"|"Medium"|"Low"} -- kill-chain fields: null (not "Not Reported") for any stage not described in the article, do not fabricate a kill chain the article doesn\'t support. affectedProducts fields: exactly as named in the article. vendorSeverity is the vendor\'s own stated rating, not your own guess -- CVSS/EPSS/KEV are supplied separately, don\'t restate them here. Every bullet should read like it came from a technical researcher, not a press release -- name the specific thing, don\'t generalize it away.\n' +
-  '"threatRelevance": {"industriesAtRisk": string[], "technologiesTargeted": string[], "geographicFocus": string[], "victimProfile": string (who is likely to be targeted or affected -- role, organization type, user population, not a repeat of technicalAnalysis.whoIsAffected\'s product-scoping answer), "initialAccessVector": string (how attackers most likely gain initial entry for THIS specific threat, e.g. "phishing email with malicious attachment", "exploitation of the internet-facing vulnerable service", "compromised credentials via password spray" -- state plainly, don\'t hedge)} -- ground every field only in what the article states or directly implies; [] or "Not Reported" if unsupported. Do not restate MITRE technique IDs here -- those belong in mitreAttack below.\n' +
+  '"threatRelevance": {"industriesAtRisk": string[], "technologiesTargeted": string[], "geographicFocus": string[]} -- ground every field only in what the article states or directly implies; [] if unsupported. Do not restate MITRE technique IDs here -- those belong in mitreAttack below. Do NOT include who is likely targeted (technicalAnalysis.whoIsAffected already answers that) or how initial access is gained (technicalAnalysis.initialAccess in the kill chain already answers that) -- this field is only the aggregate targeting picture across industries/technologies/geography, never a second victim-profile or access-vector narrative.\n' +
   '"operationalImpact": {"businessImpact": string (the operational/systemic consequence for the SOC/analyst -- what actually breaks or is at risk operationally, not the executive risk framing already covered in businessRisk; do not restate businessRisk\'s or executiveSummary\'s sentences here), "detectionChallenges": string[] (specific, concrete reasons this activity is hard to detect with typical tooling -- e.g. "living-off-the-land binary abuse blends with legitimate admin activity", "C2 traffic uses valid TLS to a reputable CDN" -- never generic "hard to detect"), "evasionTechniques": string[] (specific evasion/anti-detection methods the article describes or that are well-documented for this technique/malware family -- name the actual method, not generic "obfuscation"), "attackerObjectives": string[] (what the attacker is actually trying to achieve here -- data theft, ransomware deployment, espionage, financial fraud, initial-access resale, etc., grounded in the article, not assumed)}\n' +
   '"industryRelevance": array of EXACTLY these 10 entries, one each, in this exact order and with these exact "industry" strings -- "Financial Services", "Consumer", "Technology, Media & Telecommunications", "Life Sciences & Health Care", "Manufacturing", "Energy & Utilities", "Government & Public Sector", "Retail & eCommerce", "Education", "Transportation & Logistics" -- each shaped {"industry": string (copied exactly from the list above), "relevance": "Critical"|"High"|"Medium"|"Low"|"Not Applicable", "confidence": "High"|"Medium"|"Low" (your confidence in the relevance call itself), "whyAffected": string (2-3 sentences: why attackers may target this sector, which business processes are at risk, which technologies common in this sector are relevant here, and why this sector is more or less applicable than others -- "Not Applicable" if relevance is Not Applicable), "potentialImpact": string[] (2-4 items, e.g. "Credential Theft", "Ransomware", "Business Email Compromise", "Customer Data Exposure" -- [] if Not Applicable), "likelyTargetAssets": string[] (2-4 items, e.g. "Active Directory", "SAP", "OT/ICS Systems", "VPN" -- [] if Not Applicable), "defensiveFocus": string[] (3-5 concrete, sector-specific recommendations, e.g. for Manufacturing: "Monitor OT/ICS segmentation", "Review engineering workstation access" -- never generic advice, [] if Not Applicable), "riskScore": integer 0-10, "priority": "Immediate"|"High"|"Normal"|"Low"} -- DO NOT rate every industry Critical or High: only assign Critical/High when there is a clear technical or operational reason grounded in what the article actually describes (the affected product/sector, the attack vector, who is named as a target); for the common case of a narrow, sector-agnostic vulnerability or an article that names no specific victim sector, most industries should be "Low" or "Not Applicable" -- a heatmap that is mostly Low/Not Applicable with 1-3 genuinely elevated sectors is correct, not incomplete. Ground every "why" in the article or in well-established sector/technology overlap (e.g. a vulnerability in a hospital-focused device is High for Life Sciences & Health Care) -- never invent a sector-specific detail the article doesn\'t support.\n' +
   '"mitreAttack": array of {"technique": string, "techniqueId": string or null, "evidence": string (a short direct quote or close paraphrase FROM THE ARTICLE that specifically supports this technique -- not a restatement of the technique\'s generic definition; an entry with no article-grounded evidence is discarded entirely, so leave this array empty rather than including a technique you cannot point to specific article text for), "confidence": "High"|"Medium"|"Low" (High only when the article explicitly names this technique or describes the exact behavior; Medium when it\'s a reasonable but not explicit inference; Low when it\'s a weak/generic association -- prefer omitting Low-confidence guesses entirely), "reason": string (why this technique applies, grounded in what the article describes), "killChainPhase": string} -- techniqueId MUST be copied exactly from the CANDIDATE MITRE ATT&CK TECHNIQUES list in the user message, or null if none genuinely apply. Never invent a technique ID that isn\'t in that list, even if it looks plausible. Only map techniques explicitly supported by the article -- do not add extra plausible-sounding techniques beyond what the article\'s own described behavior supports.\n' +
@@ -211,8 +220,6 @@ function safeThreatRelevance(v) {
     industriesAtRisk: safeArray(v.industriesAtRisk),
     technologiesTargeted: safeArray(v.technologiesTargeted),
     geographicFocus: safeArray(v.geographicFocus),
-    victimProfile: safeString(v.victimProfile),
-    initialAccessVector: safeString(v.initialAccessVector),
     // Derived from the already-parsed/grounded mitreAttack array (unique,
     // real killChainPhase values) rather than asked of the model a second
     // time here -- avoids the exact restatement-drift this app's own "remove
@@ -717,6 +724,7 @@ const IOC_CATEGORY_BY_TYPE = {
   emails: "emailAddresses",
   registryKeys: "registryKeys",
   filePaths: "filePaths",
+  linuxPaths: "filePaths",
   fileNames: "fileNames",
   ports: "ports",
   eventIds: "eventIds",
@@ -724,14 +732,29 @@ const IOC_CATEGORY_BY_TYPE = {
   mutexes: "mutexes",
   scheduledTasks: "scheduledTasks",
   services: "services",
+  cweIds: "cweIds",
+  cliCommands: "cliCommands",
+  userAgents: "userAgents",
+  attackTechniques: "attackTechniqueIds",
+  malwareFamilies: "malwareNames",
 };
 
-function extractIocs(text) {
-  const extracted = extractEntities(text, {});
+// Passes this app's own synced ATT&CK technique catalog and curated malware-
+// family names into the shared extractor so `attackTechniques`/`malwareFamilies`
+// in its return value are populated (aiThreatSummary.js previously called
+// extractEntities(text, {}) with no options here, so those two categories
+// were always empty for every AI Summarization report even though the
+// extractor supported them) -- these are code-verified "this exact ID/name
+// literally appears in the article's own text" signals, a cross-check
+// against the model's own synthesized mitreAttack/malware fields, not a
+// replacement for them.
+function extractIocs(text, attackTechniques) {
+  const extracted = extractEntities(text, { techniques: attackTechniques ?? [], malwareFamilies: KNOWN_MALWARE_FAMILY_NAMES });
   const categories = {
     ipAddresses: [], domains: [], urls: [], hashes: [], emailAddresses: [],
     registryKeys: [], filePaths: [], fileNames: [], ports: [], eventIds: [],
     namedPipes: [], mutexes: [], scheduledTasks: [], services: [],
+    cweIds: [], cliCommands: [], userAgents: [], attackTechniqueIds: [], malwareNames: [],
   };
   for (const [type, category] of Object.entries(IOC_CATEGORY_BY_TYPE)) {
     for (const value of extracted[type] ?? []) categories[category].push(value);
@@ -985,7 +1008,7 @@ export async function generateThreatSummary(article, grounded) {
   // falls back to the RSS summary exactly as before.
   const articleText = await fetchArticleText(article.link, article.source);
   const sourceText = `${article.title}\n${article.summary ?? ""}\n${articleText ?? ""}`;
-  const iocs = extractIocs(sourceText);
+  const iocs = extractIocs(sourceText, grounded.attackTechniques);
 
   const cveContext = grounded.cveIds
     .map((id) => {

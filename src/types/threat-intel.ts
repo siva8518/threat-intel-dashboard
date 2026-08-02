@@ -889,6 +889,7 @@ export interface AiThreatSummaryIocs {
   hashes: string[];
   emailAddresses: string[];
   registryKeys: string[];
+  /** Windows drive-letter and absolute Unix/Linux paths (e.g. "/var/tmp/license.tmp"), merged into one category. */
   filePaths: string[];
   fileNames: string[];
   ports: string[];
@@ -897,6 +898,14 @@ export interface AiThreatSummaryIocs {
   mutexes: string[];
   scheduledTasks: string[];
   services: string[];
+  cweIds: string[];
+  /** Literal command-line/PowerShell invocations quoted directly in the source article -- code spans or command-verb-anchored quotes only, never a paraphrase. */
+  cliCommands: string[];
+  userAgents: string[];
+  /** Real MITRE ATT&CK technique IDs found literally in the article's own text (regex-matched against this app's synced catalog) -- a code-verified cross-check against the model's own synthesized `mitreAttack` mapping, not a replacement for it. */
+  attackTechniqueIds: string[];
+  /** Malware family names found literally in the article's own text (matched against this app's curated family list) -- a code-verified cross-check against the model's own synthesized `malware` array. */
+  malwareNames: string[];
 }
 
 /** One shared provenance block for the entire iocs section (not per-indicator) -- every value in AiThreatSummaryIocs is extracted directly from the article's own text via regex, so source/confidence/vendorConfirmed/firstSeen are identical for every indicator in the report by construction. See server/aiThreatSummary.js#buildIocProvenance. */
@@ -983,8 +992,6 @@ export interface AiThreatSummaryThreatRelevance {
   industriesAtRisk: string[];
   technologiesTargeted: string[];
   geographicFocus: string[];
-  victimProfile: string;
-  initialAccessVector: string;
   mitreTactics: string[];
 }
 
