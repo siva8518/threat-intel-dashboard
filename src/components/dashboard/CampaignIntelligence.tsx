@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { useCampaignIntelligence } from "@/hooks/useCampaignIntelligence";
-import type { CampaignIntelligenceEntity } from "@/types/threat-intel";
+import type { CampaignIntelligenceEntity, PivotNodeType } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
 function timeAgo(iso: string) {
@@ -18,7 +18,7 @@ function timeAgo(iso: string) {
   return `${days} days ago`;
 }
 
-function EntityRow({ entity, expanded, onToggle }: { entity: CampaignIntelligenceEntity; expanded: boolean; onToggle: () => void }) {
+function EntityRow({ entity, expanded, onToggle, onOpenPivotChain }: { entity: CampaignIntelligenceEntity; expanded: boolean; onToggle: () => void; onOpenPivotChain: (type: PivotNodeType, key: string) => void }) {
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
       <button type="button" onClick={onToggle} className="flex w-full items-start justify-between gap-3 p-3 text-left">
@@ -62,15 +62,33 @@ function EntityRow({ entity, expanded, onToggle }: { entity: CampaignIntelligenc
 
           <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {entity.associatedActors.length > 0 && (
-              <div>
+              <div className="flex flex-wrap items-center gap-1">
                 <span className="text-muted">Associated actors: </span>
-                {entity.associatedActors.join(", ")}
+                {entity.associatedActors.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => onOpenPivotChain("actor", name)}
+                    className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-primary hover:border-primary/50"
+                  >
+                    {name} →
+                  </button>
+                ))}
               </div>
             )}
             {entity.associatedMalware.length > 0 && (
-              <div>
+              <div className="flex flex-wrap items-center gap-1">
                 <span className="text-muted">Associated malware/tools: </span>
-                {entity.associatedMalware.join(", ")}
+                {entity.associatedMalware.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => onOpenPivotChain("malware", name)}
+                    className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-primary hover:border-primary/50"
+                  >
+                    {name} →
+                  </button>
+                ))}
               </div>
             )}
             {entity.targetedIndustries.length > 0 && (
@@ -125,7 +143,11 @@ function EntityRow({ entity, expanded, onToggle }: { entity: CampaignIntelligenc
  * This is also exactly what the RAG chatbot's campaign chunks are built
  * from -- anything shown here is answerable by the AI Assistant tab.
  */
-export function CampaignIntelligence() {
+interface CampaignIntelligenceProps {
+  onOpenPivotChain: (type: PivotNodeType, key: string) => void;
+}
+
+export function CampaignIntelligence({ onOpenPivotChain }: CampaignIntelligenceProps) {
   const { data, isLoading, isError, error } = useCampaignIntelligence();
   const [search, setSearch] = useState("");
   const [dateRange, setDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
@@ -192,7 +214,7 @@ export function CampaignIntelligence() {
         ) : (
           <div className={cn("space-y-2")}>
             {filtered.map((entity) => (
-              <EntityRow key={entity.id} entity={entity} expanded={expandedIds.has(entity.id)} onToggle={() => toggle(entity.id)} />
+              <EntityRow key={entity.id} entity={entity} expanded={expandedIds.has(entity.id)} onToggle={() => toggle(entity.id)} onOpenPivotChain={onOpenPivotChain} />
             ))}
           </div>
         )}

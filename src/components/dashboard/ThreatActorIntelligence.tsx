@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
 import { DateRangeFilter, EMPTY_DATE_RANGE, isWithinDateRange, type DateRange } from "./DateRangeFilter";
 import { useThreatActorIntelligence } from "@/hooks/useThreatActorIntelligence";
-import type { ThreatActorIntelligenceEntity, ThreatActorType } from "@/types/threat-intel";
+import type { ThreatActorIntelligenceEntity, ThreatActorType, PivotNodeType } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
 const TYPE_FILTERS: Array<ThreatActorType | "All"> = ["All", "APT", "Cybercrime", "Ransomware", "Hacktivist", "Initial Access Broker", "Insider", "Unknown"];
@@ -55,7 +55,7 @@ function buildTimeline(entity: ThreatActorIntelligenceEntity): TimelineEvent[] {
   return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
-function EntityRow({ entity, expanded, onToggle }: { entity: ThreatActorIntelligenceEntity; expanded: boolean; onToggle: () => void }) {
+function EntityRow({ entity, expanded, onToggle, onOpenPivotChain }: { entity: ThreatActorIntelligenceEntity; expanded: boolean; onToggle: () => void; onOpenPivotChain: (type: PivotNodeType, key: string) => void }) {
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
       <button type="button" onClick={onToggle} className="flex w-full items-start justify-between gap-3 p-3 text-left">
@@ -118,9 +118,18 @@ function EntityRow({ entity, expanded, onToggle }: { entity: ThreatActorIntellig
               </div>
             )}
             {entity.malwareUsed.length > 0 && (
-              <div>
+              <div className="flex flex-wrap items-center gap-1">
                 <span className="text-muted">Malware/tools: </span>
-                {entity.malwareUsed.join(", ")}
+                {entity.malwareUsed.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => onOpenPivotChain("malware", name)}
+                    className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-primary hover:border-primary/50"
+                  >
+                    {name} →
+                  </button>
+                ))}
               </div>
             )}
             {entity.targetedIndustries.length > 0 && (
@@ -183,6 +192,7 @@ function EntityRow({ entity, expanded, onToggle }: { entity: ThreatActorIntellig
 interface ThreatActorIntelligenceProps {
   /** Pre-fills the search box -- set from the platform search palette (see CommandPalette.tsx) when the user picks an actor result. */
   initialQuery?: string | null;
+  onOpenPivotChain: (type: PivotNodeType, key: string) => void;
 }
 
 /**
@@ -194,7 +204,7 @@ interface ThreatActorIntelligenceProps {
  * This is also exactly what the RAG chatbot's actor chunks are built from --
  * anything shown here is answerable by the AI Assistant tab.
  */
-export function ThreatActorIntelligence({ initialQuery }: ThreatActorIntelligenceProps = {}) {
+export function ThreatActorIntelligence({ initialQuery, onOpenPivotChain }: ThreatActorIntelligenceProps) {
   const { data, isLoading, isError, error } = useThreatActorIntelligence();
   const [search, setSearch] = useState(initialQuery ?? "");
 
@@ -281,7 +291,7 @@ export function ThreatActorIntelligence({ initialQuery }: ThreatActorIntelligenc
         ) : (
           <div className={cn("space-y-2")}>
             {filtered.map((entity) => (
-              <EntityRow key={entity.id} entity={entity} expanded={expandedIds.has(entity.id)} onToggle={() => toggle(entity.id)} />
+              <EntityRow key={entity.id} entity={entity} expanded={expandedIds.has(entity.id)} onToggle={() => toggle(entity.id)} onOpenPivotChain={onOpenPivotChain} />
             ))}
           </div>
         )}

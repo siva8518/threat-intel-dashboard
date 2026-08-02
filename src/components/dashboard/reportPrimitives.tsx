@@ -44,6 +44,26 @@ export function KeyValueBlock({ title, pairs }: { title: string; pairs: Array<[s
   );
 }
 
+/** Click-to-jump-back trail -- used by PivotChainExplorer.tsx to show the path walked so far. */
+export function Breadcrumb({ items }: { items: Array<{ label: string; onClick?: () => void }> }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 text-xs">
+      {items.map((item, i) => (
+        <span key={i} className="flex items-center gap-1">
+          {i > 0 && <span className="text-muted">/</span>}
+          {item.onClick ? (
+            <button type="button" onClick={item.onClick} className="text-primary hover:underline">
+              {item.label}
+            </button>
+          ) : (
+            <span className="font-semibold text-foreground">{item.label}</span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function GroupedLists({ title, groups }: { title: string; groups: Array<[string, string[]]> }) {
   const nonEmpty = groups.filter(([, items]) => items.length > 0);
   if (nonEmpty.length === 0) return null;

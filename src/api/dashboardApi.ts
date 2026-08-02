@@ -28,6 +28,8 @@ import type {
   IocRecord,
   InvestigationResult,
   AiInvestigationReport,
+  PivotNodeType,
+  PivotChainResult,
   KevEntry,
   MalwareIntelligenceEntity,
   MalwareProfile,
@@ -303,6 +305,11 @@ export async function generateInvestigationAiReport(query: string): Promise<AiIn
     body: JSON.stringify({ query }),
     timeoutMs: 90_000,
   });
+}
+
+/** One hop of the Pivot Chain -- see server/investigation/pivotChain.js. Pure correlation, no AI call, cheap to re-run on every step. */
+export async function fetchPivotChain(type: PivotNodeType, key: string): Promise<PivotChainResult> {
+  return fetchJson(`/api/dashboard/pivot-chain?type=${encodeURIComponent(type)}&key=${encodeURIComponent(key)}`, { source: "Pivot Chain" });
 }
 
 // The full-profile (fetchThreatActorProfile) and list (fetchThreatActorList)

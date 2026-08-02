@@ -48,6 +48,7 @@ import {
   DETECTION_BACKLOG_STATUSES,
 } from "../detectionBacklogTracker.js";
 import { buildInfrastructureReuse } from "../infrastructureReuse.js";
+import { getPivotNeighbors, PIVOT_NODE_TYPES } from "../investigation/pivotChain.js";
 
 export const router = Router();
 
@@ -939,6 +940,23 @@ router.post("/investigate/ai-report", async (req, res) => {
     res.json(report);
   } catch (error) {
     if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
+    res.status(502).json({ error: error.message });
+  }
+});
+
+// --- Pivot Chain -- see server/investigation/pivotChain.js ---
+// Lets an analyst walk Threat Actor -> Campaign -> Malware -> CVE -> Victim
+// -> IP -> Domain -> Report one hop at a time. Pure correlation over
+// already-computed data (no AI call), so this stays synchronous.
+router.get("/dashboard/pivot-chain", async (req, res) => {
+  const { type, key } = req.query;
+  if (!type || !PIVOT_NODE_TYPES.includes(type)) return res.status(400).json({ error: `type must be one of: ${PIVOT_NODE_TYPES.join(", ")}` });
+  if (!key || !key.trim()) return res.status(400).json({ error: "key param is required" });
+
+  try {
+    const result = await getPivotNeighbors(type, key);
+    res.json(result);
+  } catch (error) {
     res.status(502).json({ error: error.message });
   }
 });

@@ -426,6 +426,34 @@ export interface InvestigationResult {
   skipped: { source: string; reason: string }[];
 }
 
+// --- Pivot Chain -- see server/investigation/pivotChain.js ---
+// Threat Actor -> Campaign -> Malware -> CVE -> Victim -> IP -> Domain ->
+// Report, one hop at a time. Every edge is backed by a real field this app
+// already computes; a hop with no supporting data anywhere in this app is
+// listed in `unavailableHops` with a plain-language reason instead of a
+// silently-empty section.
+export type PivotNodeType = "actor" | "campaign" | "malware" | "cve" | "victim" | "ip" | "domain" | "report";
+
+export interface PivotEdge {
+  id: string;
+  label: string;
+  linkBasis: string;
+}
+
+export interface PivotNode {
+  type: PivotNodeType;
+  id: string;
+  label: string;
+  summary: string | null;
+  found: boolean;
+}
+
+export interface PivotChainResult {
+  node: PivotNode;
+  neighbors: Record<PivotNodeType, PivotEdge[]>;
+  unavailableHops: Array<{ neighborType: PivotNodeType; reason: string }>;
+}
+
 /** On-demand only -- see AiInvestigationOperationalGuidance/AiInvestigationDetectionOpportunities below, and server/investigationAi.js. Never generated automatically on search. */
 export interface AiInvestigationOperationalGuidance {
   socAnalyst: string;

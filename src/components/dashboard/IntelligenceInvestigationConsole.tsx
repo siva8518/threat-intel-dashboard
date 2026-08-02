@@ -25,12 +25,20 @@ import type {
   CveRecord,
   CveProfile,
   DetectionRuleRef,
+  PivotNodeType,
 } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
 interface ConsoleProps {
   onOpenActor: (name: string) => void;
   onOpenCampaign: () => void;
+  onOpenPivotChain: (type: PivotNodeType, key: string) => void;
+}
+
+/** Only ip/domain/cve map 1:1 onto a Pivot Chain node type -- name/hash/artifact types are ambiguous or out of the chain's scope, so no Pivot Chain entry point is offered for those. */
+function pivotNodeTypeFor(type: IndicatorType): PivotNodeType | null {
+  if (type === "ip" || type === "domain" || type === "cve") return type;
+  return null;
 }
 
 const VERDICT_BADGE = { critical: "critical", high: "high", medium: "medium", low: "low", unknown: "muted" } as const;
@@ -187,14 +195,46 @@ function KeyFactsPanel({ facts }: { facts: KeyFact[] }) {
   );
 }
 
-function RelatedIntelligenceSection({ result, onOpenActor, onOpenCampaign }: { result: InvestigationResult; onOpenActor: (name: string) => void; onOpenCampaign: () => void }) {
+function RelatedIntelligenceSection({
+  result,
+  onOpenActor,
+  onOpenCampaign,
+  onOpenPivotChain,
+}: {
+  result: InvestigationResult;
+  onOpenActor: (name: string) => void;
+  onOpenCampaign: () => void;
+  onOpenPivotChain: (type: PivotNodeType, key: string) => void;
+}) {
   const rel = result.relatedIntelligence;
-  if (!rel) return null;
+  const pivotType = pivotNodeTypeFor(result.type);
+  const pivotButton = pivotType && (
+    <button
+      type="button"
+      onClick={() => onOpenPivotChain(pivotType, result.indicator)}
+      className="mb-2 inline-flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:border-primary/50"
+    >
+      Walk Pivot Chain from here →
+    </button>
+  );
+  if (!rel) {
+    return pivotButton ? (
+      <Section title="Related Intelligence">{pivotButton}</Section>
+    ) : null;
+  }
   const hasAny = rel.matchedMalwareFamilies.length > 0 || rel.associatedThreatActors.length > 0 || rel.activeCampaigns.length > 0 || rel.matchingAiReports.length > 0 || rel.relatedIocs.length > 0;
-  if (!hasAny) return <Section title="Related Intelligence"><p className="text-xs text-muted">No related intelligence found in this platform's own tracked data.</p></Section>;
+  if (!hasAny) {
+    return (
+      <Section title="Related Intelligence">
+        {pivotButton}
+        <p className="text-xs text-muted">No related intelligence found in this platform's own tracked data.</p>
+      </Section>
+    );
+  }
   return (
     <Section title="Related Intelligence">
       <div className="space-y-3 text-xs">
+        {pivotButton}
         {rel.matchedMalwareFamilies.length > 0 && (
           <p>
             <span className="font-semibold text-foreground">Malware Families: </span>
@@ -313,7 +353,7 @@ function QuickActions({ result }: { result: InvestigationResult }) {
  * Indicator-Specific Intelligence -> Related Intelligence -> Detection
  * Opportunities -> Operational Guidance -> Raw Sources.
  */
-export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign }: ConsoleProps) {
+export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, onOpenPivotChain }: ConsoleProps) {
   const [input, setInput] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const { selectCve, selectMalware } = useSelection();
@@ -425,7 +465,7 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign }
               )}
             </Section>
 
-            <RelatedIntelligenceSection result={result} onOpenActor={onOpenActor} onOpenCampaign={onOpenCampaign} />
+            <RelatedIntelligenceSection result={result} onOpenActor={onOpenActor} onOpenCampaign={onOpenCampaign} onOpenPivotChain={onOpenPivotChain} />
 
             <DetectionOpportunitiesPanel report={aiReportM.data} />
             <OperationalGuidancePanel report={aiReportM.data} />
