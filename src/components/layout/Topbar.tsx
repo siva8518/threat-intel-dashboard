@@ -21,6 +21,7 @@ export function Topbar({ onOpenPalette }: TopbarProps) {
         </div>
         <div>
           <h1 className="text-base font-semibold leading-tight tracking-tight">
+            <span className="text-foreground">AI-Assisted</span>{" "}
             <span className="text-gradient">Cyber Intelligence</span>{" "}
             <span className="text-foreground">Platform</span>
           </h1>
