@@ -36,14 +36,22 @@ tab is independently hitting NVD/abuse.ch/etc.
 server/
   lib/            retry.js (backoff), rss.js (regex RSS parser -- Node has no DOMParser),
                   cpe.js (NVD vendor extraction), http.js (fetch+timeout+ApiError), abuseCh.js, log.js,
-                  lookupLimiter.js (per-source rate limit + 10-min cache for on-demand IOC Search lookups)
+                  lookupLimiter.js (per-source rate limit + 10-min cache for on-demand lookups),
+                  dnsRecords.js (DNS records/reverse-DNS/SPF-DKIM-DMARC, Node's own dns module)
   cache.js        in-memory { [sourceId]: { data, updatedAt, error, isSyncing } }
   scheduler.js     runs every connector once at boot, then on its own intervalMs forever
   connectors/      one module per scheduled/bulk source (see table below); index.js registers them all
   lookups/         on-demand-only single-indicator lookups (VirusTotal, GreyNoise, Shodan,
                   Hybrid Analysis, LeakIX, crt.sh, RIPEstat, Team Cymru, Hudson Rock, SANS ISC,
-                  CIRCL) -- never scheduled/cached in bulk, called live by IOC Search (CIRCL is
-                  called from the single-CVE route instead, as an NVD fallback)
+                  RDAP, urlscan.io, CIRCL) -- never scheduled/cached in bulk, called live by the
+                  Intelligence Investigation Console (CIRCL is called from the single-CVE route
+                  instead, as an NVD fallback)
+  investigation/   Intelligence Investigation Console orchestrator -- detect.js (16-type
+                  auto-detection), crossReference.js + verdict.js (shared cross-reference pass and
+                  verdict computation, reused by every module below), one module per indicator-type
+                  family (ip/domain/url/hash/cve/entity/artifact), index.js ties them together
+  investigationAi.js   on-demand "Generate AI Report" narrative generator for the Investigation
+                  Console, same hybrid-grounding pattern as aiThreatSummary.js below
   data/
     malware-attack-map.json   curated malware-family -> ATT&CK technique-id seed list (see caveats below)
   correlate.js     CVE+KEV+EPSS join, cross-source IOC dedup, malware->ATT&CK mapping,
@@ -55,7 +63,7 @@ server/
   routes/dashboard.js   GET /api/dashboard/{summary,cves,cve-trend,cve-program-activity,kev,
                         vulncheck-kev,exploits,threat-feed,malware-trending,attack-techniques,
                         ransomware,threat-actors,threat-actor-profiles,github-intel,news,health},
-                        GET /api/ioc-search
+                        GET /api/investigate, POST /api/investigate/ai-report
   index.js         mounts the router, starts the scheduler, serves dist/ in production
 ```
 
@@ -292,10 +300,13 @@ back. `server/githubIntel/store.js` persists to a gitignored JSON file instead.
     error message (React Query's `isLoading`/`isError` were both technically correct, there was just
     never a settled result to show). Fixed by giving `fetchThreatActorProfile` its own longer
     `timeoutMs` (35s) in `src/api/dashboardApi.ts`.
-- **IOC Search correlation**: searching one indicator fans out live to whichever of
-  OTX/AbuseIPDB/Pulsedive/VirusTotal/GreyNoise/Shodan/Hybrid Analysis are configured and support that
-  indicator type, and reduces their individual verdicts to one `correlatedVerdict` (malicious if ≥2
-  sources agree, suspicious if 1 flags it, else clean/unknown) -- a simple, documented heuristic, not a
+- **Intelligence Investigation Console correlation** (`server/investigation/`, formerly "IOC Search" /
+  Triage Console): pasting one indicator auto-detects which of 16 types it is (IP/domain/URL/SHA256/
+  SHA1/MD5/CVE/email/file name/process name/registry key/user agent/malware family/threat actor/
+  campaign name), fans out live to whichever of OTX/AbuseIPDB/Pulsedive/VirusTotal/GreyNoise/Shodan/
+  Hybrid Analysis/RDAP/urlscan.io are configured and support that type, and reduces their individual
+  verdicts to one shared verdict (malicious if ≥2 sources agree, suspicious if 1 flags it, else
+  clean/unknown -- see `server/investigation/verdict.js`) -- a simple, documented heuristic, not a
   proprietary scoring model. Each lookup is wrapped in `server/lib/lookupLimiter.js`, which enforces a
   minimum spacing between live calls per source (matching that source's free-tier rate limit) and
   caches each indicator's result for 10 minutes, so repeat searches are free and rapid-fire searches

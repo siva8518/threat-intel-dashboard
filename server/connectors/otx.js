@@ -124,3 +124,26 @@ export async function checkIndicator(type, value) {
     verdict: (data.pulse_info?.count ?? 0) > 0 ? "malicious" : "unknown",
   };
 }
+
+/**
+ * Passive DNS for an IP or domain -- OTX's free `/passive_dns` endpoint,
+ * same API key as every other OTX call here. Used by the Intelligence
+ * Investigation Console's IP/Domain modules; not part of the IOC Search
+ * fan-out above since it's a distinct sub-panel, not a verdict source.
+ */
+export async function getPassiveDns(type, value) {
+  const headers = authHeaders();
+  if (!headers) throw new OtxNotConfiguredError();
+
+  const section = { ip: "IPv4", domain: "domain" }[type];
+  if (!section) throw new ApiError(`OTX passive DNS does not support indicator type "${type}"`, "OTX");
+
+  const data = await fetchJson(`${OTX_BASE}/indicators/${section}/${value}/passive_dns`, { source: "OTX", headers });
+  return (data.passive_dns ?? []).slice(0, 25).map((r) => ({
+    hostname: r.hostname,
+    address: r.address,
+    recordType: r.record_type,
+    firstSeen: r.first,
+    lastSeen: r.last,
+  }));
+}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Bot, BrainCircuit, Bug, Crosshair, Eye, Flame, Ghost, Github, LayoutDashboard, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { TriageConsole } from "@/components/dashboard/TriageConsole";
+import { IntelligenceInvestigationConsole } from "@/components/dashboard/IntelligenceInvestigationConsole";
 import { CveHub } from "@/components/dashboard/CveHub";
 import { HuntingDetectionHub } from "@/components/dashboard/HuntingDetectionHub";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
@@ -38,7 +38,7 @@ import { SelectionProvider } from "@/context/SelectionContext";
 import type { Severity } from "@/types/threat-intel";
 
 const TABS = [
-  { id: "triage", label: "Triage Console", icon: Siren },
+  { id: "triage", label: "Intelligence Investigation Console", icon: Siren },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "cves", label: "Latest CVEs", icon: ShieldAlert },
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },
@@ -137,7 +137,7 @@ export function DashboardPage() {
   return (
     <SelectionProvider>
     <DashboardLayout tabs={TABS} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as TabId)} onSelectActor={goToActorSearch}>
-      {activeTab === "triage" && <TriageConsole onOpenActor={goToActorSearch} onOpenCampaign={() => setActiveTab("campaign-intelligence")} />}
+      {activeTab === "triage" && <IntelligenceInvestigationConsole onOpenActor={goToActorSearch} onOpenCampaign={() => setActiveTab("campaign-intelligence")} />}
       {activeTab === "overview" && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

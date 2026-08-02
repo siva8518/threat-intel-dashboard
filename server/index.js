@@ -2,7 +2,7 @@
 // version, this process owns scheduling, caching, retries and correlation
 // for every threat-intel source -- see server/scheduler.js and
 // server/connectors/. The frontend only ever talks to /api/dashboard/* and
-// /api/ioc-search, both mounted below, which serve already-normalized,
+// /api/investigate, both mounted below, which serve already-normalized,
 // already-correlated JSON.
 //
 // "dotenv/config" must load before anything else in this file, since every
@@ -33,8 +33,8 @@ const distDir = path.join(__dirname, "..", "dist");
 const PORT = process.env.PORT || 8080;
 
 // Mounted at /api: dashboard.js defines routes as "/dashboard/summary",
-// "/dashboard/cves", ..., and "/ioc-search", which land at
-// /api/dashboard/summary, /api/dashboard/cves, ..., /api/ioc-search.
+// "/dashboard/cves", ..., and "/investigate", which land at
+// /api/dashboard/summary, /api/dashboard/cves, ..., /api/investigate.
 app.use("/api", dashboardRouter);
 app.use("/api", chatRouter);
 

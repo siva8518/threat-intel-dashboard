@@ -26,8 +26,8 @@ import type {
   IndustryBriefing,
   IndustryName,
   IocRecord,
-  IocSearchIndicatorType,
-  IocSearchResult,
+  InvestigationResult,
+  AiInvestigationReport,
   KevEntry,
   MalwareIntelligenceEntity,
   MalwareProfile,
@@ -289,9 +289,20 @@ export async function fetchSourcesHealth(): Promise<{ sources: SourceHealth[]; o
   return fetchJson("/api/dashboard/health", { source: "Dashboard API" });
 }
 
-export async function searchIoc(type: IocSearchIndicatorType, value: string): Promise<IocSearchResult> {
-  const search = new URLSearchParams({ type, value });
-  return fetchJson(`/api/ioc-search?${search.toString()}`, { source: "IOC Search" });
+/** Auto-detects the indicator type server-side and returns the full Universal Overview + type-specific module data -- see server/investigation/index.js. */
+export async function investigate(query: string): Promise<InvestigationResult> {
+  return fetchJson(`/api/investigate?query=${encodeURIComponent(query)}`, { source: "Intelligence Investigation Console" });
+}
+
+/** On-demand only -- fired by the "Generate AI Report" button, never automatically on search. Longer timeout since this is a real LLM call, same reasoning as draftDetectionBacklogArtifacts above. */
+export async function generateInvestigationAiReport(query: string): Promise<AiInvestigationReport> {
+  return fetchJson("/api/investigate/ai-report", {
+    source: "Intelligence Investigation Console",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+    timeoutMs: 90_000,
+  });
 }
 
 // The full-profile (fetchThreatActorProfile) and list (fetchThreatActorList)

@@ -6,23 +6,11 @@ import { fetchLatestCves, queryCves } from "../connectors/nvd.js";
 import { correlateCves, computeTrendingMalware, computeAttackTechniquesObserved, computeAttackTacticHeatmap, mergeThreatActors, computeActorIndustryHeatmap, computeGeoTargeting, industryForSector } from "../correlate.js";
 import { threatFeedIocs } from "../threatFeed.js";
 import { ransomwareCampaigns as getRansomwareCampaigns } from "../ransomwareCampaigns.js";
-import { checkIndicator as checkOtx } from "../connectors/otx.js";
-import { checkIndicator as checkAbuseIpdb } from "../connectors/abuseipdb.js";
-import { checkIndicator as checkPulsedive } from "../connectors/pulsedive.js";
-import { checkIndicator as checkVirusTotal } from "../lookups/virustotal.js";
-import { checkIndicator as checkGreyNoise } from "../lookups/greynoise.js";
-import { checkIndicator as checkShodan } from "../lookups/shodan.js";
-import { checkIndicator as checkHybridAnalysis } from "../lookups/hybridAnalysis.js";
-import { checkIndicator as checkLeakix } from "../lookups/leakix.js";
-import { checkIndicator as checkCrtsh } from "../lookups/crtsh.js";
-import { checkIndicator as checkRipestat } from "../lookups/ripestat.js";
-import { checkIndicator as checkTeamCymru } from "../lookups/teamCymru.js";
-import { checkIndicator as checkHudsonRock } from "../lookups/hudsonRock.js";
-import { checkIndicator as checkIsc } from "../lookups/isc.js";
 import { lookupCve as lookupCveCircl } from "../lookups/circl.js";
 import { fetchFallbackCves } from "../lookups/cveFallback.js";
-import { matchWarninglists } from "../connectors/mispWarninglists.js";
-import { throttleAndCache } from "../lib/lookupLimiter.js";
+import { investigate } from "../investigation/index.js";
+import { generateInvestigationAiReport } from "../investigationAi.js";
+import { AllProvidersFailedError } from "../ai/aiRouter.js";
 import { listThreatActors, searchThreatActors, buildThreatActorProfile } from "../actorProfile.js";
 import { getAllGithubRepos, computeTopCves } from "../githubIntel/index.js";
 import { buildCveProfile } from "../cveProfile.js";
@@ -916,106 +904,34 @@ router.get("/dashboard/health", (_req, res) => {
   res.json({ sources: withReliability, onlineCount: health.filter((h) => h.online).length, totalCount: health.length });
 });
 
-// MISP Warning Lists: a synced-in-memory lookup (server/connectors/mispWarninglists.js),
-// not a network call, so it needs no throttling. Flags known-benign
-// infrastructure (CDNs, cloud IP ranges, top-N domains, dynamic-DNS, etc)
-// that other sources sometimes over-flag due to shared hosting -- "clean"
-// when matched, "unknown" (not "malicious"/"clean") when it isn't, since
-// absence from these specific lists says nothing either way.
-async function checkMispWarninglists(type, value) {
-  const data = cache.getEntry("misp-warninglists").data;
-  const matches = matchWarninglists(type, value, data);
-  return { source: "MISP Warning Lists", verdict: matches.size > 0 ? "clean" : "unknown", matchedLists: Array.from(matches) };
-}
+// --- Intelligence Investigation Console -- see server/investigation/index.js ---
+// Replaces the old /ioc-search fan-out (ip/domain/url/hash only) with one
+// orchestrator that auto-detects all 16 indicator types, fans out to the
+// matching per-type module, and returns a Universal Overview every type
+// shares plus type-specific module data. The AI Investigation Report is a
+// second, separate on-demand call -- never fired automatically here.
+router.get("/investigate", async (req, res) => {
+  const { query } = req.query;
+  if (!query || !query.trim()) return res.status(400).json({ error: "query param is required" });
 
-// --- IOC Search: live fan-out across OTX/AbuseIPDB/Pulsedive/VirusTotal/GreyNoise/Shodan/Hybrid Analysis/LeakIX ---
-// Every free-tier lookup is wrapped in throttleAndCache: a short (10 min)
-// per-indicator cache plus a minimum spacing between live calls to that
-// source, so repeat/rapid searches can't blow through e.g. VirusTotal's
-// 4-req/min free-tier quota.
-const IOC_LOOKUPS = {
-  ip: [
-    checkOtx,
-    checkAbuseIpdb,
-    throttleAndCache("Pulsedive", 3_000, checkPulsedive),
-    throttleAndCache("VirusTotal", 15_000, checkVirusTotal),
-    throttleAndCache("GreyNoise", 2_000, checkGreyNoise),
-    throttleAndCache("Shodan", 1_000, checkShodan),
-    throttleAndCache("LeakIX", 5_000, checkLeakix),
-    throttleAndCache("RIPEstat", 1_000, checkRipestat),
-    throttleAndCache("Team Cymru", 1_000, checkTeamCymru),
-    throttleAndCache("SANS ISC", 2_000, checkIsc),
-    checkMispWarninglists,
-  ],
-  domain: [
-    checkOtx,
-    throttleAndCache("Pulsedive", 3_000, checkPulsedive),
-    throttleAndCache("VirusTotal", 15_000, checkVirusTotal),
-    throttleAndCache("LeakIX", 5_000, checkLeakix),
-    throttleAndCache("crt.sh", 3_000, checkCrtsh),
-    throttleAndCache("Hudson Rock", 3_000, checkHudsonRock),
-    checkMispWarninglists,
-  ],
-  url: [checkOtx, throttleAndCache("Pulsedive", 3_000, checkPulsedive), throttleAndCache("VirusTotal", 15_000, checkVirusTotal), checkMispWarninglists],
-  hash: [
-    checkOtx,
-    throttleAndCache("VirusTotal", 15_000, checkVirusTotal),
-    throttleAndCache("Hybrid Analysis", 5_000, checkHybridAnalysis),
-    throttleAndCache("Team Cymru", 1_000, checkTeamCymru),
-    checkMispWarninglists,
-  ],
-};
-
-router.get("/ioc-search", async (req, res) => {
-  const { type, value } = req.query;
-  if (!type || !value) return res.status(400).json({ error: "type and value query params are required" });
-
-  const lookups = IOC_LOOKUPS[type];
-  if (!lookups) return res.status(400).json({ error: `Unsupported indicator type "${type}"` });
-
-  const settled = await Promise.allSettled(lookups.map((fn) => fn(type, value)));
-  const results = [];
-  const notConfigured = [];
-  const rateLimited = [];
-  const skipped = [];
-  for (const outcome of settled) {
-    if (outcome.status === "fulfilled") {
-      results.push(outcome.value);
-    } else if (outcome.reason?.status === 401) {
-      notConfigured.push(outcome.reason.source);
-    } else if (outcome.reason?.status === 429) {
-      rateLimited.push(outcome.reason.source);
-    } else if (outcome.reason?.source) {
-      // Confirmed live this bucket was previously missing entirely: e.g.
-      // Hybrid Analysis's own 400 ("only supports SHA256, not MD5/SHA1") or
-      // a Team Cymru DNS failure just vanished with no signal at all -- an
-      // analyst had no way to tell "this source has nothing to say" apart
-      // from "this source was never even asked". Anything that isn't a
-      // missing-key or rate-limit case still gets surfaced, with the
-      // specific reason, instead of silently disappearing.
-      skipped.push({ source: outcome.reason.source, reason: outcome.reason.message ?? "Lookup failed" });
-    }
+  try {
+    const result = await investigate(query);
+    res.json(result);
+  } catch (error) {
+    res.status(502).json({ error: error.message });
   }
+});
 
-  const maliciousVotes = results.filter((r) => r.verdict === "malicious").length;
-  const suspiciousVotes = results.filter((r) => r.verdict === "suspicious").length;
-  // A single source's own internal consensus can already be decisive --
-  // VirusTotal reporting 7/7 AV engines malicious, Hybrid Analysis scoring
-  // a sample 70+/100, or Team Cymru's Malware Hash Registry showing >=50%
-  // historical detection -- confirmed live the old "needs >=2 corroborating
-  // sources" rule was downgrading exactly this case to "Suspicious" even
-  // when one source's own evidence was already overwhelming. Thresholds
-  // below are commonly-used industry rules of thumb for "high-confidence",
-  // not arbitrary: they only fire on evidence a source already returned,
-  // never invent anything.
-  const highConfidenceHit = results.some((r) => {
-    if (r.source === "VirusTotal") return (r.malicious ?? 0) >= 5;
-    if (r.source === "Hybrid Analysis") return (r.threatScore ?? 0) >= 70;
-    if (r.source === "Team Cymru MHR") return (r.detectionPercent ?? 0) >= 50;
-    return false;
-  });
-  const correlatedVerdict =
-    highConfidenceHit || maliciousVotes >= 2 ? "malicious" : maliciousVotes >= 1 || suspiciousVotes >= 1 ? "suspicious" : results.length > 0 ? "clean" : "unknown";
+router.post("/investigate/ai-report", async (req, res) => {
+  const { query } = req.body ?? {};
+  if (!query || !query.trim()) return res.status(400).json({ error: "query is required" });
 
-  res.json({ indicator: value, type, correlatedVerdict, results, notConfigured, rateLimited, skipped });
+  try {
+    const investigation = await investigate(query);
+    const report = await generateInvestigationAiReport(investigation);
+    res.json(report);
+  } catch (error) {
+    if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
+    res.status(502).json({ error: error.message });
+  }
 });

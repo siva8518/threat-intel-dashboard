@@ -350,23 +350,115 @@ export interface ThreatActorProfile {
   timeline: TimelineEvent[];
 }
 
-export type IocSearchIndicatorType = "ip" | "domain" | "url" | "hash";
-
 export interface IocLookupResult {
   source: string;
   verdict: "malicious" | "suspicious" | "clean" | "unknown";
   [key: string]: unknown;
 }
 
-export interface IocSearchResult {
+// --- Intelligence Investigation Console -- see server/investigation/index.js ---
+// The full 16-type detection surface (replaces the old 4-type ip/domain/
+// url/hash-only IOC Search), auto-classified server-side, never picked by
+// the user.
+export type IndicatorType =
+  | "cve"
+  | "ip"
+  | "domain"
+  | "url"
+  | "sha256"
+  | "sha1"
+  | "md5"
+  | "email"
+  | "fileName"
+  | "processName"
+  | "registryKey"
+  | "userAgent"
+  | "name" // malware family / threat actor / campaign -- resolved against this app's own entity stores
+  | "unknown";
+
+export type InvestigationVerdict = "critical" | "high" | "medium" | "low" | "unknown";
+
+/** The one shared set of fields every indicator type renders, regardless of what kind it is -- see server/investigation/verdict.js for why severity/riskLevel/recommendedPriority are always derived from the single `overallVerdict`, never invented independently. */
+export interface UniversalOverview {
   indicator: string;
-  type: IocSearchIndicatorType;
-  correlatedVerdict: "malicious" | "suspicious" | "clean" | "unknown";
-  results: IocLookupResult[];
+  indicatorType: IndicatorType;
+  overallVerdict: InvestigationVerdict;
+  verdictLabel: string;
+  confidence: "High" | "Medium" | "Low";
+  severity: Severity;
+  riskLevel: "Critical" | "High" | "Medium" | "Low";
+  recommendedPriority: "Immediate" | "High" | "Normal" | "Low";
+  firstSeen: string | null;
+  lastSeen: string | null;
+  activeCampaigns: string[];
+  associatedThreatActors: string[];
+  mitreAttackMapping: Array<{ id: string; name: string; tactic: string | null }>;
+  /** Populated only after "Generate AI Report" runs -- null until then, see AiInvestigationReport.businessImpact. */
+  businessImpact: string | null;
+  aiInvestigationSummary: string | null;
+}
+
+/** Cross-reference hits against this app's own already-ingested intelligence -- see server/investigation/crossReference.js. Powers the Related Intelligence section for every indicator type. */
+export interface InvestigationRelatedIntelligence {
+  matchedMalwareFamilies: string[];
+  associatedThreatActors: string[];
+  activeCampaigns: string[];
+  matchingAiReports: Array<{ id: string; articleTitle: string; articleLink: string; articleSource: string; publishedDate: string }>;
+  relatedIocs: Array<{ indicator: string; indicatorType: string; malwareFamily: string; firstSeen: string | null }>;
+}
+
+/**
+ * The full per-indicator investigation result -- moduleData's shape depends
+ * on `type` (see server/investigation/{ip,domain,url,hash,cve,entity,artifact}Module.js
+ * for exactly what each returns); left loosely typed here rather than as a
+ * 16-way discriminated union since every consumer already narrows on `type`
+ * before reading type-specific fields, same pattern this app already uses
+ * for IocLookupResult's `[key: string]: unknown` source-specific payloads.
+ */
+export interface InvestigationResult {
+  indicator: string;
+  type: IndicatorType;
+  overview: UniversalOverview;
+  moduleData: Record<string, unknown>;
+  relatedIntelligence: InvestigationRelatedIntelligence | null;
   notConfigured: string[];
   rateLimited: string[];
-  /** Sources that were attempted but returned neither data nor a missing-key/rate-limit error (e.g. Hybrid Analysis rejecting a non-SHA256 hash, a Team Cymru DNS failure) -- surfaced with the real reason instead of silently vanishing from Source Breakdown. */
   skipped: { source: string; reason: string }[];
+}
+
+/** On-demand only -- see AiInvestigationOperationalGuidance/AiInvestigationDetectionOpportunities below, and server/investigationAi.js. Never generated automatically on search. */
+export interface AiInvestigationOperationalGuidance {
+  socAnalyst: string;
+  threatHunter: string;
+  threatIntel: string;
+  detectionEngineer: string;
+  incidentResponse: string;
+  vulnerabilityManagement: string;
+}
+
+export interface AiInvestigationDetectionOpportunities {
+  sentinelKql: string[];
+  sigma: string[];
+  splunkSpl: string[];
+  elastic: string[];
+  yara: string[];
+  detectionGaps: string[];
+  huntingHypotheses: string[];
+}
+
+export interface AiInvestigationReport {
+  whatThisIs: string;
+  whyItMatters: string;
+  likelyAttackerObjective: string;
+  businessImpact: string;
+  confidenceReasoning: string;
+  recommendedInvestigationPath: string[];
+  immediateContainmentRecommendations: string[];
+  operationalGuidance: AiInvestigationOperationalGuidance;
+  detectionOpportunities: AiInvestigationDetectionOpportunities;
+  model: string;
+  provider: string;
+  generatedAt: string;
 }
 
 export interface CveProgramEntry {
