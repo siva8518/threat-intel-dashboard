@@ -1123,7 +1123,7 @@ export async function generateThreatSummary(article, grounded) {
     `${buildTechniqueCandidatesBlock(candidateTechniques)}\n` +
     campaignContext.block;
 
-  // Routed through server/ai/aiRouter.js (Gemini -> Qwen -> Groq -> Cohere,
+  // Routed through server/ai/aiRouter.js (Gemini -> Mistral -> Groq -> Cohere,
   // automatic failover on rate limits/quota/timeouts/5xx) rather than
   // calling Groq directly -- this report generation is the single heaviest,
   // most latency-sensitive LLM call in the app, so it benefits the most

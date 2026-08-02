@@ -1,26 +1,24 @@
-// Qwen 3 32B, served through OpenRouter's unified OpenAI-compatible API --
-// one API surface/key covers every model OpenRouter hosts, so this is the
-// only place "which OpenRouter model" is decided (server/ai/config.js).
+// Mistral Small, served through Mistral's own OpenAI-compatible chat
+// completions endpoint -- same request/response shape as groqProvider.js,
+// just a different base URL/key.
 import { fetchJson } from "../../lib/http.js";
 import { classifyProviderError } from "../aiProviderError.js";
 import { AI_ROUTER_CONFIG } from "../config.js";
 
-const BASE_URL = "https://openrouter.ai/api/v1/chat/completions";
-// 60s -- see geminiProvider.js's comment on the same constant; this app's
+const BASE_URL = "https://api.mistral.ai/v1/chat/completions";
+// 60s -- see groqProvider.js's comment on the same constant; this app's
 // heaviest LLM call (server/aiThreatSummary.js's structured report) needs
 // the headroom.
 const REQUEST_TIMEOUT_MS = 60_000;
-const LABEL = "OpenRouter - Qwen";
+const LABEL = "Mistral";
 
 /**
- * Shared request path for both summarize() and summarizeJson() -- they only
- * differ in an optional system message and response_format, so the actual
- * fetch/error-classify/response-parse logic lives here once.
+ * Shared request path for both summarize() and summarizeJson().
  * @param {string} prompt
  * @param {{systemPrompt?: string, temperature?: number, jsonMode?: boolean}} options
  */
-async function callQwen(prompt, { systemPrompt, temperature, jsonMode = false } = {}) {
-  const { apiKey, model } = AI_ROUTER_CONFIG.qwen;
+async function callMistral(prompt, { systemPrompt, temperature, jsonMode = false } = {}) {
+  const { apiKey, model } = AI_ROUTER_CONFIG.mistral;
   const messages = systemPrompt ? [{ role: "system", content: systemPrompt }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }];
 
   let data;
@@ -42,33 +40,30 @@ async function callQwen(prompt, { systemPrompt, temperature, jsonMode = false } 
   }
 
   const summary = data.choices?.[0]?.message?.content;
-  if (!summary) throw classifyProviderError(LABEL, new Error("OpenRouter/Qwen returned no usable content"));
+  if (!summary) throw classifyProviderError(LABEL, new Error("Mistral returned no usable content"));
 
   return { summary, tokensUsed: data.usage?.total_tokens };
 }
 
-export const qwenProvider = {
+export const mistralProvider = {
   label: LABEL,
-  model: AI_ROUTER_CONFIG.qwen.model,
+  model: AI_ROUTER_CONFIG.mistral.model,
 
   isConfigured() {
-    return Boolean(AI_ROUTER_CONFIG.qwen.apiKey);
+    return Boolean(AI_ROUTER_CONFIG.mistral.apiKey);
   },
 
   /** @param {string} prompt @returns {Promise<{summary: string, tokensUsed?: number}>} */
   async summarize(prompt) {
-    return callQwen(prompt);
+    return callMistral(prompt);
   },
 
   /**
-   * Same call, but requests OpenAI-compatible JSON-object mode and allows a
-   * separate system prompt -- for structured-report callers like
-   * server/aiThreatSummary.js.
    * @param {string} userPrompt
    * @param {{systemPrompt?: string, temperature?: number}} [options]
    * @returns {Promise<{summary: string, tokensUsed?: number}>}
    */
   async summarizeJson(userPrompt, options = {}) {
-    return callQwen(userPrompt, { ...options, jsonMode: true });
+    return callMistral(userPrompt, { ...options, jsonMode: true });
   },
 };

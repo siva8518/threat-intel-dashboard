@@ -16,13 +16,9 @@ export const AI_ROUTER_CONFIG = {
     // avoids this exact breakage recurring every time a model gets retired.
     model: process.env.GEMINI_MODEL || "gemini-flash-latest",
   },
-  qwen: {
-    // Qwen is served through OpenRouter's single unified API, not its own
-    // vendor endpoint -- one OpenRouter key covers every model on their
-    // platform, so this deliberately reuses OPENROUTER_API_KEY rather than
-    // introducing a Qwen-specific key that doesn't exist.
-    apiKey: process.env.OPENROUTER_API_KEY,
-    model: process.env.OPENROUTER_QWEN_MODEL || "qwen/qwen3-32b",
+  mistral: {
+    apiKey: process.env.MISTRAL_API_KEY,
+    model: process.env.MISTRAL_MODEL || "mistral-small-latest",
   },
   groq: {
     // Same key this app already uses for server/groqClient.js's structured

@@ -15,13 +15,13 @@ import { log } from "../lib/log.js";
 import { withRetry } from "../lib/retry.js";
 import { classifyProviderError } from "./aiProviderError.js";
 import { geminiProvider } from "./providers/geminiProvider.js";
-import { qwenProvider } from "./providers/qwenProvider.js";
+import { mistralProvider } from "./providers/mistralProvider.js";
 import { groqProvider } from "./providers/groqProvider.js";
 import { cohereProvider } from "./providers/cohereProvider.js";
 
-// Priority order: Gemini 2.5 Flash -> Qwen 3 32B (OpenRouter) -> Groq Llama
-// 3.3 70B -> Cohere Command R.
-const PROVIDERS = [geminiProvider, qwenProvider, groqProvider, cohereProvider];
+// Priority order: Gemini 2.5 Flash -> Mistral Small -> Groq Llama 3.3 70B ->
+// Cohere Command R.
+const PROVIDERS = [geminiProvider, mistralProvider, groqProvider, cohereProvider];
 
 const RETRIES_PER_PROVIDER = 1; // "retry each provider once" -- 2 total attempts per provider before failing over
 const RETRY_BASE_DELAY_MS = 1000;

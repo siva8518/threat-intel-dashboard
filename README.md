@@ -436,9 +436,9 @@ intel, executive leadership).
 - `server/aiThreatSummary.js` builds the prompt and calls `aiRouter.summarizeJson()` (see **AI Router**
   below) — unlike the RAG Assistant above, this does **not** run on local Ollama. It's this app's single
   heaviest LLM call (a 25+ section structured report per article, seen live running past 16,000 tokens),
-  and routing it through Gemini → Qwen → Groq → Cohere (rather than a single hosted provider) means it
+  and routing it through Gemini → Mistral → Groq → Cohere (rather than a single hosted provider) means it
   keeps working even when one provider's free tier is exhausted. At least one of `GEMINI_API_KEY`,
-  `OPENROUTER_API_KEY`, `GROQ_API_KEY`, or `COHERE_API_KEY` needs to be set in `.env` — with none set, AI
+  `MISTRAL_API_KEY`, `GROQ_API_KEY`, or `COHERE_API_KEY` needs to be set in `.env` — with none set, AI
   Summarization reports itself unavailable, same "quiet not-configured" pattern as every other optional
   keyed source in this app.
 - The AI Technical Summary is explicitly a technical-extraction task, not an executive summary --
@@ -475,7 +475,7 @@ intel, executive leadership).
 text) and `summarizeJson(prompt, { systemPrompt, temperature })` (each provider's native JSON-object
 response mode, plus an optional separate system message). AI Summarization above (`server/aiThreatSummary.js`)
 is wired through the latter — it used to call `server/groqClient.js` directly (Groq only); now it calls
-`aiRouter.summarizeJson()`, so its 25+ section structured report generation gets the same Gemini → Qwen →
+`aiRouter.summarizeJson()`, so its 25+ section structured report generation gets the same Gemini → Mistral →
 Groq → Cohere failover as everything else here, instead of going fully dark whenever Groq's free tier is
 exhausted. `server/groqClient.js` itself is untouched and still serves its other two callers
 (`server/combinedExtraction.js`'s entity extraction, `server/detectionRuleDraft.js`) directly.
@@ -487,7 +487,7 @@ const result = await aiRouter.summarize(prompt);
 // { provider: "Groq", model: "llama-3.3-70b-versatile", summary: "...", latency: 612, success: true }
 ```
 
-- Tries **Gemini 2.5 Flash → Qwen 3 32B (OpenRouter) → Groq Llama 3.3 70B → Cohere Command R**, in that
+- Tries **Gemini 2.5 Flash → Mistral Small → Groq Llama 3.3 70B → Cohere Command R**, in that
   order. Every provider is optional — one with no API key set is skipped (not treated as a failure).
 - A provider that errors (rate limit, quota, timeout, 5xx, network error, or anything else) is retried
   once with exponential backoff (`server/lib/retry.js`), then the router fails over to the next provider.
