@@ -1171,6 +1171,8 @@ export interface AiThreatSummaryPlatformRecommendations {
   emailSecurityRecommendations: string[];
   identityMonitoringRecommendations: string[];
   edrRecommendations: string[];
+  /** Guidance for end users/employees, not security staff -- only populated when the attack vector genuinely involves user action (phishing, credential entry, social engineering). */
+  userRecommendations: string[];
 }
 
 /** `applicable` is false (all other fields "Not Applicable"/[]) when the article involves no specific CVE. */

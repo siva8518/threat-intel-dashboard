@@ -36,6 +36,7 @@ export const EMPTY_PLATFORM_RECOMMENDATIONS = {
   emailSecurityRecommendations: [] as string[],
   identityMonitoringRecommendations: [] as string[],
   edrRecommendations: [] as string[],
+  userRecommendations: [] as string[],
 };
 
 export const EMPTY_OPERATIONAL_ACTIONS = {

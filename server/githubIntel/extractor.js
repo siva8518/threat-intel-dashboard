@@ -150,6 +150,21 @@ function refang(text) {
     .replace(/\[at\]|\(at\)/gi, "@");
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Plain `.includes()` on a short family/actor name is a real false-positive
+// source -- confirmed live "conti" (the ransomware family) matched inside
+// the unrelated word "continued", and would just as easily match inside
+// "container", "contingency", etc. Word-boundary anchoring keeps the same
+// case-insensitive substring check but requires it to actually be its own
+// token, not a fragment of a longer unrelated word.
+function containsWord(haystackLower, needleLower) {
+  if (!needleLower) return false;
+  return new RegExp(`\\b${escapeRegExp(needleLower)}\\b`, "i").test(haystackLower);
+}
+
 function uniqueMatches(text, pattern) {
   return Array.from(new Set(text.match(pattern) ?? []));
 }
@@ -182,10 +197,10 @@ export function extractEntities(rawText, { techniques = [], groups = [], malware
   const attackTactics = ATTACK_TACTICS.filter((tactic) => lower.includes(tactic.toLowerCase()));
 
   const threatActorNames = groups
-    .filter((g) => lower.includes(g.name.toLowerCase()) || g.aliases.some((a) => lower.includes(a.toLowerCase())))
+    .filter((g) => containsWord(lower, g.name.toLowerCase()) || g.aliases.some((a) => containsWord(lower, a.toLowerCase())))
     .map((g) => g.name);
 
-  const malwareFamilyMatches = malwareFamilies.filter((family) => lower.includes(family.toLowerCase()));
+  const malwareFamilyMatches = malwareFamilies.filter((family) => containsWord(lower, family.toLowerCase()));
 
   const cliCommands = Array.from(
     new Set([...uniqueCapturedGroups(text, CODE_SPAN_PATTERN), ...uniqueCapturedGroups(text, QUOTED_COMMAND_PATTERN)].map((c) => c.trim())),

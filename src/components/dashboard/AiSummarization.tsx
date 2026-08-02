@@ -483,12 +483,16 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                     ["Impact if unpatched", risk.impactIfUnpatched],
                   ]}
                 />
+                {/* threatRelevance.industriesAtRisk deliberately not shown
+                    here -- confirmed live it's almost always the same list
+                    as businessRisk.industriesCommonlyTargeted right above,
+                    since both answer "which sectors does this threat
+                    target." One list, not two saying the same thing. */}
                 <GroupedLists
                   title=""
                   groups={[
                     ["Industries commonly targeted", risk.industriesCommonlyTargeted ?? []],
                     ["Regions impacted", risk.regionsCommonlyTargeted ?? []],
-                    ["Industries at risk", relevance.industriesAtRisk],
                     ["Technologies targeted", relevance.technologiesTargeted],
                     ["Geographic focus", relevance.geographicFocus],
                     ["MITRE tactics", relevance.mitreTactics],
@@ -642,12 +646,38 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                     ["What happened", tech.whatHappened],
                     ["Why it matters", tech.whyItMatters],
                     ["Who is affected", tech.whoIsAffected],
-                    ["Exploitation status", tech.exploitationStatus],
-                    ["Vendor severity", tech.vendorSeverity],
                     ["Active exploitation", tech.activeExploitation],
-                    ["Overall SOC priority", tech.overallSocPriority],
                   ]}
                 />
+                {tech.exploitationStatus && tech.exploitationStatus !== "Not Reported" && (
+                  <p className="mt-1.5 text-sm">
+                    <span className="font-semibold text-foreground">Exploitation status: </span>
+                    <span className="text-foreground">{tech.exploitationStatus}</span>
+                    {report.references[0] && (
+                      <>
+                        {" "}
+                        <a href={report.references[0].url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                          (see source)
+                        </a>
+                      </>
+                    )}
+                  </p>
+                )}
+                {tech.vendorSeverity && tech.vendorSeverity !== "Not Reported" && (
+                  <p className="mt-1.5 text-sm">
+                    <span className="font-semibold text-foreground">Vendor severity: </span>
+                    <span className="text-foreground">{tech.vendorSeverity}</span>
+                    {/* This is the vendor's own stated rating, quoted directly from
+                        the article -- it can legitimately differ from this report's
+                        overall severity badge at the top, which also weighs KEV
+                        status, CVSS, and confirmed active exploitation, not just the
+                        vendor's own label. Not a contradiction to resolve; a distinct
+                        signal worth showing separately. */}
+                    <span className="ml-1 text-xs text-muted">
+                      (the vendor's own rating -- this report's overall severity above also factors in KEV/CVSS/active exploitation, so it can differ)
+                    </span>
+                  </p>
+                )}
                 <GroupedLists
                   title="Attack Details"
                   groups={[
@@ -872,6 +902,7 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                     ["Email security (Defender for Office 365)", platformRecs.emailSecurityRecommendations],
                     ["Identity monitoring", platformRecs.identityMonitoringRecommendations],
                     ["EDR", platformRecs.edrRecommendations],
+                    ["User recommendations", platformRecs.userRecommendations ?? []],
                   ]}
                 />
               </div>

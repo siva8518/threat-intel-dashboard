@@ -139,7 +139,6 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
       groupedListsSection("", [
         ["Industries commonly targeted", risk.industriesCommonlyTargeted ?? []],
         ["Regions impacted", risk.regionsCommonlyTargeted ?? []],
-        ["Industries at risk", report.threatRelevance?.industriesAtRisk ?? []],
         ["Technologies targeted", report.threatRelevance?.technologiesTargeted ?? []],
         ["Geographic focus", report.threatRelevance?.geographicFocus ?? []],
         ["MITRE tactics", report.threatRelevance?.mitreTactics ?? []],
@@ -227,12 +226,21 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
         ["What happened", tech.whatHappened],
         ["Why it matters", tech.whyItMatters],
         ["Who is affected", tech.whoIsAffected],
-        ["Exploitation status", tech.exploitationStatus],
-        ["Vendor severity", tech.vendorSeverity],
         ["Active exploitation", tech.activeExploitation],
-        ["Overall SOC priority", tech.overallSocPriority],
       ]),
     );
+    if (tech.exploitationStatus && tech.exploitationStatus !== "Not Reported") {
+      const sourceLink = report.references[0] ? ` <a href="${esc(report.references[0].url)}">(see source)</a>` : "";
+      parts.push(`<p><strong>Exploitation status:</strong> ${esc(tech.exploitationStatus)}${sourceLink}</p>`);
+    }
+    if (tech.vendorSeverity && tech.vendorSeverity !== "Not Reported") {
+      // Vendor's own stated rating -- can legitimately differ from this
+      // report's overall severity (KEV/CVSS/active exploitation also
+      // factored in there), mirrors AiSummarization.tsx's clarification.
+      parts.push(
+        `<p><strong>Vendor severity:</strong> ${esc(tech.vendorSeverity)} <em>(the vendor's own rating -- this report's overall severity also factors in KEV/CVSS/active exploitation, so it can differ)</em></p>`,
+      );
+    }
     parts.push(
       groupedListsSection("Attack Details", [
         ["Attack vector", tech.attackVector],
@@ -387,6 +395,7 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
         ["Email security (Defender for Office 365)", plat.emailSecurityRecommendations],
         ["Identity monitoring", plat.identityMonitoringRecommendations],
         ["EDR", plat.edrRecommendations],
+        ["User recommendations", plat.userRecommendations ?? []],
       ]),
     );
   }
