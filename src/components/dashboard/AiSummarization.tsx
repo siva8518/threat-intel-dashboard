@@ -1195,7 +1195,15 @@ export function AiSummarization() {
               <Skeleton key={i} className="h-16 w-full" />
             ))}
           </div>
-        ) : isError ? (
+        ) : isError && reports.length === 0 ? (
+          // Only show the error state when there's truly nothing to show --
+          // a background refetch (this tab polls every few minutes) failing
+          // once (a restart, a transient network blip) must not hide reports
+          // already sitting in cache. Confirmed live this was happening:
+          // isError alone used to gate this branch, so a single failed
+          // refetch replaced a real, populated report list with an error
+          // screen even though `data` from the last successful fetch was
+          // still valid and unchanged.
           <ErrorState message={error?.message ?? "AI Summarization is unavailable right now."} />
         ) : filtered.length === 0 ? (
           <EmptyState
