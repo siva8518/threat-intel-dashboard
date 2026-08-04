@@ -87,7 +87,7 @@ function techniqueIdsFromSoftwareIndex(malwareFamily, softwareIndex) {
 }
 
 /** Case-insensitive substring match against the curated malware->ATT&CK seed map, merged with the real ATT&CK Software catalog above when one is supplied. */
-function techniqueIdsForFamily(malwareFamily, softwareIndex = []) {
+export function techniqueIdsForFamily(malwareFamily, softwareIndex = []) {
   if (!malwareFamily || malwareFamily === "Unknown" || malwareFamily === "N/A") return [];
   const lower = malwareFamily.toLowerCase();
   const ids = techniqueIdsFromSoftwareIndex(malwareFamily, softwareIndex);

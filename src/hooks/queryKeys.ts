@@ -40,5 +40,5 @@ export const queryKeys = {
   remediationQueue: ["remediation-queue"] as const,
   huntingLibrary: ["hunting-library"] as const,
   detectionBacklog: ["detection-backlog"] as const,
-  pivotChain: (type: string, key: string) => ["pivot-chain", type, key] as const,
+  investigationGraphNode: (type: string, key: string) => ["investigation-graph", type, key] as const,
 };

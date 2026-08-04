@@ -26,7 +26,7 @@ import { crossReferenceIndicator } from "./crossReference.js";
 // (see gather()) can call it a second time, for a bounded set of sibling
 // IPs, sharing the exact same 10-min cache/rate-limit state in
 // lib/lookupLimiter.js rather than duplicating it.
-const checkRipestatThrottled = throttleAndCache("RIPEstat", 1_000, checkRipestat);
+export const checkRipestatThrottled = throttleAndCache("RIPEstat", 1_000, checkRipestat);
 
 const LOOKUPS = [
   checkOtx,

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, Copy, Download, ExternalLink, Search, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,18 +25,20 @@ import type {
   CveRecord,
   CveProfile,
   DetectionRuleRef,
-  PivotNodeType,
+  GraphNodeType,
 } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
 interface ConsoleProps {
   onOpenActor: (name: string) => void;
   onOpenCampaign: () => void;
-  onOpenPivotChain: (type: PivotNodeType, key: string) => void;
+  onOpenInvestigationGraph: (type: GraphNodeType, key: string) => void;
+  /** Seeds the search box and auto-runs it once -- used by Pivot Chain's "Investigate in Triage Console" action so a click there lands on a fully-run investigation, not just a prefilled box. */
+  initialQuery?: string | null;
 }
 
 /** Only ip/domain/cve map 1:1 onto a Pivot Chain node type -- name/hash/artifact types are ambiguous or out of the chain's scope, so no Pivot Chain entry point is offered for those. */
-function pivotNodeTypeFor(type: IndicatorType): PivotNodeType | null {
+function pivotNodeTypeFor(type: IndicatorType): GraphNodeType | null {
   if (type === "ip" || type === "domain" || type === "cve") return type;
   return null;
 }
@@ -236,19 +238,19 @@ function RelatedIntelligenceSection({
   result,
   onOpenActor,
   onOpenCampaign,
-  onOpenPivotChain,
+  onOpenInvestigationGraph,
 }: {
   result: InvestigationResult;
   onOpenActor: (name: string) => void;
   onOpenCampaign: () => void;
-  onOpenPivotChain: (type: PivotNodeType, key: string) => void;
+  onOpenInvestigationGraph: (type: GraphNodeType, key: string) => void;
 }) {
   const rel = result.relatedIntelligence;
   const pivotType = pivotNodeTypeFor(result.type);
   const pivotButton = pivotType && (
     <button
       type="button"
-      onClick={() => onOpenPivotChain(pivotType, result.indicator)}
+      onClick={() => onOpenInvestigationGraph(pivotType, result.indicator)}
       className="mb-2 inline-flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:border-primary/50"
     >
       Walk Pivot Chain from here →
@@ -390,13 +392,18 @@ function QuickActions({ result }: { result: InvestigationResult }) {
  * Indicator-Specific Intelligence -> Related Intelligence -> Detection
  * Opportunities -> Operational Guidance -> Raw Sources.
  */
-export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, onOpenPivotChain }: ConsoleProps) {
+export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, onOpenInvestigationGraph, initialQuery }: ConsoleProps) {
   const [input, setInput] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const { selectCve, selectMalware } = useSelection();
 
   const investigateM = useInvestigate();
   const aiReportM = useGenerateInvestigationAiReport();
+
+  useEffect(() => {
+    if (initialQuery) runInvestigation(initialQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuery]);
 
   function runInvestigation(raw: string) {
     const query = raw.trim();
@@ -511,7 +518,7 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, 
               )}
             </Section>
 
-            <RelatedIntelligenceSection result={result} onOpenActor={onOpenActor} onOpenCampaign={onOpenCampaign} onOpenPivotChain={onOpenPivotChain} />
+            <RelatedIntelligenceSection result={result} onOpenActor={onOpenActor} onOpenCampaign={onOpenCampaign} onOpenInvestigationGraph={onOpenInvestigationGraph} />
 
             <DetectionOpportunitiesPanel report={aiReportM.data} />
             <OperationalGuidancePanel report={aiReportM.data} />

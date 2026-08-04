@@ -426,32 +426,49 @@ export interface InvestigationResult {
   skipped: { source: string; reason: string }[];
 }
 
-// --- Pivot Chain -- see server/investigation/pivotChain.js ---
-// Threat Actor -> Campaign -> Malware -> CVE -> Victim -> IP -> Domain ->
-// Report, one hop at a time. Every edge is backed by a real field this app
-// already computes; a hop with no supporting data anywhere in this app is
-// listed in `unavailableHops` with a plain-language reason instead of a
-// silently-empty section.
-export type PivotNodeType = "actor" | "campaign" | "malware" | "cve" | "victim" | "ip" | "domain" | "report";
+// --- Investigation Graph -- see server/investigation/investigationGraph.js ---
+// Analyst-grade node-and-edge graph: start from any entity type, expand any
+// node to discover its real relationships, click any newly-added node to
+// expand further (infinite pivoting). Every edge is backed by a real field
+// this app already computes; a relationship type with no supporting data
+// anywhere in this app is listed in `unavailableRelationships` with a
+// plain-language reason instead of a silently-empty section. `asn` is a
+// leaf-only type (see backend file header) -- expanding one always returns
+// zero edges, it exists only so an ASN can render as a normal node when
+// pivoted to from an IP.
+export type GraphNodeType =
+  | "actor" | "campaign" | "malware" | "cve" | "victim" | "ip" | "domain" | "url" | "hash"
+  | "email" | "fileName" | "processName" | "registryKey" | "userAgent" | "attackTechnique" | "country" | "report" | "asn";
 
-export interface PivotEdge {
-  id: string;
-  label: string;
-  linkBasis: string;
+export type GraphConfidence = "High" | "Medium" | "Low";
+
+export interface GraphEdge {
+  targetType: GraphNodeType;
+  targetKey: string;
+  targetLabel: string;
+  relationship: string;
+  why: string;
+  confidence: GraphConfidence;
+  firstSeen: string | null;
+  lastSeen: string | null;
+  /** Null when not meaningfully computable for this relationship type -- render as "not tracked", never as 0 (which would imply zero evidence). */
+  supportingReportCount: number | null;
+  sources: string[];
 }
 
-export interface PivotNode {
-  type: PivotNodeType;
+export interface GraphNode {
+  type: GraphNodeType;
   id: string;
   label: string;
   summary: string | null;
   found: boolean;
+  metadata: Record<string, unknown> | null;
 }
 
-export interface PivotChainResult {
-  node: PivotNode;
-  neighbors: Record<PivotNodeType, PivotEdge[]>;
-  unavailableHops: Array<{ neighborType: PivotNodeType; reason: string }>;
+export interface GraphNodeResult {
+  node: GraphNode;
+  edges: GraphEdge[];
+  unavailableRelationships: Array<{ relationshipType: string; reason: string }>;
 }
 
 /** On-demand only -- see AiInvestigationOperationalGuidance/AiInvestigationDetectionOpportunities below, and server/investigationAi.js. Never generated automatically on search. */

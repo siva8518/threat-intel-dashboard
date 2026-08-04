@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, BrainCircuit, Bug, Crosshair, Eye, Flame, Ghost, Github, LayoutDashboard, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Waypoints, Wifi } from "lucide-react";
+import { Bot, BrainCircuit, Bug, Crosshair, Eye, Flame, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { IntelligenceInvestigationConsole } from "@/components/dashboard/IntelligenceInvestigationConsole";
 import { CveHub } from "@/components/dashboard/CveHub";
@@ -30,17 +30,17 @@ import { AiSummarization } from "@/components/dashboard/AiSummarization";
 import { EmergingThreats } from "@/components/dashboard/EmergingThreats";
 import { EmergingThreatsFeed } from "@/components/dashboard/EmergingThreatsFeed";
 import { Watchlist } from "@/components/dashboard/Watchlist";
-import { PivotChainExplorer } from "@/components/dashboard/PivotChainExplorer";
+import { InvestigationGraph } from "@/components/dashboard/InvestigationGraph";
 import { CveDetailDrawer } from "@/components/dashboard/CveDetailDrawer";
 import { MalwareDetailDrawer } from "@/components/dashboard/MalwareDetailDrawer";
 import type { TodayEventKey } from "@/components/dashboard/TopSecurityEventsToday";
 import { EMPTY_DATE_RANGE, type DateRange } from "@/components/dashboard/DateRangeFilter";
 import { SelectionProvider } from "@/context/SelectionContext";
-import type { PivotNodeType, Severity } from "@/types/threat-intel";
+import type { GraphNodeType, Severity } from "@/types/threat-intel";
 
 const TABS = [
   { id: "triage", label: "Triage Console", icon: Siren },
-  { id: "pivot-chain", label: "Pivot Chain", icon: Waypoints },
+  { id: "investigation-graph", label: "Investigation Graph", icon: Network },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "cves", label: "Latest CVEs", icon: ShieldAlert },
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },
@@ -76,11 +76,44 @@ export function DashboardPage() {
   const [malwareDateRange, setMalwareDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
   const [ransomwareDateRange, setRansomwareDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
   const [huntingDetectionSection, setHuntingDetectionSection] = useState<"hunting" | "backlog">("hunting");
-  const [pivotChainStart, setPivotChainStart] = useState<{ type: PivotNodeType; key: string } | null>(null);
+  const [investigationGraphStart, setInvestigationGraphStart] = useState<{ type: GraphNodeType; key: string } | null>(null);
+  const [triageInitialQuery, setTriageInitialQuery] = useState<string | null>(null);
+  const [campaignSearchQuery, setCampaignSearchQuery] = useState<string | null>(null);
+  const [malwareSearchQuery, setMalwareSearchQuery] = useState<string | null>(null);
+  const [aiSummarySearchQuery, setAiSummarySearchQuery] = useState<string | null>(null);
 
-  function goToPivotChain(type: PivotNodeType, key: string) {
-    setPivotChainStart({ type, key });
-    setActiveTab("pivot-chain");
+  function goToInvestigationGraph(type: GraphNodeType, key: string) {
+    setInvestigationGraphStart({ type, key });
+    setActiveTab("investigation-graph");
+  }
+
+  /**
+   * Investigation Graph's node-detail-panel jump-off points -- each node
+   * type gets a real next step into a tab that has richer, purpose-built
+   * tooling than the graph's own compact node view (full multi-source
+   * lookup + AI report for ip/domain/cve, the full entity record for
+   * actor/campaign/malware, the full report body for report). No new data
+   * source, just wiring existing search-prefill patterns (see
+   * goToActorSearch above) into the tabs that didn't have one yet.
+   */
+  function goToTriageInvestigate(query: string) {
+    setTriageInitialQuery(query);
+    setActiveTab("triage");
+  }
+
+  function goToCampaignSearch(name: string) {
+    setCampaignSearchQuery(name);
+    setActiveTab("campaign-intelligence");
+  }
+
+  function goToMalwareSearch(name: string) {
+    setMalwareSearchQuery(name);
+    setActiveTab("malware-intelligence");
+  }
+
+  function goToAiSummarySearch(title: string) {
+    setAiSummarySearchQuery(title);
+    setActiveTab("ai-summarization");
   }
 
   function goToDetectionGaps() {
@@ -145,8 +178,25 @@ export function DashboardPage() {
   return (
     <SelectionProvider>
     <DashboardLayout tabs={TABS} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as TabId)} onSelectActor={goToActorSearch}>
-      {activeTab === "triage" && <IntelligenceInvestigationConsole onOpenActor={goToActorSearch} onOpenCampaign={() => setActiveTab("campaign-intelligence")} onOpenPivotChain={goToPivotChain} />}
-      {activeTab === "pivot-chain" && <PivotChainExplorer initialType={pivotChainStart?.type} initialKey={pivotChainStart?.key} />}
+      {activeTab === "triage" && (
+        <IntelligenceInvestigationConsole
+          onOpenActor={goToActorSearch}
+          onOpenCampaign={() => setActiveTab("campaign-intelligence")}
+          onOpenInvestigationGraph={goToInvestigationGraph}
+          initialQuery={triageInitialQuery}
+        />
+      )}
+      {activeTab === "investigation-graph" && (
+        <InvestigationGraph
+          initialType={investigationGraphStart?.type}
+          initialKey={investigationGraphStart?.key}
+          goToTriageInvestigate={goToTriageInvestigate}
+          goToCampaignSearch={goToCampaignSearch}
+          goToMalwareSearch={goToMalwareSearch}
+          goToActorSearch={goToActorSearch}
+          goToAiSummarySearch={goToAiSummarySearch}
+        />
+      )}
       {activeTab === "overview" && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -196,11 +246,13 @@ export function DashboardPage() {
         />
       )}
       {activeTab === "github-intel" && <GithubIntel />}
-      {activeTab === "malware-intelligence" && <MalwareIntelligence initialSection={malwareSection} initialDateRange={malwareDateRange} onOpenPivotChain={goToPivotChain} />}
-      {activeTab === "actor-intelligence" && <ThreatActorIntelligence initialQuery={actorSearchQuery} onOpenPivotChain={goToPivotChain} />}
-      {activeTab === "campaign-intelligence" && <CampaignIntelligence onOpenPivotChain={goToPivotChain} />}
+      {activeTab === "malware-intelligence" && (
+        <MalwareIntelligence initialSection={malwareSection} initialDateRange={malwareDateRange} onOpenInvestigationGraph={goToInvestigationGraph} initialQuery={malwareSearchQuery} />
+      )}
+      {activeTab === "actor-intelligence" && <ThreatActorIntelligence initialQuery={actorSearchQuery} onOpenInvestigationGraph={goToInvestigationGraph} />}
+      {activeTab === "campaign-intelligence" && <CampaignIntelligence onOpenInvestigationGraph={goToInvestigationGraph} initialQuery={campaignSearchQuery} />}
       {activeTab === "darkweb-intelligence" && <DarkWebIntelligence />}
-      {activeTab === "ai-summarization" && <AiSummarization />}
+      {activeTab === "ai-summarization" && <AiSummarization initialQuery={aiSummarySearchQuery} />}
       {activeTab === "emerging-threats" && <EmergingThreats />}
       {activeTab === "hunting-detection" && <HuntingDetectionHub initialSection={huntingDetectionSection} />}
       {activeTab === "news" && <SecurityNews />}

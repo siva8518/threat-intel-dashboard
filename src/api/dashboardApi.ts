@@ -28,8 +28,8 @@ import type {
   IocRecord,
   InvestigationResult,
   AiInvestigationReport,
-  PivotNodeType,
-  PivotChainResult,
+  GraphNodeType,
+  GraphNodeResult,
   KevEntry,
   MalwareIntelligenceEntity,
   MalwareProfile,
@@ -307,9 +307,9 @@ export async function generateInvestigationAiReport(query: string): Promise<AiIn
   });
 }
 
-/** One hop of the Pivot Chain -- see server/investigation/pivotChain.js. Pure correlation, no AI call, cheap to re-run on every step. */
-export async function fetchPivotChain(type: PivotNodeType, key: string): Promise<PivotChainResult> {
-  return fetchJson(`/api/dashboard/pivot-chain?type=${encodeURIComponent(type)}&key=${encodeURIComponent(key)}`, { source: "Pivot Chain" });
+/** One node of the Investigation Graph -- see server/investigation/investigationGraph.js. Pure correlation, no AI call, cheap to re-run on every expand click. */
+export async function fetchInvestigationGraphNode(type: GraphNodeType, key: string): Promise<GraphNodeResult> {
+  return fetchJson(`/api/dashboard/investigation-graph?type=${encodeURIComponent(type)}&key=${encodeURIComponent(key)}`, { source: "Investigation Graph" });
 }
 
 // The full-profile (fetchThreatActorProfile) and list (fetchThreatActorList)

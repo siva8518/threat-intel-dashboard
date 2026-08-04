@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BrainCircuit, ChevronDown, ChevronRight, ExternalLink, ShieldAlert, Gauge, FileDown, FileType } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -1121,9 +1121,19 @@ const SEVERITY_FILTER_LABEL: Record<Severity | "all", string> = {
   UNKNOWN: "Unknown",
 };
 
-export function AiSummarization() {
+interface AiSummarizationProps {
+  /** Pre-fills the search box -- set from Pivot Chain's "Open Report" action when a report node is pivoted to. */
+  initialQuery?: string | null;
+}
+
+export function AiSummarization({ initialQuery }: AiSummarizationProps = {}) {
   const { data, isLoading, isError, error } = useAiThreatSummaries();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialQuery ?? "");
+
+  useEffect(() => {
+    if (initialQuery) setSearch(initialQuery);
+  }, [initialQuery]);
+
   const [severityFilter, setSeverityFilter] = useState<Severity | "all">("all");
   const [dateRange, setDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());

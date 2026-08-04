@@ -44,7 +44,7 @@ export function KeyValueBlock({ title, pairs }: { title: string; pairs: Array<[s
   );
 }
 
-/** Click-to-jump-back trail -- used by PivotChainExplorer.tsx to show the path walked so far. */
+/** Click-to-jump-back trail for a linear step-by-step path (not currently used by the graph-based Investigation Graph, kept for any future linear-navigation UI). */
 export function Breadcrumb({ items }: { items: Array<{ label: string; onClick?: () => void }> }) {
   return (
     <div className="flex flex-wrap items-center gap-1 text-xs">
