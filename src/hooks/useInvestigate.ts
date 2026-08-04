@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { investigate, generateInvestigationAiReport } from "@/api/dashboardApi";
+import { investigate, generateInvestigationAiReport, generateGraphInsights } from "@/api/dashboardApi";
 
 /** On-demand, fired on search submit -- see useIocSearch.ts for the same pattern this replaces (broadened from 4 indicator types to all 16, auto-detected server-side). */
 export function useInvestigate() {
@@ -12,5 +12,12 @@ export function useInvestigate() {
 export function useGenerateInvestigationAiReport() {
   return useMutation({
     mutationFn: (query: string) => generateInvestigationAiReport(query),
+  });
+}
+
+/** Unlike useGenerateInvestigationAiReport above, this one IS fired automatically -- see useInvestigationWorkspace.ts, which calls .mutate() once relationships finish loading, not on a button click. */
+export function useGraphInsights() {
+  return useMutation({
+    mutationFn: generateGraphInsights,
   });
 }

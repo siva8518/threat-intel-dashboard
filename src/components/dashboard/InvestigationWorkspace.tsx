@@ -16,6 +16,7 @@ import { AiSummaryPanel, DetectionOpportunitiesPanel, OperationalGuidancePanel }
 import { RelationshipCard } from "./investigation/RelationshipCard";
 import { RecommendedActionsPanel } from "./investigation/RecommendedActionsPanel";
 import { RealDetectionsHuntingPanel } from "./investigation/RealDetectionsHuntingPanel";
+import { AiGraphInsightsPanel } from "./investigation/AiGraphInsightsPanel";
 import { InvestigationGraph } from "./InvestigationGraph";
 import { useSelection } from "@/context/SelectionContext";
 import { useGenerateInvestigationAiReport } from "@/hooks/useInvestigate";
@@ -338,7 +339,7 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
 
   const workspace = useInvestigationWorkspace();
   const aiReportM = useGenerateInvestigationAiReport();
-  const { investigateM, result, graphTarget, graphNode, graphEdges, graphUnavailable, graphLoading, graphError, recommendedActions } = workspace;
+  const { investigateM, result, graphTarget, graphNode, graphEdges, graphUnavailable, graphLoading, graphError, recommendedActions, graphInsights, graphInsightsPending, graphInsightsError } = workspace;
 
   useEffect(() => {
     if (initialQuery) runInvestigation(initialQuery);
@@ -447,6 +448,8 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
                 )}
               </Section>
             )}
+
+            <AiGraphInsightsPanel insights={graphInsights} pending={graphInsightsPending} error={graphInsightsError} onFocusEntity={runInvestigation} />
 
             <RelatedAiReportsSection result={result} />
 

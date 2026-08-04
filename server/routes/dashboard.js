@@ -49,6 +49,7 @@ import {
 } from "../detectionBacklogTracker.js";
 import { buildInfrastructureReuse } from "../infrastructureReuse.js";
 import { getGraphNode, GRAPH_NODE_TYPES } from "../investigation/investigationGraph.js";
+import { generateGraphInsights } from "../investigation/graphInsights.js";
 
 export const router = Router();
 
@@ -959,6 +960,25 @@ router.get("/dashboard/investigation-graph", async (req, res) => {
     const result = await getGraphNode(type, key);
     res.json(result);
   } catch (error) {
+    res.status(502).json({ error: error.message });
+  }
+});
+
+// --- AI Investigation Summary -- see server/investigation/graphInsights.js ---
+// Synthesizes an already-fetched graph node's relationships (posted by the
+// client, which already has them from the two calls above -- no need to
+// redundantly re-run the expensive external-lookup fan-out here). Fired
+// automatically once relationships finish loading in the Investigation
+// Workspace, unlike /investigate/ai-report which stays manual-trigger-only.
+router.post("/dashboard/investigation-graph/insights", async (req, res) => {
+  const { node, edges, unavailableRelationships, overview } = req.body ?? {};
+  if (!node || !Array.isArray(edges)) return res.status(400).json({ error: "node and edges are required" });
+
+  try {
+    const insights = await generateGraphInsights({ node, edges, unavailableRelationships: unavailableRelationships ?? [], overview: overview ?? null });
+    res.json(insights);
+  } catch (error) {
+    if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
     res.status(502).json({ error: error.message });
   }
 });

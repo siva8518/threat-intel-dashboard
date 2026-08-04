@@ -471,6 +471,26 @@ export interface GraphNodeResult {
   unavailableRelationships: Array<{ relationshipType: string; reason: string }>;
 }
 
+/**
+ * AI Investigation Summary -- see server/investigation/graphInsights.js.
+ * Synthesizes an Investigation Graph node's relationships instead of
+ * restating them. Unlike AiInvestigationReport below, this one is fired
+ * automatically once relationships finish loading (see
+ * src/hooks/useInvestigationWorkspace.ts), not on a manual button click.
+ */
+export interface GraphInsights {
+  summary: string;
+  standoutRelationships: string[];
+  likelyAttackChain: string | null;
+  strongestActorMatch: { name: string; reasoning: string } | null;
+  priorityInvestigationTargets: Array<{ entity: string; entityType: string; reasoning: string }>;
+  crossReportPatterns: string[];
+  recommendations: string[];
+  model: string;
+  provider: string;
+  generatedAt: string;
+}
+
 /** On-demand only -- see AiInvestigationOperationalGuidance/AiInvestigationDetectionOpportunities below, and server/investigationAi.js. Never generated automatically on search. */
 export interface AiInvestigationOperationalGuidance {
   socAnalyst: string;

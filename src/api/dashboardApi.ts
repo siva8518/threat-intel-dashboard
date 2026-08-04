@@ -30,6 +30,9 @@ import type {
   AiInvestigationReport,
   GraphNodeType,
   GraphNodeResult,
+  GraphEdge,
+  GraphNode,
+  GraphInsights,
   KevEntry,
   MalwareIntelligenceEntity,
   MalwareProfile,
@@ -310,6 +313,22 @@ export async function generateInvestigationAiReport(query: string): Promise<AiIn
 /** One node of the Investigation Graph -- see server/investigation/investigationGraph.js. Pure correlation, no AI call, cheap to re-run on every expand click. */
 export async function fetchInvestigationGraphNode(type: GraphNodeType, key: string): Promise<GraphNodeResult> {
   return fetchJson(`/api/dashboard/investigation-graph?type=${encodeURIComponent(type)}&key=${encodeURIComponent(key)}`, { source: "Investigation Graph" });
+}
+
+/** Fired automatically once a Workspace search's relationships finish loading (see useInvestigationWorkspace.ts) -- posts the graph node/edges the client already has in memory rather than re-fetching them server-side. Real LLM call, same generous timeout as generateInvestigationAiReport. */
+export async function generateGraphInsights(payload: {
+  node: GraphNode;
+  edges: GraphEdge[];
+  unavailableRelationships: Array<{ relationshipType: string; reason: string }>;
+  overview: InvestigationResult["overview"] | null;
+}): Promise<GraphInsights> {
+  return fetchJson("/api/dashboard/investigation-graph/insights", {
+    source: "AI Investigation Summary",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    timeoutMs: 90_000,
+  });
 }
 
 // The full-profile (fetchThreatActorProfile) and list (fetchThreatActorList)
