@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Bot, BrainCircuit, Bug, Crosshair, Eye, Flame, Ghost, Github, LayoutDashboard, Network, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
+import { Bot, BrainCircuit, Bug, Crosshair, Eye, Flame, Ghost, Github, LayoutDashboard, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { IntelligenceInvestigationConsole } from "@/components/dashboard/IntelligenceInvestigationConsole";
+import { InvestigationWorkspace } from "@/components/dashboard/InvestigationWorkspace";
 import { CveHub } from "@/components/dashboard/CveHub";
 import { HuntingDetectionHub } from "@/components/dashboard/HuntingDetectionHub";
 import { ExecutiveThreatSummary } from "@/components/dashboard/ExecutiveThreatSummary";
@@ -30,17 +30,15 @@ import { AiSummarization } from "@/components/dashboard/AiSummarization";
 import { EmergingThreats } from "@/components/dashboard/EmergingThreats";
 import { EmergingThreatsFeed } from "@/components/dashboard/EmergingThreatsFeed";
 import { Watchlist } from "@/components/dashboard/Watchlist";
-import { InvestigationGraph } from "@/components/dashboard/InvestigationGraph";
 import { CveDetailDrawer } from "@/components/dashboard/CveDetailDrawer";
 import { MalwareDetailDrawer } from "@/components/dashboard/MalwareDetailDrawer";
 import type { TodayEventKey } from "@/components/dashboard/TopSecurityEventsToday";
 import { EMPTY_DATE_RANGE, type DateRange } from "@/components/dashboard/DateRangeFilter";
 import { SelectionProvider } from "@/context/SelectionContext";
-import type { GraphNodeType, Severity } from "@/types/threat-intel";
+import type { Severity } from "@/types/threat-intel";
 
 const TABS = [
-  { id: "triage", label: "Triage Console", icon: Siren },
-  { id: "investigation-graph", label: "Investigation Graph", icon: Network },
+  { id: "triage", label: "Investigation Workspace", icon: Siren },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "cves", label: "Latest CVEs", icon: ShieldAlert },
   { id: "attack-techniques", label: "ATT&CK Techniques", icon: ShieldAlert },
@@ -76,25 +74,19 @@ export function DashboardPage() {
   const [malwareDateRange, setMalwareDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
   const [ransomwareDateRange, setRansomwareDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
   const [huntingDetectionSection, setHuntingDetectionSection] = useState<"hunting" | "backlog">("hunting");
-  const [investigationGraphStart, setInvestigationGraphStart] = useState<{ type: GraphNodeType; key: string } | null>(null);
   const [triageInitialQuery, setTriageInitialQuery] = useState<string | null>(null);
   const [campaignSearchQuery, setCampaignSearchQuery] = useState<string | null>(null);
   const [malwareSearchQuery, setMalwareSearchQuery] = useState<string | null>(null);
   const [aiSummarySearchQuery, setAiSummarySearchQuery] = useState<string | null>(null);
 
-  function goToInvestigationGraph(type: GraphNodeType, key: string) {
-    setInvestigationGraphStart({ type, key });
-    setActiveTab("investigation-graph");
-  }
-
   /**
-   * Investigation Graph's node-detail-panel jump-off points -- each node
-   * type gets a real next step into a tab that has richer, purpose-built
-   * tooling than the graph's own compact node view (full multi-source
-   * lookup + AI report for ip/domain/cve, the full entity record for
-   * actor/campaign/malware, the full report body for report). No new data
-   * source, just wiring existing search-prefill patterns (see
-   * goToActorSearch above) into the tabs that didn't have one yet.
+   * The Investigation Workspace tab's node-detail-panel jump-off points --
+   * each entity type gets a real next step into a tab that has richer,
+   * purpose-built tooling than the Workspace's own compact relationship view
+   * (the full entity record for actor/campaign/malware, the full report
+   * body for report). No new data source, just wiring existing
+   * search-prefill patterns (see goToActorSearch above) into the tabs that
+   * didn't have one yet.
    */
   function goToTriageInvestigate(query: string) {
     setTriageInitialQuery(query);
@@ -179,22 +171,13 @@ export function DashboardPage() {
     <SelectionProvider>
     <DashboardLayout tabs={TABS} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as TabId)} onSelectActor={goToActorSearch}>
       {activeTab === "triage" && (
-        <IntelligenceInvestigationConsole
+        <InvestigationWorkspace
           onOpenActor={goToActorSearch}
           onOpenCampaign={() => setActiveTab("campaign-intelligence")}
-          onOpenInvestigationGraph={goToInvestigationGraph}
-          initialQuery={triageInitialQuery}
-        />
-      )}
-      {activeTab === "investigation-graph" && (
-        <InvestigationGraph
-          initialType={investigationGraphStart?.type}
-          initialKey={investigationGraphStart?.key}
-          goToTriageInvestigate={goToTriageInvestigate}
           goToCampaignSearch={goToCampaignSearch}
           goToMalwareSearch={goToMalwareSearch}
-          goToActorSearch={goToActorSearch}
           goToAiSummarySearch={goToAiSummarySearch}
+          initialQuery={triageInitialQuery}
         />
       )}
       {activeTab === "overview" && (
@@ -247,10 +230,10 @@ export function DashboardPage() {
       )}
       {activeTab === "github-intel" && <GithubIntel />}
       {activeTab === "malware-intelligence" && (
-        <MalwareIntelligence initialSection={malwareSection} initialDateRange={malwareDateRange} onOpenInvestigationGraph={goToInvestigationGraph} initialQuery={malwareSearchQuery} />
+        <MalwareIntelligence initialSection={malwareSection} initialDateRange={malwareDateRange} onOpenInvestigationGraph={(_type, key) => goToTriageInvestigate(key)} initialQuery={malwareSearchQuery} />
       )}
-      {activeTab === "actor-intelligence" && <ThreatActorIntelligence initialQuery={actorSearchQuery} onOpenInvestigationGraph={goToInvestigationGraph} />}
-      {activeTab === "campaign-intelligence" && <CampaignIntelligence onOpenInvestigationGraph={goToInvestigationGraph} initialQuery={campaignSearchQuery} />}
+      {activeTab === "actor-intelligence" && <ThreatActorIntelligence initialQuery={actorSearchQuery} onOpenInvestigationGraph={(_type, key) => goToTriageInvestigate(key)} />}
+      {activeTab === "campaign-intelligence" && <CampaignIntelligence onOpenInvestigationGraph={(_type, key) => goToTriageInvestigate(key)} initialQuery={campaignSearchQuery} />}
       {activeTab === "darkweb-intelligence" && <DarkWebIntelligence />}
       {activeTab === "ai-summarization" && <AiSummarization initialQuery={aiSummarySearchQuery} />}
       {activeTab === "emerging-threats" && <EmergingThreats />}

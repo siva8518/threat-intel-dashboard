@@ -1,7 +1,7 @@
 // Declarative grouping of the 16 IndicatorType values into the section
 // family that renders them -- adding a 17th type later means adding one
 // entry here (plus, if it's genuinely a new shape, one new section
-// component), not touching IntelligenceInvestigationConsole.tsx's layout.
+// component), not touching InvestigationWorkspace.tsx's layout.
 import type { IndicatorType } from "@/types/threat-intel";
 
 export type SectionFamily = "network" | "hash" | "cve" | "entity" | "artifact" | "unknown";

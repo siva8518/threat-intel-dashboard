@@ -141,6 +141,38 @@ function enrichmentFor(entity, kind) {
   };
 }
 
+/**
+ * Same real citations as enrichmentFor above, but for a raw IOC (ip/domain/
+ * url/hash/artifact) rather than a canonical entity -- keyed off the
+ * malware family(ies) crossReferenceIndicator() already matched this value
+ * to, since a Sigma/YARA rule or hunting query is never written against a
+ * literal indicator value, only against the family it belongs to. Without
+ * this, "what should Detection Engineering deploy" had no answer for any
+ * IOC search, even when the matched family has real public rules.
+ */
+function detectionAndHuntingForFamilies(familyNames) {
+  if (!familyNames.length) return { detectionRules: [], huntingQueries: [] };
+  const ruleIndex = cache.getEntry("detection-rules").data?.index ?? [];
+
+  const seenRules = new Set();
+  const detectionRules = [];
+  for (const name of familyNames) {
+    for (const rule of detectionRulesFor(name, ruleIndex)) {
+      const k = `${rule.label}:${rule.path}`;
+      if (seenRules.has(k)) continue;
+      seenRules.add(k);
+      detectionRules.push(rule);
+    }
+  }
+
+  const matchedEntities = getMalwareEntities().filter((m) => familyNames.some((n) => norm(n) === norm(m.name)));
+  const matchedIds = new Set(matchedEntities.map((m) => `entity::malware::${m.id}`));
+  const huntingItems = buildEntityHuntingQueries(matchedEntities, [], ruleIndex).filter((item) => matchedIds.has(item.reportId));
+  const huntingQueries = huntingItems.map((i) => ({ platform: i.platformLabel, query: i.query, source: i.articleSource, sourceUrl: i.articleLink }));
+
+  return { detectionRules, huntingQueries };
+}
+
 // --- Actor ---------------------------------------------------------------
 
 function gatherActor(key) {
@@ -261,6 +293,18 @@ function gatherMalware(key) {
     }
     const softwareIndex = cache.getEntry("attack").data?.software ?? [];
     for (const id of techniqueIdsForFamily(entity.name, softwareIndex)) edges.push(edge("attackTechnique", id, id, "implements technique", "Reverse: ATT&CK software techniqueIds / curated map"));
+
+    // Victims -- dark-web findings can name a malware family directly;
+    // ransomware disclosure records only ever carry the actor group, never a
+    // malware family, so that path goes through the actor(s) already found
+    // above to use this family.
+    const usingActorNames = new Set(getActorEntities().filter((a) => (a.malwareUsed ?? []).some((m) => names.has(norm(m)))).map((a) => norm(a.name)));
+    for (const r of getRansomwareCampaigns()) {
+      if (usingActorNames.has(norm(r.group))) edges.push(edge("victim", r.victim, r.victim, "breached victim", "Indirect: via an actor known to use this malware family", { firstSeen: r.discoveredDate, lastSeen: r.discoveredDate }));
+    }
+    for (const d of getDarkWebEntities()) {
+      if ((d.associatedMalware ?? []).some((m) => names.has(norm(m)))) edges.push(edge("victim", d.victimOrg ?? d.name, d.victimOrg ?? d.name, "linked to victim", "Direct: dark-web finding associatedMalware"));
+    }
   }
 
   return {
@@ -400,7 +444,7 @@ async function gatherIpOrDomain(type, key) {
   if (type === "ip" && !dnsAsn) unavailable.push({ relationshipType: "asn", reason: "No configured live lookup (RIPEstat/Team Cymru/SANS ISC) returned an ASN for this IP." });
 
   return {
-    node: { type, id: value, label: value, summary: null, found: true, metadata: null },
+    node: { type, id: value, label: value, summary: null, found: true, metadata: detectionAndHuntingForFamilies(crossRef.matchedMalwareFamilies) },
     edges: dedupeEdges(edges),
     unavailableRelationships: unavailable,
   };
@@ -436,7 +480,7 @@ function gatherCrossReferenceOnly(type, key) {
   ];
 
   return {
-    node: { type, id: value, label: value, summary: null, found, metadata: null },
+    node: { type, id: value, label: value, summary: null, found, metadata: detectionAndHuntingForFamilies(crossRef.matchedMalwareFamilies) },
     edges: dedupeEdges(edges),
     unavailableRelationships: [
       {

@@ -43,7 +43,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "./ErrorState";
 import { Section, KeyValueBlock, FieldList } from "./reportPrimitives";
-import { useInvestigationGraph, type PositionedGraphNode, type GraphEdgeWithSource } from "@/hooks/useInvestigationGraph";
+import { RelationshipCard } from "./investigation/RelationshipCard";
+import { useInvestigationGraph, type PositionedGraphNode } from "@/hooks/useInvestigationGraph";
 import type { GraphNodeType, GraphConfidence } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
@@ -98,7 +99,6 @@ const SEED_TYPES: GraphNodeType[] = [
   "email", "fileName", "processName", "registryKey", "userAgent", "attackTechnique", "country", "report",
 ];
 
-const CONFIDENCE_BADGE: Record<GraphConfidence, "high" | "medium" | "low"> = { High: "high", Medium: "medium", Low: "low" };
 const CONFIDENCE_STROKE: Record<GraphConfidence, string> = { High: "#3fb950", Medium: "#d29922", Low: "#8b949e" };
 
 function EntityNode({ data }: NodeProps<Node<{ node: PositionedGraphNode; selected: boolean; loading: boolean }>>) {
@@ -316,28 +316,6 @@ function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampa
         )}
       </CardContent>
     </Card>
-  );
-}
-
-function RelationshipCard({ edge, onFocus }: { edge: GraphEdgeWithSource; onFocus: () => void }) {
-  return (
-    <button type="button" onClick={onFocus} className="block w-full rounded-lg border border-white/10 bg-white/[0.03] p-2.5 text-left text-xs hover:border-primary/40">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-semibold text-foreground">
-          {edge.relationship} <span className="font-mono text-primary">{edge.targetLabel}</span>
-        </span>
-        <Badge variant={CONFIDENCE_BADGE[edge.confidence]}>{edge.confidence}</Badge>
-      </div>
-      <p className="mt-1 text-muted" title={edge.why}>
-        {edge.why}
-      </p>
-      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted">
-        {edge.firstSeen && <span>First seen {edge.firstSeen.slice(0, 10)}</span>}
-        {edge.lastSeen && edge.lastSeen !== edge.firstSeen && <span>Last seen {edge.lastSeen.slice(0, 10)}</span>}
-        <span>{edge.supportingReportCount === null ? "Supporting reports: not tracked" : `${edge.supportingReportCount} supporting report(s)`}</span>
-        <span>{edge.sources.join(", ")}</span>
-      </div>
-    </button>
   );
 }
 

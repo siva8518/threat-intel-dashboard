@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Copy, Download, ExternalLink, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, ExternalLink, Search, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState } from "./ErrorState";
+import { EmptyState, ErrorState } from "./ErrorState";
 import { Section } from "./reportPrimitives";
 import { NotConfiguredNotice, IpIntelligenceSection, DomainIntelligenceSection, UrlIntelligenceSection } from "./investigation/NetworkIndicatorSections";
 import { HashIntelligenceSection } from "./investigation/HashSections";
@@ -13,34 +13,27 @@ import { CveIntelligenceSection } from "./investigation/CveSections";
 import { EntityIntelligenceSection } from "./investigation/EntitySections";
 import { ArtifactIntelligenceSection } from "./investigation/ArtifactSections";
 import { AiSummaryPanel, DetectionOpportunitiesPanel, OperationalGuidancePanel } from "./investigation/AiReportSection";
+import { RelationshipCard } from "./investigation/RelationshipCard";
+import { RecommendedActionsPanel } from "./investigation/RecommendedActionsPanel";
+import { RealDetectionsHuntingPanel } from "./investigation/RealDetectionsHuntingPanel";
+import { InvestigationGraph } from "./InvestigationGraph";
 import { useSelection } from "@/context/SelectionContext";
-import { useInvestigate, useGenerateInvestigationAiReport } from "@/hooks/useInvestigate";
+import { useGenerateInvestigationAiReport } from "@/hooks/useInvestigate";
+import { useInvestigationWorkspace } from "@/hooks/useInvestigationWorkspace";
 import { sectionFamilyFor, INDICATOR_TYPE_LABEL } from "@/investigation/moduleConfig";
 import { virusTotalLookupUrl } from "@/lib/vtLookup";
-import type {
-  IndicatorType,
-  InvestigationResult,
-  IocLookupResult,
-  MalwareIntelligenceEntity,
-  CveRecord,
-  CveProfile,
-  DetectionRuleRef,
-  GraphNodeType,
-} from "@/types/threat-intel";
+import type { IndicatorType, InvestigationResult, IocLookupResult, MalwareIntelligenceEntity, CveRecord, CveProfile, DetectionRuleRef } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
-interface ConsoleProps {
+interface WorkspaceProps {
   onOpenActor: (name: string) => void;
   onOpenCampaign: () => void;
-  onOpenInvestigationGraph: (type: GraphNodeType, key: string) => void;
-  /** Seeds the search box and auto-runs it once -- used by Pivot Chain's "Investigate in Triage Console" action so a click there lands on a fully-run investigation, not just a prefilled box. */
+  /** Search-prefill + auto-run destinations for the embedded Relationship Graph's "View Full Profile" actions -- see InvestigationGraph.tsx's NodeActions. Distinct from the deterministic re-search this page does on its own (see RelationshipCard's onFocus below), which stays on this one page instead of switching tabs. */
+  goToCampaignSearch: (name: string) => void;
+  goToMalwareSearch: (name: string) => void;
+  goToAiSummarySearch: (title: string) => void;
+  /** Seeds the search box and auto-runs it once -- used by other tabs' "pivot here" buttons so a click there lands on a fully-run investigation, not just a prefilled box. */
   initialQuery?: string | null;
-}
-
-/** Only ip/domain/cve map 1:1 onto a Pivot Chain node type -- name/hash/artifact types are ambiguous or out of the chain's scope, so no Pivot Chain entry point is offered for those. */
-function pivotNodeTypeFor(type: IndicatorType): GraphNodeType | null {
-  if (type === "ip" || type === "domain" || type === "cve") return type;
-  return null;
 }
 
 const VERDICT_BADGE = { critical: "critical", high: "high", medium: "medium", low: "low", unknown: "muted" } as const;
@@ -173,7 +166,7 @@ interface KeyFact {
   value: string;
 }
 
-/** A compact "so what" summary distinct from the deeper Indicator-Specific Intelligence panels below it -- same purpose TriageConsole.tsx's buildKeyFacts served, extended to the full 16-type surface. */
+/** A compact "so what" summary distinct from the deeper Indicator-Specific Intelligence panels below it. */
 function buildKeyFacts(result: InvestigationResult): KeyFact[] {
   const facts: KeyFact[] = [];
   const md = result.moduleData;
@@ -193,7 +186,7 @@ function buildKeyFacts(result: InvestigationResult): KeyFact[] {
     if (reg?.registrar) facts.push({ label: "Registrar", value: safe(reg.registrar) });
     if (cert) facts.push({ label: "Subdomains Found", value: safe(cert.subdomainCount) });
     const security = md.security as Record<string, Record<string, unknown>> | undefined;
-    if (security?.typosquatting?.flagged) facts.push({ label: "Typosquat Risk", value: `Resembles “${security.typosquatting.closestBrandMatch}”` });
+    if (security?.typosquatting?.flagged) facts.push({ label: "Typosquat Risk", value: `Resembles "${security.typosquatting.closestBrandMatch}"` });
   } else if (result.type === "url") {
     const scan = md.scan as Record<string, unknown> | null;
     const components = md.components as Record<string, unknown> | undefined;
@@ -234,88 +227,22 @@ function KeyFactsPanel({ facts }: { facts: KeyFact[] }) {
   );
 }
 
-function RelatedIntelligenceSection({
-  result,
-  onOpenActor,
-  onOpenCampaign,
-  onOpenInvestigationGraph,
-}: {
-  result: InvestigationResult;
-  onOpenActor: (name: string) => void;
-  onOpenCampaign: () => void;
-  onOpenInvestigationGraph: (type: GraphNodeType, key: string) => void;
-}) {
+/** Just the AI Summarization report cross-references now -- matched malware/actor/campaign names moved to the richer Relationships section below (same data, but with why/confidence/dates/sources instead of a bare chip), so this isn't duplicated in two places. */
+function RelatedAiReportsSection({ result }: { result: InvestigationResult }) {
   const rel = result.relatedIntelligence;
-  const pivotType = pivotNodeTypeFor(result.type);
-  const pivotButton = pivotType && (
-    <button
-      type="button"
-      onClick={() => onOpenInvestigationGraph(pivotType, result.indicator)}
-      className="mb-2 inline-flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:border-primary/50"
-    >
-      Walk Pivot Chain from here →
-    </button>
-  );
-  if (!rel) {
-    return pivotButton ? (
-      <Section title="Related Intelligence">{pivotButton}</Section>
-    ) : null;
-  }
-  const hasAny = rel.matchedMalwareFamilies.length > 0 || rel.associatedThreatActors.length > 0 || rel.activeCampaigns.length > 0 || rel.matchingAiReports.length > 0 || rel.relatedIocs.length > 0;
-  if (!hasAny) {
-    return (
-      <Section title="Related Intelligence">
-        {pivotButton}
-        <p className="text-xs text-muted">No related intelligence found in this platform's own tracked data.</p>
-      </Section>
-    );
-  }
+  if (!rel || rel.matchingAiReports.length === 0) return null;
   return (
-    <Section title="Related Intelligence">
-      <div className="space-y-3 text-xs">
-        {pivotButton}
-        {rel.matchedMalwareFamilies.length > 0 && (
-          <p>
-            <span className="font-semibold text-foreground">Malware Families: </span>
-            <span className="text-muted">{rel.matchedMalwareFamilies.join(", ")}</span>
-          </p>
-        )}
-        {rel.associatedThreatActors.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-semibold text-foreground">Threat Actors:</span>
-            {rel.associatedThreatActors.map((name) => (
-              <button key={name} type="button" onClick={() => onOpenActor(name)} className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-primary hover:border-primary/50">
-                {name} →
-              </button>
-            ))}
-          </div>
-        )}
-        {rel.activeCampaigns.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-semibold text-foreground">Campaigns:</span>
-            {rel.activeCampaigns.map((name) => (
-              <button key={name} type="button" onClick={onOpenCampaign} className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-primary hover:border-primary/50">
-                {name} →
-              </button>
-            ))}
-          </div>
-        )}
-        {rel.matchingAiReports.length > 0 && (
-          <div>
-            <p className="mb-1 font-semibold text-foreground">Related AI Summarization Reports:</p>
-            <ul className="space-y-1">
-              {rel.matchingAiReports.map((r) => (
-                <li key={r.id}>
-                  <a href={r.articleLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-                    {r.articleTitle} <ExternalLink className="h-3 w-3" />
-                  </a>{" "}
-                  <span className="text-muted">— {r.articleSource}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
+    <Section title="AI Summaries &amp; Vendor Reports">
+      <ul className="space-y-1 text-xs">
+        {rel.matchingAiReports.map((r) => (
+          <li key={r.id}>
+            <a href={r.articleLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+              {r.articleTitle} <ExternalLink className="h-3 w-3" />
+            </a>{" "}
+            <span className="text-muted">— {r.articleSource}</span>
+          </li>
+        ))}
+      </ul>
     </Section>
   );
 }
@@ -383,22 +310,35 @@ function QuickActions({ result }: { result: InvestigationResult }) {
 }
 
 /**
- * The Intelligence Investigation Console -- replaces TriageConsole.tsx.
- * Auto-detects all 16 indicator types server-side (no manual type
- * selection), leads with an answer (verdict/severity/priority/"why should I
- * care") instead of a raw source dump, and adds per-type investigation
- * modules plus an on-demand AI Investigation Report. Page order matches the
- * spec exactly: AI Summary -> Verdict -> Why Should I Care -> Key Facts ->
- * Indicator-Specific Intelligence -> Related Intelligence -> Detection
- * Opportunities -> Operational Guidance -> Raw Sources.
+ * The Investigation Workspace -- the first screen for any investigation.
+ * One search box, auto-detected type (all 16 indicator shapes plus
+ * malware/actor/campaign names), and everything an analyst needs to decide
+ * "what is this, why should I care, is it malicious, what's connected, what
+ * should each team do next" without a second search anywhere else. Fuses
+ * server/investigation/index.js#investigate() (verdict/why-care/related
+ * intelligence) with server/investigation/investigationGraph.js (real
+ * relationship edges + detection/hunting citations) via
+ * useInvestigationWorkspace -- see that hook for exactly how. The full
+ * pan/zoom/infinite-pivot canvas (formerly its own "Investigation Graph"
+ * tab) is embedded at the bottom as an expandable "Explore Full Relationship
+ * Graph" section rather than a second destination requiring a second search.
+ *
+ * Page order front-loads synthesis before raw evidence: AI Summary (opt-in)
+ * -> Verdict -> Why Should I Care -> Key Facts -> Relationships -> AI/vendor
+ * reports -> real Detections & Hunting -> Recommended Actions (SOC/Detection
+ * Engineering/Threat Intelligence/Incident Response) -> Indicator-Specific
+ * raw lookup evidence -> deeper opt-in AI narrative -> Quick Actions ->
+ * Explore Full Relationship Graph.
  */
-export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, onOpenInvestigationGraph, initialQuery }: ConsoleProps) {
+export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampaignSearch, goToMalwareSearch, goToAiSummarySearch, initialQuery }: WorkspaceProps) {
   const [input, setInput] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
+  const [showFullGraph, setShowFullGraph] = useState(false);
   const { selectCve, selectMalware } = useSelection();
 
-  const investigateM = useInvestigate();
+  const workspace = useInvestigationWorkspace();
   const aiReportM = useGenerateInvestigationAiReport();
+  const { investigateM, result, graphTarget, graphNode, graphEdges, graphUnavailable, graphLoading, graphError, recommendedActions } = workspace;
 
   useEffect(() => {
     if (initialQuery) runInvestigation(initialQuery);
@@ -410,7 +350,7 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, 
     if (!query) return;
     setInput(query);
     setSubmittedQuery(query);
-    investigateM.mutate(query);
+    workspace.runInvestigation(query);
     aiReportM.reset();
   }
 
@@ -418,16 +358,15 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, 
     selectMalware({ family: entity.name, count: entity.iocSightings, sources: entity.articles.map((a) => a.source), techniques: [], detectionRules });
   }
 
-  const result = investigateM.data;
   const family = result ? sectionFamilyFor(result.type as IndicatorType) : null;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base font-semibold text-foreground">Triage Console</CardTitle>
+        <CardTitle className="text-base font-semibold text-foreground">Investigation Workspace</CardTitle>
         <p className="mt-1 text-xs text-muted">
           Paste anything from an alert — an IP, domain, URL, file hash, CVE ID, email, file/process name, registry key, user agent, or a malware/actor/campaign
-          name — and get a full investigation instead of a raw source dump. Type is auto-detected, no manual selection needed.
+          name — and get a complete investigation briefing instead of a raw source dump. Type is auto-detected, no manual selection needed.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -466,13 +405,6 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, 
               Detected as <span className="font-mono text-foreground">{INDICATOR_TYPE_LABEL[result.type as IndicatorType]}</span>: <span className="font-mono text-foreground">{result.indicator}</span>
             </p>
 
-            <AiSummaryPanel
-              report={aiReportM.data}
-              isPending={aiReportM.isPending}
-              error={aiReportM.isError ? (aiReportM.error as Error).message : null}
-              onGenerate={() => aiReportM.mutate(submittedQuery)}
-            />
-
             <VerdictBanner overview={result.overview} />
 
             <Section title="Should I Care?">
@@ -486,6 +418,41 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, 
             </Section>
 
             <KeyFactsPanel facts={buildKeyFacts(result)} />
+
+            {graphLoading ? (
+              <Section title="Relationships">
+                <Skeleton className="h-24 w-full" />
+              </Section>
+            ) : graphError ? (
+              <Section title="Relationships">
+                <ErrorState message={graphError} />
+              </Section>
+            ) : (
+              <Section title="Relationships">
+                {graphEdges.length === 0 ? (
+                  <p className="text-xs text-muted">No relationships found in this platform's own tracked data for this entity.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {graphEdges.map((e) => (
+                      <RelationshipCard key={`${e.targetType}:${e.targetKey}`} edge={e} onFocus={() => runInvestigation(e.targetKey)} />
+                    ))}
+                  </div>
+                )}
+                {graphUnavailable.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-[11px] italic text-muted">
+                    {graphUnavailable.map((u) => (
+                      <li key={u.relationshipType}>{u.reason}</li>
+                    ))}
+                  </ul>
+                )}
+              </Section>
+            )}
+
+            <RelatedAiReportsSection result={result} />
+
+            <RealDetectionsHuntingPanel graphNode={graphNode} />
+
+            {recommendedActions && <RecommendedActionsPanel actions={recommendedActions} />}
 
             <Section title="Indicator-Specific Intelligence">
               {family === "network" && result.type === "ip" && (
@@ -518,8 +485,12 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, 
               )}
             </Section>
 
-            <RelatedIntelligenceSection result={result} onOpenActor={onOpenActor} onOpenCampaign={onOpenCampaign} onOpenInvestigationGraph={onOpenInvestigationGraph} />
-
+            <AiSummaryPanel
+              report={aiReportM.data}
+              isPending={aiReportM.isPending}
+              error={aiReportM.isError ? (aiReportM.error as Error).message : null}
+              onGenerate={() => aiReportM.mutate(submittedQuery)}
+            />
             <DetectionOpportunitiesPanel report={aiReportM.data} />
             <OperationalGuidancePanel report={aiReportM.data} />
 
@@ -528,6 +499,30 @@ export function IntelligenceInvestigationConsole({ onOpenActor, onOpenCampaign, 
             )}
 
             <QuickActions result={result} />
+
+            <Section title="">
+              <button
+                type="button"
+                onClick={() => setShowFullGraph((v) => !v)}
+                className="flex w-full items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs font-semibold text-foreground hover:border-primary/40"
+              >
+                {showFullGraph ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                Explore Full Relationship Graph
+              </button>
+              {showFullGraph && graphTarget && (
+                <div className="mt-3">
+                  <InvestigationGraph
+                    initialType={graphTarget.type}
+                    initialKey={graphTarget.key}
+                    goToTriageInvestigate={runInvestigation}
+                    goToCampaignSearch={goToCampaignSearch}
+                    goToMalwareSearch={goToMalwareSearch}
+                    goToActorSearch={onOpenActor}
+                    goToAiSummarySearch={goToAiSummarySearch}
+                  />
+                </div>
+              )}
+            </Section>
           </div>
         )}
       </CardContent>
