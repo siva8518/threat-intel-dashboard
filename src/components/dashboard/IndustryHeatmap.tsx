@@ -6,15 +6,19 @@ import type { AiThreatSummaryIndustryRelevance, IndustryName, IndustryRelevanceL
 
 export const INDUSTRY_EMOJI: Record<IndustryName, string> = {
   "Financial Services": "🏦",
-  Consumer: "🛍",
-  "Technology, Media & Telecommunications": "💻",
-  "Life Sciences & Health Care": "🏥",
+  Healthcare: "🏥",
+  Government: "🏛",
   Manufacturing: "🏭",
+  Retail: "🛒",
+  Technology: "💻",
+  Telecommunications: "📡",
   "Energy & Utilities": "⚡",
-  "Government & Public Sector": "🏛",
-  "Retail & eCommerce": "🛒",
   Education: "🎓",
   "Transportation & Logistics": "🚚",
+  "Media & Entertainment": "🎬",
+  Hospitality: "🏨",
+  Insurance: "📄",
+  Pharmaceuticals: "💊",
 };
 
 const RELEVANCE_BADGE_VARIANT: Record<IndustryRelevanceLevel, "critical" | "high" | "medium" | "low" | "muted"> = {

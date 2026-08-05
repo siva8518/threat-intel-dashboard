@@ -15,7 +15,7 @@ function esc(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function safeFilename(title: string): string {
+export function safeFilename(title: string): string {
   return (
     title
       .trim()
@@ -521,7 +521,7 @@ const SHARED_STYLES = `
   table.ops-table td li { margin-bottom: 2px; }
 `;
 
-function triggerDownload(blob: Blob, filename: string) {
+export function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

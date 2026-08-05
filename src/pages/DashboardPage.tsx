@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, BrainCircuit, Bug, Crosshair, Eye, Flame, Ghost, Github, LayoutDashboard, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
+import { Bot, BrainCircuit, Bug, Building2, Crosshair, Eye, Flame, Ghost, Github, LayoutDashboard, Newspaper, ShieldAlert, Siren, Skull, Telescope, UserSearch, Wifi } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { InvestigationWorkspace } from "@/components/dashboard/InvestigationWorkspace";
 import { CveHub } from "@/components/dashboard/CveHub";
@@ -28,6 +28,7 @@ import { CampaignIntelligence } from "@/components/dashboard/CampaignIntelligenc
 import { DarkWebIntelligence } from "@/components/dashboard/DarkWebIntelligence";
 import { AiSummarization } from "@/components/dashboard/AiSummarization";
 import { EmergingThreats } from "@/components/dashboard/EmergingThreats";
+import { IndustryIntelligence } from "@/components/dashboard/IndustryIntelligence";
 import { EmergingThreatsFeed } from "@/components/dashboard/EmergingThreatsFeed";
 import { Watchlist } from "@/components/dashboard/Watchlist";
 import { CveDetailDrawer } from "@/components/dashboard/CveDetailDrawer";
@@ -50,6 +51,7 @@ const TABS = [
   { id: "darkweb-intelligence", label: "Dark Web Intelligence", icon: Ghost },
   { id: "ai-summarization", label: "AI Summarization", icon: BrainCircuit },
   { id: "emerging-threats", label: "Emerging Threats", icon: Flame },
+  { id: "industry-intelligence", label: "Industry Intelligence", icon: Building2 },
   { id: "hunting-detection", label: "Hunting & Detection", icon: Telescope },
   { id: "news", label: "Security News", icon: Newspaper },
   { id: "watchlist", label: "Watchlist", icon: Eye },
@@ -237,6 +239,7 @@ export function DashboardPage() {
       {activeTab === "darkweb-intelligence" && <DarkWebIntelligence />}
       {activeTab === "ai-summarization" && <AiSummarization initialQuery={aiSummarySearchQuery} />}
       {activeTab === "emerging-threats" && <EmergingThreats />}
+      {activeTab === "industry-intelligence" && <IndustryIntelligence />}
       {activeTab === "hunting-detection" && <HuntingDetectionHub initialSection={huntingDetectionSection} />}
       {activeTab === "news" && <SecurityNews />}
       {activeTab === "watchlist" && <Watchlist />}

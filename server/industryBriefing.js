@@ -1,10 +1,10 @@
 // On-demand, per-industry deep-dive threat briefing -- reached by clicking
-// "Generate Full Briefing" on an Industry Heatmap row (see
-// server/emergingThreatsRanking.js, which computes that same heatmap and
-// whose matchIndustries10()/INDUSTRY_CATALOG this module reuses rather than
-// duplicating). Generated live per request, not scheduled/cached, since most
-// of the 10 sectors won't be viewed in a given session -- see the "on-demand
-// per industry" placement decision.
+// "Generate Full Briefing" on an Industry Heatmap row, or from the
+// Industry Intelligence page's selector (see server/emergingThreatsRanking.js,
+// which computes that same heatmap and whose matchIndustries()/INDUSTRY_CATALOG
+// this module reuses rather than duplicating). Generated live per request,
+// not scheduled/cached, since most of the 14 sectors won't be viewed in a
+// given session -- see the "on-demand per industry" placement decision.
 //
 // Unlike server/aiThreatSummary.js (one article -> one deep-dive report),
 // this synthesizes across MANY articles at once, so the model is given a
@@ -25,7 +25,12 @@
 // CISA" only happens when the underlying article really is from a CISA feed.
 import { groqJson, GroqUnavailableError } from "./groqClient.js";
 import { INDUSTRY_CATALOG } from "./aiThreatSummary.js";
-import { matchIndustries10 } from "./emergingThreatsRanking.js";
+import { matchIndustries } from "./emergingThreatsRanking.js";
+import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
+import { getAllEntities as getActorEntities } from "./threatActorIntelligence.js";
+import { getAllEntities as getCampaignEntities } from "./campaignIntelligence.js";
+import { buildEntityHuntingQueries } from "./huntingLibrary.js";
+import * as cache from "./cache.js";
 
 const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || "llama-3.3-70b-versatile";
 
@@ -101,7 +106,7 @@ export function poolForIndustry(industry, taggedNewsItems, reports, kevIds) {
 
     const report = reportsByLink.get(item.link);
     const reportRow = report?.industryRelevance?.find((r) => r.industry === industry);
-    const keywordHit = matchIndustries10(item.title).includes(industry);
+    const keywordHit = matchIndustries(item.title).includes(industry);
     const reportHit = reportRow && (reportRow.relevance === "Critical" || reportRow.relevance === "High");
     if (!keywordHit && !reportHit) continue;
 
@@ -194,8 +199,8 @@ const SYSTEM_PROMPT =
   '"malwareFamilies": array of {"name": string (must be a malware family name that literally appears in the table\'s malware list), "type": string (one of "Ransomware", "Loader", "Banking Trojan", "Stealer", "RAT", "Botnet", "Wiper", "Backdoor", or another concise type if none fit), "primaryPurpose": string, "initialInfectionMethod": string, "persistenceMechanism": string, "commonPayload": string, "typicalVictims": string, "severity": "Critical"|"High"|"Medium"|"Low", "sourceArticleIds": int[]} -- [] if the table names no malware for this industry, do not invent one. Do not include "trend" -- computed separately from your citations.\n' +
   '"commonTargets": string[] (4-8 specific assets/technologies this industry\'s attackers are shown targeting in the table, e.g. "Microsoft 365", "OT/ICS Systems", "Payment Systems" -- ground in the table, not a generic checklist).\n' +
   '"vulnerabilityTrendsCommentary": string, 2-3 sentences of narrative synthesis over the table\'s own CVE/KEV entries (which are listed separately and verified programmatically -- do not restate the raw CVE IDs here, comment on the pattern: frequently-affected vendors/products, internet-facing exposure, exploit maturity).\n' +
-  '"industryRiskAssessment": {"currentThreatLevel": "Critical"|"High"|"Medium"|"Low", "mostLikelyAttackScenarios": string[] (2-4), "highestBusinessRisks": string[] (2-4), "technologiesRequiringAttention": string[] (2-5)}.\n' +
-  '"recommendedDefensivePriorities": string[] of up to 10 items, ranked most urgent first, specific to this industry and this table -- not generic best-practices.\n' +
+  '"industryRiskAssessment": {"currentThreatLevel": "Critical"|"High"|"Medium"|"Low", "whyTargeted": string (2-3 sentences on why THIS sector specifically is being targeted right now, grounded in the table -- what makes it attractive/vulnerable, e.g. legacy OT exposure, high-value data, low security maturity, regulatory pressure creating urgency to pay), "mostLikelyAttackScenarios": string[] (2-4), "highestBusinessRisks": string[] (2-4), "technologiesRequiringAttention": string[] (2-5)}.\n' +
+  '"recommendedDefensivePriorities": string[] of up to 10 items security teams should prioritize over the NEXT 30 DAYS specifically, ranked most urgent first, specific to this industry and this table -- not generic best-practices, not a multi-quarter roadmap.\n' +
   '"threatIntelOutlook": string, 1-2 paragraphs on likely developments over the next 60-90 days, grounded only in the table\'s own trajectory or a clearly-hedged general pattern for the category -- never a specific unconfirmed prediction about a named incident.\n' +
   "No other text, no markdown formatting, no code fences.";
 
@@ -354,6 +359,7 @@ function safeRiskAssessment(value) {
   const v = value && typeof value === "object" ? value : {};
   return {
     currentThreatLevel: RELEVANCE_LEVELS.has(v.currentThreatLevel) ? v.currentThreatLevel : "Medium",
+    whyTargeted: safeString(v.whyTargeted, "Not enough grounded detail to explain why this sector is currently targeted."),
     mostLikelyAttackScenarios: safeStringArray(v.mostLikelyAttackScenarios, 4),
     highestBusinessRisks: safeStringArray(v.highestBusinessRisks, 4),
     technologiesRequiringAttention: safeStringArray(v.technologiesRequiringAttention, 5),
@@ -372,6 +378,174 @@ function vulnerabilityTrendsFromPool(pool) {
     }
   }
   return { kevEntries: kevEntries.slice(0, 20), totalUniqueCves: seenCves.size };
+}
+
+function norm(v) {
+  return (v ?? "").toString().trim().toLowerCase();
+}
+
+/**
+ * Real server/campaignIntelligence.js entities targeting this industry --
+ * either tagged directly via the entity's own targetedIndustries (see
+ * server/newsCorrelation.js#matchIndustries, same keyword signal this
+ * module's own poolForIndustry uses), or run by one of this briefing's own
+ * validated actors. Deterministic, no new correlation invented -- same
+ * reverse-lookup-by-targetedIndustries pattern already proven in
+ * server/investigation/investigationGraph.js's victim-edge derivation.
+ */
+function activeCampaignsForIndustry(industry, activeThreatActors) {
+  const actorNames = new Set(activeThreatActors.map((a) => norm(a.actor)));
+  return getCampaignEntities()
+    .filter((c) => (c.targetedIndustries ?? []).includes(industry) || (c.associatedActors ?? []).some((a) => actorNames.has(norm(a))))
+    .slice(0, 10)
+    .map((c) => ({
+      name: c.name,
+      associatedActors: c.associatedActors ?? [],
+      associatedMalware: c.associatedMalware ?? [],
+      firstSeen: c.firstSeen ?? null,
+      lastSeen: c.lastSeen ?? null,
+      verified: Boolean(c.verified),
+      mentionCount: c.mentionCount ?? 0,
+    }));
+}
+
+/** Enriches each validated actor with real entity data (mentionCount/firstSeen/lastSeen from server/threatActorIntelligence.js) instead of relying only on the model's own citation count -- same "prefer the real entity over the model's own citation count" discipline investigationGraph.js already established. Falls back to the briefing's own citation count when no canonical entity exists (e.g. a ransomware-only actor not yet in the news-derived store). */
+function enrichActorsWithEntityData(actors) {
+  const entities = getActorEntities();
+  return actors.map((a) => {
+    const entity = entities.find((e) => norm(e.name) === norm(a.actor) || (e.aliases ?? []).some((al) => norm(al) === norm(a.actor)));
+    return {
+      ...a,
+      reportCount: entity?.mentionCount ?? a.sourceArticles.length,
+      firstSeen: entity?.firstSeen ?? null,
+      lastSeen: entity?.lastSeen ?? null,
+    };
+  });
+}
+
+/**
+ * Real CVSS/EPSS/KEV per CVE ID in the grounding pool -- looked up from the
+ * same bulk NVD sync cache + EPSS + KEV sources server/routes/dashboard.js's
+ * own /dashboard/cves route already reads, never a live per-CVE network call
+ * (too slow for a request-scoped multi-CVE lookup). A CVE too new/old for
+ * the bulk NVD sync gets KEV-only enrichment -- honest, not fabricated.
+ */
+function criticalCvesForPool(pool) {
+  const nvdRecords = cache.getEntry("nvd").data?.latestCves?.records ?? [];
+  const nvdById = new Map(nvdRecords.map((r) => [r.id, r]));
+  const kevIds = new Set((cache.getEntry("cisa-kev").data?.entries ?? []).map((e) => e.cveId));
+  const epssScores = cache.getEntry("epss").data ?? {};
+
+  const seen = new Set();
+  const out = [];
+  for (const a of pool) {
+    for (const cveId of a.cveIds) {
+      if (seen.has(cveId)) continue;
+      seen.add(cveId);
+      const record = nvdById.get(cveId);
+      out.push({
+        cveId,
+        cvssScore: record?.cvssScore ?? null,
+        epssScore: epssScores[cveId]?.score ?? null,
+        epssPercentile: epssScores[cveId]?.percentile ?? null,
+        knownExploited: kevIds.has(cveId),
+        description: record?.description ?? null,
+      });
+    }
+  }
+  return out
+    .sort((x, y) => Number(y.knownExploited) - Number(x.knownExploited) || (y.epssScore ?? 0) - (x.epssScore ?? 0) || (y.cvssScore ?? 0) - (x.cvssScore ?? 0))
+    .slice(0, 20);
+}
+
+/**
+ * Real ip/domain/url/hash IOCs from this industry's already-validated
+ * malware families' own tracked indicators (server/malwareIntelligence.js's
+ * iocs/articleIocs -- same fields server/investigation/investigationGraph.js
+ * already reads), plus real email addresses from the pool's own matched AI
+ * Summarization reports. Deterministic, capped, deduped.
+ */
+function buildIndustryIocFeed(malwareFamilies, pool, reports) {
+  const names = new Set(malwareFamilies.map((m) => norm(m.name)));
+  const entities = getMalwareEntities().filter((e) => names.has(norm(e.name)));
+
+  const indicators = [];
+  const seen = new Set();
+  outer: for (const entity of entities) {
+    for (const ioc of [...(entity.iocs ?? []), ...(entity.articleIocs ?? [])]) {
+      const key = `${ioc.indicatorType}:${norm(ioc.indicator)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      indicators.push({ indicator: ioc.indicator, indicatorType: ioc.indicatorType, malwareFamily: entity.name, firstSeen: ioc.firstSeen ?? null });
+      if (indicators.length >= 175) break outer;
+    }
+  }
+
+  const poolIds = new Set(pool.map((a) => a.id));
+  for (const report of reports) {
+    if (!poolIds.has(report.id)) continue;
+    for (const email of report.iocs?.emailAddresses ?? []) {
+      const key = `email:${norm(email)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      indicators.push({ indicator: email, indicatorType: "email", malwareFamily: null, firstSeen: report.publishedDate ?? null });
+      if (indicators.length >= 200) break;
+    }
+  }
+
+  return { indicators, totalCount: indicators.length };
+}
+
+/** The pool's own matched entries that are backed by a real stored AiThreatSummaryReport (report.id === article link, see aiThreatSummary.js) -- not just a bare news item -- exposing real vendor/severity/actor/campaign/AI-summary fields already on the stored report, never re-authored. */
+function recentReportsForPool(pool, reports) {
+  const reportsById = new Map(reports.map((r) => [r.id, r]));
+  const out = [];
+  for (const a of pool) {
+    const report = reportsById.get(a.id);
+    if (!report) continue;
+    out.push({
+      id: report.id,
+      articleTitle: report.articleTitle,
+      articleLink: report.articleLink,
+      articleSource: report.articleSource,
+      publishedDate: report.publishedDate,
+      severity: report.severity,
+      threatActors: (report.threatActors ?? []).map((t) => t.group),
+      campaignName: report.campaignName ?? null,
+      executiveSummary: report.executiveSummary ?? null,
+    });
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+/**
+ * Real per-platform detection queries + rule citations for this industry's
+ * validated malware + actor entities -- pure reuse of
+ * server/huntingLibrary.js#buildEntityHuntingQueries (already powers the
+ * Hunting & Detection tab), just scoped down to this industry's own
+ * entities instead of every tracked one. No new query-generation logic.
+ */
+function detectionAndHuntingForIndustry(malwareFamilies, activeThreatActors) {
+  const ruleIndex = cache.getEntry("detection-rules").data?.index ?? [];
+  const malwareNames = new Set(malwareFamilies.map((m) => norm(m.name)));
+  const actorNames = new Set(activeThreatActors.map((a) => norm(a.actor)));
+
+  const malwareEntities = getMalwareEntities().filter((e) => malwareNames.has(norm(e.name)));
+  const actorEntities = getActorEntities().filter((e) => actorNames.has(norm(e.name)) || (e.aliases ?? []).some((al) => actorNames.has(norm(al))));
+
+  const items = buildEntityHuntingQueries(malwareEntities, actorEntities, ruleIndex);
+  const DETECTION_PLATFORMS = { sentinelKql: "sentinelKql", defenderXdrKql: "sentinelKql", splunkSpl: "splunkSpl", elastic: "elastic", sigma: "sigma", yara: "yara" };
+
+  const detectionOpportunities = { sentinelKql: [], splunkSpl: [], elastic: [], sigma: [], yara: [] };
+  const huntingOpportunities = [];
+  for (const item of items) {
+    const entry = { platform: item.platformLabel, query: item.query, source: item.articleSource, sourceUrl: item.articleLink, malware: item.malware, threatActors: item.threatActors };
+    const bucket = DETECTION_PLATFORMS[item.platform];
+    if (bucket && detectionOpportunities[bucket].length < 10) detectionOpportunities[bucket].push(entry);
+    if (huntingOpportunities.length < 30) huntingOpportunities.push(entry);
+  }
+  return { detectionOpportunities, huntingOpportunities };
 }
 
 /**
@@ -412,6 +586,9 @@ export async function generateIndustryBriefing(industry, { taggedNewsItems, repo
   }
 
   const topAttackTechniques = safeTopAttackTechniques(parsed.topAttackTechniques, pool, validTechniqueIds, idToTechnique);
+  const activeThreatActors = enrichActorsWithEntityData(safeActiveThreatActors(parsed.activeThreatActors, pool));
+  const malwareFamilies = safeMalwareFamilies(parsed.malwareFamilies, pool);
+  const { detectionOpportunities, huntingOpportunities } = detectionAndHuntingForIndustry(malwareFamilies, activeThreatActors);
 
   return {
     industry,
@@ -420,13 +597,19 @@ export async function generateIndustryBriefing(industry, { taggedNewsItems, repo
     dateRangeDays: Math.round(POOL_WINDOW_MS / (24 * 60 * 60 * 1000)),
     executiveSummary: safeString(parsed.executiveSummary, "Insufficient grounded detail to produce an executive summary."),
     topEmergingThreats: safeTopEmergingThreats(parsed.topEmergingThreats, pool),
-    activeThreatActors: safeActiveThreatActors(parsed.activeThreatActors, pool),
+    activeThreatActors,
+    activeCampaigns: activeCampaignsForIndustry(industry, activeThreatActors),
     emergingAttackTechniques: safeAttackTechniques(parsed.emergingAttackTechniques, pool),
     topAttackTechniques,
     tacticsSummary: computeTacticsSummary(topAttackTechniques),
-    malwareFamilies: safeMalwareFamilies(parsed.malwareFamilies, pool),
+    malwareFamilies,
     commonTargets: safeStringArray(parsed.commonTargets, 8),
     vulnerabilityTrends: { ...vulnerabilityTrendsFromPool(pool), commentary: safeString(parsed.vulnerabilityTrendsCommentary) },
+    criticalCves: criticalCvesForPool(pool),
+    industryIocFeed: buildIndustryIocFeed(malwareFamilies, pool, reports),
+    recentReports: recentReportsForPool(pool, reports),
+    detectionOpportunities,
+    huntingOpportunities,
     industryRiskAssessment: safeRiskAssessment(parsed.industryRiskAssessment),
     recommendedDefensivePriorities: safeStringArray(parsed.recommendedDefensivePriorities, 10),
     threatIntelOutlook: safeString(parsed.threatIntelOutlook, "Not enough grounded signal to project a reliable outlook."),

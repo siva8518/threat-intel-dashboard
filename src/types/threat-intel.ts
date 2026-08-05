@@ -447,8 +447,13 @@ export interface GraphEdge {
   targetKey: string;
   targetLabel: string;
   relationship: string;
+  /** Technical provenance label (e.g. "Direct: actor.malwareUsed") -- kept for the tooltip; `reasoning` is the analyst-facing text. */
   why: string;
+  /** Analyst-readable sentence explaining why this relationship exists, including real supporting-report counts/sources when known -- see buildReasoning() in server/investigation/investigationGraph.js. */
+  reasoning: string;
   confidence: GraphConfidence;
+  /** 0-100, the numeric score classifyConfidence()'s tier badge is derived from -- see scoreConfidence() in server/investigation/investigationGraph.js. */
+  confidenceScore: number;
   firstSeen: string | null;
   lastSeen: string | null;
   /** Null when not meaningfully computable for this relationship type -- render as "not tracked", never as 0 (which would imply zero evidence). */
@@ -1161,18 +1166,22 @@ export interface AiThreatSummaryOperationalImpactAssessment {
   attackerObjectives: string[];
 }
 
-/** Fixed 10-sector catalog -- see INDUSTRY_CATALOG in server/aiThreatSummary.js. Every report has all 10, most "Not Applicable"/"Low" by design; only genuinely-supported sectors are elevated. */
+/** Fixed 14-sector catalog -- see INDUSTRY_CATALOG in server/aiThreatSummary.js. Every report has all 14, most "Not Applicable"/"Low" by design; only genuinely-supported sectors are elevated. */
 export type IndustryName =
   | "Financial Services"
-  | "Consumer"
-  | "Technology, Media & Telecommunications"
-  | "Life Sciences & Health Care"
+  | "Healthcare"
+  | "Government"
   | "Manufacturing"
+  | "Retail"
+  | "Technology"
+  | "Telecommunications"
   | "Energy & Utilities"
-  | "Government & Public Sector"
-  | "Retail & eCommerce"
   | "Education"
-  | "Transportation & Logistics";
+  | "Transportation & Logistics"
+  | "Media & Entertainment"
+  | "Hospitality"
+  | "Insurance"
+  | "Pharmaceuticals";
 
 export type IndustryRelevanceLevel = "Critical" | "High" | "Medium" | "Low" | "Not Applicable";
 
@@ -1574,6 +1583,10 @@ export interface IndustryBriefingActor {
   recentCampaigns: string;
   ttps: string;
   sourceArticles: IndustryBriefingArticleRef[];
+  /** Real threatActorIntelligence.js entity mentionCount/dates when this actor resolves to a known entity -- falls back to sourceArticles.length/null when it doesn't (see enrichActorsWithEntityData in server/industryBriefing.js). */
+  reportCount: number;
+  firstSeen: string | null;
+  lastSeen: string | null;
 }
 
 export interface IndustryBriefingTechnique {
@@ -1613,6 +1626,71 @@ export interface IndustryBriefingMalwareFamily {
   sourceArticles: IndustryBriefingArticleRef[];
 }
 
+/** Real campaignIntelligence.js entity, reverse-matched by targetedIndustries/associatedActors -- never model-authored (see activeCampaignsForIndustry in server/industryBriefing.js). */
+export interface IndustryBriefingCampaign {
+  name: string;
+  associatedActors: string[];
+  associatedMalware: string[];
+  firstSeen: string | null;
+  lastSeen: string | null;
+  verified: boolean;
+  mentionCount: number;
+}
+
+/** Real CVSS/EPSS/KEV data from the NVD/KEV/EPSS caches -- never model-authored (see criticalCvesForPool in server/industryBriefing.js). */
+export interface IndustryBriefingCriticalCve {
+  cveId: string;
+  cvssScore: number | null;
+  epssScore: number | null;
+  epssPercentile: number | null;
+  knownExploited: boolean;
+  description: string | null;
+}
+
+export interface IndustryIocIndicator {
+  indicator: string;
+  indicatorType: string;
+  malwareFamily: string | null;
+  firstSeen: string | null;
+}
+
+/** Real IOCs pulled from this industry's own malware entities' iocs/articleIocs, plus email addresses from matched reports -- never model-authored (see buildIndustryIocFeed in server/industryBriefing.js). */
+export interface IndustryIocFeed {
+  indicators: IndustryIocIndicator[];
+  totalCount: number;
+}
+
+/** A real stored AiThreatSummaryReport row matched into this industry's grounding pool -- fields come straight off the stored report, not re-authored (see recentReportsForPool in server/industryBriefing.js). */
+export interface IndustryBriefingReport {
+  id: string;
+  articleTitle: string;
+  articleLink: string;
+  articleSource: string;
+  publishedDate: string;
+  severity: string;
+  threatActors: string[];
+  campaignName: string | null;
+  executiveSummary: string | null;
+}
+
+export interface IndustryDetectionOpportunity {
+  platform: string;
+  query: string;
+  source: string;
+  sourceUrl: string;
+  malware: string[];
+  threatActors: string[];
+}
+
+/** Deterministic, per-platform detection queries reused from server/huntingLibrary.js#buildEntityHuntingQueries -- no new LLM call. */
+export interface IndustryDetectionOpportunities {
+  sentinelKql: IndustryDetectionOpportunity[];
+  splunkSpl: IndustryDetectionOpportunity[];
+  elastic: IndustryDetectionOpportunity[];
+  sigma: IndustryDetectionOpportunity[];
+  yara: IndustryDetectionOpportunity[];
+}
+
 export interface IndustryBriefing {
   industry: IndustryName;
   generatedAt: string;
@@ -1622,6 +1700,7 @@ export interface IndustryBriefing {
   executiveSummary: string;
   topEmergingThreats: IndustryBriefingThreat[];
   activeThreatActors: IndustryBriefingActor[];
+  activeCampaigns: IndustryBriefingCampaign[];
   emergingAttackTechniques: IndustryBriefingTechnique[];
   topAttackTechniques: IndustryBriefingAttackTechnique[];
   tacticsSummary: IndustryBriefingTacticSummary[];
@@ -1633,8 +1712,14 @@ export interface IndustryBriefing {
     totalUniqueCves: number;
     commentary: string;
   };
+  criticalCves: IndustryBriefingCriticalCve[];
+  industryIocFeed: IndustryIocFeed;
+  recentReports: IndustryBriefingReport[];
+  detectionOpportunities: IndustryDetectionOpportunities;
+  huntingOpportunities: IndustryDetectionOpportunity[];
   industryRiskAssessment: {
     currentThreatLevel: "Critical" | "High" | "Medium" | "Low";
+    whyTargeted: string;
     mostLikelyAttackScenarios: string[];
     highestBusinessRisks: string[];
     technologiesRequiringAttention: string[];

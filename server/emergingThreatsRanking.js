@@ -19,7 +19,7 @@
 // to avoid any confusion between the two -- this module never touches that
 // connector or its cache entry.
 import { INDUSTRY_CATALOG } from "./aiThreatSummary.js";
-import industryKeywords10 from "./data/industry-map-10.json" with { type: "json" };
+import industryKeywords from "./data/industry-map-14.json" with { type: "json" };
 
 const WEIGHTS = { risk: 0.35, kev: 0.15, namedThreat: 0.15, industryRisk: 0.2, recency: 0.15 };
 const RECENCY_FULL_WINDOW_MS = 24 * 60 * 60 * 1000; // full recency credit for anything published in the last 24h
@@ -243,15 +243,15 @@ const RELEVANCE_TO_PRIORITY = { Critical: "Immediate", High: "High", Medium: "No
 // catches plurals/possessives the old substring match relied on ("telecom"
 // still matches inside "telecommunications") while refusing to match a
 // keyword embedded mid-word like "factory" inside "artifactory".
-const INDUSTRY_KEYWORD_PATTERNS = Object.entries(industryKeywords10)
+const INDUSTRY_KEYWORD_PATTERNS = Object.entries(industryKeywords)
   .filter(([industry]) => !industry.startsWith("_"))
   .map(([industry, keywords]) => [
     industry,
     keywords.map((k) => new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")),
   ]);
 
-/** Case-insensitive, leading-word-boundary match against a title -- see server/data/industry-map-10.json. Same "curated list, not NLP" convention as matchIndustries() in server/newsCorrelation.js, just scoped to this feature's own 10-sector taxonomy. Exported for reuse by server/industryBriefing.js so it doesn't duplicate the keyword-map loading/matching logic. */
-export function matchIndustries10(title) {
+/** Case-insensitive, leading-word-boundary match against a title -- see server/data/industry-map-14.json. Same "curated list, not NLP" convention as matchIndustries() in server/newsCorrelation.js (a distinct, older 4-bucket function of the same name for a different widget), just scoped to this feature's own 14-sector taxonomy. Exported for reuse by server/industryBriefing.js so it doesn't duplicate the keyword-map loading/matching logic. */
+export function matchIndustries(title) {
   const hits = [];
   for (const [industry, patterns] of INDUSTRY_KEYWORD_PATTERNS) {
     if (patterns.some((re) => re.test(title))) hits.push(industry);
@@ -282,7 +282,7 @@ export function computeAggregateIndustryHeatmap(taggedNewsItems, reports) {
 
   for (const item of taggedNewsItems) {
     if (now - new Date(item.publishedDate).getTime() > POOL_WINDOW_MS) continue;
-    const matchedIndustries = matchIndustries10(item.title);
+    const matchedIndustries = matchIndustries(item.title);
     if (matchedIndustries.length === 0) continue;
 
     const keywordRelevance = SEVERITY_TO_RELEVANCE[item.severity] ?? "Low";
