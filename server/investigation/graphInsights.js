@@ -58,6 +58,7 @@ function buildReportOverlap(edges) {
 const SYSTEM_PROMPT =
   "You are a senior Threat Intelligence Analyst reviewing an automated investigation graph a junior analyst just pulled up. " +
   "You are given the investigated entity, every real relationship (edge) already discovered for it, which relationship types have no data source (so you never suggest investigating something this platform simply cannot answer), and pre-computed overlap facts (which malware/actor/campaign names already appear in 2+ of the connected reports, and how many reports each piece of infrastructure independently appears in). " +
+  "The edge list may span multiple pivots the analyst has already made (a multi-hop graph), not only the investigated entity's own direct connections -- treat every edge as real discovered intelligence regardless of how many hops away it sits, and never assume everything is one hop from the entity. " +
   "Do NOT restate the edge list -- the analyst can already see it in full above your summary. Your job is to explain what it MEANS: which connections matter, what they imply together, and what to do next. " +
   "\n\nGROUNDING RULES:\n" +
   "- Every claim must trace to a specific edge, report, or tally entry you were given. Name the actual entity/report/count, never a vague generality.\n" +

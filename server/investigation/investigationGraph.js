@@ -34,6 +34,8 @@ import { crossReferenceIndicator } from "./crossReference.js";
 import { resolveDnsRecords, reverseDns } from "../lib/dnsRecords.js";
 import { getPassiveDns } from "../connectors/otx.js";
 import { checkRipestatThrottled } from "./ipModule.js";
+import { checkIndicator as checkCrtsh } from "../lookups/crtsh.js";
+import { checkIndicator as checkRdap } from "../lookups/rdap.js";
 import { detectionRulesFor, detectionRulesForCve, techniqueIdsForFamily } from "../correlate.js";
 import { buildEntityHuntingQueries } from "../huntingLibrary.js";
 import * as cache from "../cache.js";
@@ -68,23 +70,50 @@ function dedupeEdges(edges) {
 
 // Confidence is derived entirely from provenance this app already records in
 // `linkBasis` strings -- an explicit stored field on either side of a
-// relationship ("Direct"/"Reverse") is High, something inferred via a shared
-// value or a live external source ("Cross-reference"/"Indirect"/"Live") is
-// Medium, and an algorithmic guess or a not-yet-canonicalized name match
-// ("Heuristic"/"Report-only") is Low. Nothing here is a new judgment call --
-// it's a fixed mapping over labels the underlying gather functions already
-// produce.
+// relationship ("Direct"/"Reverse") is highest, something inferred via a
+// shared value or a live external source ("Cross-reference"/"Indirect"/
+// "Live") is mid-tier, and an algorithmic guess or a not-yet-canonicalized
+// name match ("Heuristic"/"Report-only") is lowest. The third element of
+// each rule is that tier's numeric base score (see scoreConfidence below) --
+// nothing here is a new judgment call, it's a fixed mapping over labels the
+// underlying gather functions already produce.
 const CONFIDENCE_RULES = [
-  [/^Direct:/, "High"],
-  [/^Reverse:/, "High"],
-  [/^Cross-reference:/, "Medium"],
-  [/^Indirect:/, "Medium"],
-  [/^Live:/, "Medium"],
-  [/^Heuristic:/, "Low"],
-  [/^Report-only:/, "Low"],
+  [/^Direct:/, "High", 72],
+  [/^Reverse:/, "High", 72],
+  [/^Cross-reference:/, "Medium", 52],
+  [/^Indirect:/, "Medium", 50],
+  [/^Live:/, "Medium", 55],
+  [/^Heuristic:/, "Low", 30],
+  [/^Report-only:/, "Low", 25],
 ];
+const DEFAULT_CONFIDENCE_RULE = [null, "Low", 25];
+function confidenceRule(linkBasis) {
+  return CONFIDENCE_RULES.find(([re]) => re.test(linkBasis)) ?? DEFAULT_CONFIDENCE_RULE;
+}
 function classifyConfidence(linkBasis) {
-  return CONFIDENCE_RULES.find(([re]) => re.test(linkBasis))?.[1] ?? "Low";
+  return confidenceRule(linkBasis)[1];
+}
+
+/**
+ * Numeric 0-100 confidence underneath the High/Medium/Low badge above --
+ * still purely derived from real facts already on the edge, never a new
+ * judgment call. Base score comes from the same provenance tier
+ * classifyConfidence() maps; a real (not fabricated) supportingReportCount
+ * and a real distinct source count each add a small, capped bonus; a
+ * relationship confirmed recently (lastSeen within the last 90 days) gets a
+ * small recency bonus over a stale or unknown one.
+ */
+function scoreConfidence(linkBasis, extra = {}) {
+  const [, , base] = confidenceRule(linkBasis);
+  let score = base;
+  if (typeof extra.supportingReportCount === "number") score += Math.min(20, extra.supportingReportCount * 4);
+  if (Array.isArray(extra.sources)) score += Math.min(10, Math.max(0, extra.sources.length - 1) * 5);
+  if (extra.lastSeen) {
+    const days = (Date.now() - new Date(extra.lastSeen).getTime()) / (24 * 60 * 60 * 1000);
+    if (days <= 30) score += 6;
+    else if (days <= 90) score += 3;
+  }
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
 const SOURCE_PATTERNS = [
@@ -94,6 +123,8 @@ const SOURCE_PATTERNS = [
   [/campaign\.\w|campaignIds/i, "Campaign Intelligence store"],
   [/dark-web finding targetedCountries/i, "Dark Web Intelligence store"],
   [/AbuseIPDB/i, "AbuseIPDB"],
+  [/crt\.sh/i, "crt.sh certificate transparency"],
+  [/RDAP/i, "RDAP (WHOIS)"],
   [/passive DNS/i, "OTX Passive DNS"],
   [/reverse DNS/i, "Reverse DNS (PTR)"],
   [/DNS A\/AAAA/i, "DNS resolution"],
@@ -103,30 +134,75 @@ const SOURCE_PATTERNS = [
   [/RIPEstat/i, "RIPEstat"],
   [/own (?:prior )?ioc/i, "This app's own ingested IOC data"],
 ];
-function sourcesFor(linkBasis) {
+/** `overlapSources` (real distinct article-source names from articleOverlapDetail) are folded in alongside the technical source label, deduped -- so an edge backed by both a store field AND independently corroborating reports shows every real source, not just one. */
+function sourcesFor(linkBasis, extra = {}) {
   const hit = SOURCE_PATTERNS.find(([re]) => re.test(linkBasis));
-  return [hit ? hit[1] : "This app's own correlation"];
+  const base = hit ? hit[1] : "This app's own correlation";
+  const overlap = Array.isArray(extra.overlapSources) ? extra.overlapSources : [];
+  return Array.from(new Set([base, ...overlap]));
 }
 
-/** Real, computable per-edge "supporting reports" -- the intersection of two entities' own article lists by link. Returns null (not 0) when not meaningfully computable, so the UI can render "not tracked" instead of implying zero evidence. */
-function articleOverlapCount(a, b) {
-  if (!a?.articles?.length || !b?.articles?.length) return null;
+// Plain-English rendering of the same provenance categories classifyConfidence()
+// already classifies -- the analyst-facing counterpart to the technical
+// linkBasis label (kept as `why`, now a tooltip rather than the primary text).
+const REASONING_TEMPLATES = [
+  [/^Direct:/, "Directly recorded in this platform's own tracked data"],
+  [/^Reverse:/, "Directly recorded in this platform's own tracked data (reverse lookup)"],
+  [/^Cross-reference:/, "Discovered by cross-referencing a shared indicator across this platform's own tracked malware data"],
+  [/^Indirect:/, "Inferred from a shared value in this platform's own tracked data"],
+  [/^Live:/, "Confirmed via a live external lookup at investigation time"],
+  [/^Heuristic:/, "An algorithmic best-guess match, not an explicit citation"],
+  [/^Report-only:/, "Named in a report but not yet matched to a canonical entity in this app"],
+];
+function baseReasoning(linkBasis) {
+  return REASONING_TEMPLATES.find(([re]) => re.test(linkBasis))?.[1] ?? "Derived from this platform's own correlation";
+}
+/**
+ * Analyst-readable sentence for the edge -- e.g. "Directly recorded in this
+ * platform's own tracked data. Observed together in 14 independent
+ * intelligence reports including Microsoft, Mandiant, CISA." Every number
+ * and name here comes straight from articleOverlapDetail()'s real,
+ * pre-computed overlap -- never estimated or invented.
+ */
+function buildReasoning(linkBasis, extra = {}) {
+  const parts = [baseReasoning(linkBasis)];
+  if (typeof extra.supportingReportCount === "number" && extra.supportingReportCount > 0) {
+    const names = Array.isArray(extra.overlapSources) && extra.overlapSources.length > 0 ? ` including ${extra.overlapSources.join(", ")}` : "";
+    parts.push(`Observed together in ${extra.supportingReportCount} independent intelligence report${extra.supportingReportCount === 1 ? "" : "s"}${names}`);
+  }
+  return `${parts.join(". ")}.`;
+}
+
+/** Real, computable per-edge "supporting reports" -- the intersection of two entities' own article lists by link, plus up to 3 real distinct article-source names from that overlap (never invented). Returns {count: null, sources: []} (not 0) when not meaningfully computable, so the UI can render "not tracked" instead of implying zero evidence. */
+function articleOverlapDetail(a, b) {
+  if (!a?.articles?.length || !b?.articles?.length) return { count: null, sources: [] };
   const links = new Set(b.articles.map((x) => x.link));
-  return a.articles.filter((x) => links.has(x.link)).length;
+  const overlapping = a.articles.filter((x) => links.has(x.link));
+  const sources = Array.from(new Set(overlapping.map((x) => x.source).filter(Boolean))).slice(0, 3);
+  return { count: overlapping.length, sources };
+}
+/** Spreads an articleOverlapDetail() result into the {supportingReportCount, overlapSources} shape edge()'s `extra` expects. */
+function overlapExtra(detail) {
+  return { supportingReportCount: detail.count, overlapSources: detail.sources };
 }
 
 function edge(targetType, targetKey, targetLabel, relationship, linkBasis, extra = {}) {
+  const supportingReportCount = extra.supportingReportCount ?? null;
+  const overlapSources = extra.overlapSources ?? [];
+  const sources = sourcesFor(linkBasis, { overlapSources });
   return {
     targetType,
     targetKey,
     targetLabel,
     relationship,
     why: linkBasis,
+    reasoning: buildReasoning(linkBasis, { supportingReportCount, overlapSources }),
     confidence: classifyConfidence(linkBasis),
+    confidenceScore: scoreConfidence(linkBasis, { supportingReportCount, sources, lastSeen: extra.lastSeen ?? null }),
     firstSeen: extra.firstSeen ?? null,
     lastSeen: extra.lastSeen ?? null,
-    supportingReportCount: extra.supportingReportCount ?? null,
-    sources: sourcesFor(linkBasis),
+    supportingReportCount,
+    sources,
   };
 }
 
@@ -183,7 +259,7 @@ function gatherActor(key) {
 
     for (const name of entity.malwareUsed) {
       const target = findByNameOrAlias(getMalwareEntities(), name);
-      edges.push(edge("malware", name, name, "uses malware", "Direct: actor.malwareUsed", { supportingReportCount: articleOverlapCount(entity, target) }));
+      edges.push(edge("malware", name, name, "uses malware", "Direct: actor.malwareUsed", overlapExtra(articleOverlapDetail(entity, target))));
     }
     for (const id of entity.cveExploited) edges.push(edge("cve", id, id, "exploits", "Direct: actor.cveExploited"));
     if (entity.country) edges.push(edge("country", entity.country, entity.country, "originates from", "Direct: actor.country (ATT&CK)"));
@@ -192,7 +268,7 @@ function gatherActor(key) {
 
     for (const c of getCampaignEntities()) {
       if ((c.associatedActors ?? []).some((a) => names.has(norm(a)))) {
-        edges.push(edge("campaign", c.name, c.name, "runs campaign", "Reverse: campaign.associatedActors", { supportingReportCount: articleOverlapCount(entity, c) }));
+        edges.push(edge("campaign", c.name, c.name, "runs campaign", "Reverse: campaign.associatedActors", overlapExtra(articleOverlapDetail(entity, c))));
       }
     }
     for (const r of getRansomwareCampaigns()) {
@@ -233,11 +309,11 @@ function gatherCampaign(key) {
     const actorNames = new Set(entity.associatedActors.map(norm));
     for (const name of entity.associatedActors) {
       const target = findByNameOrAlias(getActorEntities(), name);
-      edges.push(edge("actor", name, name, "run by", "Direct: campaign.associatedActors", { supportingReportCount: articleOverlapCount(entity, target) }));
+      edges.push(edge("actor", name, name, "run by", "Direct: campaign.associatedActors", overlapExtra(articleOverlapDetail(entity, target))));
     }
     for (const name of entity.associatedMalware) {
       const target = findByNameOrAlias(getMalwareEntities(), name);
-      edges.push(edge("malware", name, name, "deploys malware", "Direct: campaign.associatedMalware", { supportingReportCount: articleOverlapCount(entity, target) }));
+      edges.push(edge("malware", name, name, "deploys malware", "Direct: campaign.associatedMalware", overlapExtra(articleOverlapDetail(entity, target))));
     }
     for (const id of entity.cveExploited) edges.push(edge("cve", id, id, "exploits", "Direct: campaign.cveExploited"));
     for (const c of entity.targetedCountries) edges.push(edge("country", c, c, "targets victims in", "Indirect: campaign.targetedCountries (news text match)"));
@@ -286,10 +362,10 @@ function gatherMalware(key) {
     edges.push(...malwareIndicatorEdges(entity));
     const names = new Set([norm(entity.name), ...entity.aliases.map(norm)]);
     for (const a of getActorEntities()) {
-      if ((a.malwareUsed ?? []).some((m) => names.has(norm(m)))) edges.push(edge("actor", a.name, a.name, "used by", "Reverse: actor.malwareUsed", { supportingReportCount: articleOverlapCount(entity, a) }));
+      if ((a.malwareUsed ?? []).some((m) => names.has(norm(m)))) edges.push(edge("actor", a.name, a.name, "used by", "Reverse: actor.malwareUsed", overlapExtra(articleOverlapDetail(entity, a))));
     }
     for (const c of getCampaignEntities()) {
-      if ((c.associatedMalware ?? []).some((m) => names.has(norm(m)))) edges.push(edge("campaign", c.name, c.name, "deployed in", "Reverse: campaign.associatedMalware", { supportingReportCount: articleOverlapCount(entity, c) }));
+      if ((c.associatedMalware ?? []).some((m) => names.has(norm(m)))) edges.push(edge("campaign", c.name, c.name, "deployed in", "Reverse: campaign.associatedMalware", overlapExtra(articleOverlapDetail(entity, c))));
     }
     const softwareIndex = cache.getEntry("attack").data?.software ?? [];
     for (const id of techniqueIdsForFamily(entity.name, softwareIndex)) edges.push(edge("attackTechnique", id, id, "implements technique", "Reverse: ATT&CK software techniqueIds / curated map"));
@@ -409,6 +485,7 @@ async function gatherIpOrDomain(type, key) {
   }
 
   let dnsAsn = null;
+  const domainMetadata = {};
   try {
     if (type === "ip") {
       const [hostname, passive] = await Promise.allSettled([reverseDns(value), getPassiveDns("ip", value)]);
@@ -427,14 +504,48 @@ async function gatherIpOrDomain(type, key) {
         edges.push(edge("asn", dnsAsn, `AS${dnsAsn}${ripestat.holder ? ` (${ripestat.holder})` : ""}`, "shares ASN with", `Live: RIPEstat (${sameAsn.length} sibling IP(s) from this app's own IOC data confirmed on the same ASN)`));
       }
     } else {
-      const [records, passive] = await Promise.allSettled([resolveDnsRecords(value), getPassiveDns("domain", value)]);
+      // crt.sh (certificate transparency) and RDAP (WHOIS-equivalent) are the
+      // exact same lookups server/investigation/domainModule.js already uses
+      // for the Triage Console's domain module -- reused here as real edges/
+      // metadata instead of duplicating the correlation logic. No bulk
+      // registrant-to-registrant index exists anywhere in this app, so RDAP
+      // only ever enriches this one node's metadata, never a new cross-domain
+      // edge (see file header discipline on not inventing correlation).
+      const [records, passive, certificate, registration] = await Promise.allSettled([
+        resolveDnsRecords(value),
+        getPassiveDns("domain", value),
+        checkCrtsh("domain", value),
+        checkRdap("domain", value),
+      ]);
       if (records.status === "fulfilled") for (const ip of [...records.value.a, ...records.value.aaaa]) edges.push(edge("ip", ip, ip, "resolves to", "Live: DNS A/AAAA record"));
       if (passive.status === "fulfilled") {
         for (const rec of passive.value) if (rec.address && (rec.recordType === "A" || rec.recordType === "AAAA")) edges.push(edge("ip", rec.address, rec.address, "passive DNS resolution", "Live: OTX passive DNS"));
       }
+      if (certificate.status === "fulfilled") {
+        const subdomains = (certificate.value.subdomains ?? []).filter((s) => s && s !== value).slice(0, 10);
+        for (const sub of subdomains) edges.push(edge("domain", sub, sub, "shares SSL/TLS certificate with", "Live: crt.sh certificate transparency (same certificate covers this subdomain)"));
+        if (certificate.value.certificateCount > 0) {
+          domainMetadata.certificate = {
+            certificateCount: certificate.value.certificateCount,
+            subdomainCount: certificate.value.subdomainCount,
+            latestIssuer: certificate.value.latestIssuer,
+            latestNotBefore: certificate.value.latestNotBefore,
+          };
+        }
+      }
+      if (registration.status === "fulfilled" && registration.value.registered) {
+        domainMetadata.registration = {
+          registrar: registration.value.registrar,
+          createdDate: registration.value.createdDate,
+          updatedDate: registration.value.updatedDate,
+          expiresDate: registration.value.expiresDate,
+          nameservers: registration.value.nameservers,
+          registrant: registration.value.registrant,
+        };
+      }
     }
   } catch {
-    // live DNS/passive-DNS/RIPEstat lookup failed entirely -- leave that side empty rather than guess
+    // live DNS/passive-DNS/RIPEstat/crt.sh/RDAP lookup failed entirely -- leave that side empty rather than guess
   }
 
   const unavailable = [
@@ -444,7 +555,7 @@ async function gatherIpOrDomain(type, key) {
   if (type === "ip" && !dnsAsn) unavailable.push({ relationshipType: "asn", reason: "No configured live lookup (RIPEstat/Team Cymru/SANS ISC) returned an ASN for this IP." });
 
   return {
-    node: { type, id: value, label: value, summary: null, found: true, metadata: detectionAndHuntingForFamilies(crossRef.matchedMalwareFamilies) },
+    node: { type, id: value, label: value, summary: null, found: true, metadata: { ...detectionAndHuntingForFamilies(crossRef.matchedMalwareFamilies), ...domainMetadata } },
     edges: dedupeEdges(edges),
     unavailableRelationships: unavailable,
   };

@@ -35,6 +35,7 @@ import {
   Target,
   Flag,
   ExternalLink,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -44,8 +45,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "./ErrorState";
 import { Section, KeyValueBlock, FieldList } from "./reportPrimitives";
 import { RelationshipCard } from "./investigation/RelationshipCard";
+import { InvestigationLeadsPanel } from "./investigation/InvestigationLeadsPanel";
+import { AiGraphInsightsPanel } from "./investigation/AiGraphInsightsPanel";
 import { useInvestigationGraph, type PositionedGraphNode } from "@/hooks/useInvestigationGraph";
-import type { GraphNodeType, GraphConfidence } from "@/types/threat-intel";
+import { useGraphInsights } from "@/hooks/useInvestigate";
+import type { GraphNodeType, GraphConfidence, InvestigationResult } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
 const NODE_TYPE_LABEL: Record<GraphNodeType, string> = {
@@ -136,14 +140,18 @@ interface InvestigationGraphProps {
   goToMalwareSearch: (name: string) => void;
   goToActorSearch: (name: string) => void;
   goToAiSummarySearch: (title: string) => void;
+  /** Passed straight through to the "Re-analyze Full Graph" AI call's context -- the same overview useInvestigationWorkspace's single-node auto-summary already receives. Optional since this component has no overview of its own when not embedded in the Workspace. */
+  overview?: InvestigationResult["overview"] | null;
 }
 
-function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampaignSearch, goToMalwareSearch, goToActorSearch, goToAiSummarySearch }: InvestigationGraphProps) {
+function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampaignSearch, goToMalwareSearch, goToActorSearch, goToAiSummarySearch, overview }: InvestigationGraphProps) {
   const graph = useInvestigationGraph();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formType, setFormType] = useState<GraphNodeType>("malware");
   const [formValue, setFormValue] = useState("");
   const { setCenter } = useReactFlow();
+  const fullGraphInsights = useGraphInsights();
+  const [seedId, setSeedId] = useState<string | null>(null);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node>([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -152,6 +160,8 @@ function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampa
     if (initialType && initialKey) {
       const id = graph.nodeKey(initialType, initialKey);
       setSelectedId(id);
+      setSeedId(id);
+      fullGraphInsights.reset();
       graph.reset(initialType, initialKey);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,7 +217,25 @@ function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampa
     if (!formValue.trim()) return;
     const id = graph.nodeKey(formType, formValue.trim());
     setSelectedId(id);
+    setSeedId(id);
+    fullGraphInsights.reset();
     graph.reset(formType, formValue.trim());
+  }
+
+  /**
+   * Scoped to whatever the analyst has actually built by expanding nodes --
+   * every accumulated edge across the whole graph, not just the seed's
+   * direct connections. Reuses generateGraphInsights() unchanged (it already
+   * operates generically over any edge list); no backend change needed.
+   */
+  function runFullGraphAnalysis() {
+    const seedNode = seedId ? graph.nodes.get(seedId) : null;
+    if (!seedNode) return;
+    const allEdges = Array.from(graph.edges.values());
+    const unavailableRelationships = Array.from(
+      new Map(Array.from(graph.unavailableByNode.values()).flat().map((u) => [`${u.relationshipType}:${u.reason}`, u])).values(),
+    );
+    fullGraphInsights.mutate({ node: seedNode, edges: allEdges, unavailableRelationships, overview: overview ?? null });
   }
 
   const selectedNode = selectedId ? graph.nodes.get(selectedId) : null;
@@ -219,14 +247,27 @@ function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampa
   return (
     <Card>
       <CardHeader className="flex-col items-start gap-3">
-        <div>
-          <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
-            <Network className="h-4 w-4 text-primary" />
-            Investigation Graph
-          </CardTitle>
-          <p className="mt-1 text-xs text-muted">
-            Start from any indicator or entity, then click any node to discover its real relationships and keep pivoting -- every edge shows why it exists, confidence, first/last seen, and supporting sources.
-          </p>
+        <div className="flex w-full flex-wrap items-start justify-between gap-2">
+          <div>
+            <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
+              <Network className="h-4 w-4 text-primary" />
+              Investigation Graph
+            </CardTitle>
+            <p className="mt-1 text-xs text-muted">
+              Start from any indicator or entity, then click any node to discover its real relationships and keep pivoting -- every edge shows why it exists, confidence, first/last seen, and supporting sources.
+            </p>
+          </div>
+          {graph.nodes.size > 1 && (
+            <button
+              type="button"
+              onClick={runFullGraphAnalysis}
+              disabled={fullGraphInsights.isPending}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:border-primary/50 disabled:opacity-60"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {fullGraphInsights.isPending ? "Analyzing…" : "Re-analyze Full Graph"}
+            </button>
+          )}
         </div>
         <form onSubmit={startNew} className="flex w-full flex-wrap items-center gap-2">
           <Select value={formType} onChange={(e) => setFormType(e.target.value as GraphNodeType)} className="w-52">
@@ -290,6 +331,8 @@ function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampa
 
                   <NodeMetadata node={selectedNode} />
 
+                  <InvestigationLeadsPanel edges={selectedEdges} onSelect={(type, key) => selectAndExpand(graph.nodeKey(type, key), type, key)} />
+
                   {selectedEdges.length > 0 && (
                     <Section title="Relationships">
                       <div className="space-y-2">
@@ -312,6 +355,21 @@ function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampa
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {(fullGraphInsights.isPending || fullGraphInsights.isSuccess || fullGraphInsights.isError) && (
+          <div className="mt-3">
+            <AiGraphInsightsPanel
+              title="Full Graph Analysis"
+              insights={fullGraphInsights.data ?? null}
+              pending={fullGraphInsights.isPending}
+              error={fullGraphInsights.isError ? (fullGraphInsights.error as Error).message : null}
+              onFocusEntity={(entity) => {
+                const gn = Array.from(graph.nodes.values()).find((n) => n.label === entity);
+                if (gn) selectAndExpand(graph.nodeKey(gn.type, gn.id), gn.type, gn.id);
+              }}
+            />
           </div>
         )}
       </CardContent>
@@ -366,6 +424,15 @@ function NodeMetadata({ node }: { node: PositionedGraphNode }) {
   push("Sector", meta.sector);
   push("Severity", meta.severity);
   push("Published", meta.publishedDate);
+
+  // Registrar/created/expires/nameservers are already shown in full by
+  // KeyFactsPanel and the deeper Indicator-Specific Intelligence section
+  // (domainModule.js's own separate RDAP call) for a domain search -- the
+  // only thing from this node's metadata that isn't already on this page
+  // anywhere is the crt.sh certificate issuer. Same "each fact lives in
+  // exactly one place" rule as the rest of this page.
+  const certificate = meta.certificate as { latestIssuer?: string | null } | undefined;
+  push("Latest Certificate Issuer (crt.sh)", certificate?.latestIssuer);
 
   const aliases = Array.isArray(meta.aliases) ? (meta.aliases as string[]) : [];
   const detectionRules = Array.isArray(meta.detectionRules) ? (meta.detectionRules as Array<{ label: string; path: string; url: string }>) : [];

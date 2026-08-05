@@ -442,9 +442,10 @@ router.get("/dashboard/emerging-threats-ranking", (_req, res) => {
 });
 
 // On-demand deep-dive briefing for one industry, triggered from an Industry
-// Heatmap row -- see server/industryBriefing.js for the grounding/citation
-// discipline. Generated live per request (not scheduled/cached), since most
-// of the 10 sectors won't be viewed in a given session.
+// Heatmap row or the Industry Intelligence page's selector -- see
+// server/industryBriefing.js for the grounding/citation discipline.
+// Generated live per request (not scheduled/cached), since most of the 14
+// sectors won't be viewed in a given session.
 router.get("/dashboard/industry-briefing", async (req, res) => {
   const industry = String(req.query.industry ?? "");
   if (!INDUSTRY_CATALOG.includes(industry)) {

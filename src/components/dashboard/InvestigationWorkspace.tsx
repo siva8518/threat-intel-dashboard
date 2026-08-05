@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, ExternalLink, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Copy, Download, ExternalLink, Search, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState, ErrorState } from "./ErrorState";
+import { EmptyState } from "./ErrorState";
 import { Section } from "./reportPrimitives";
 import { NotConfiguredNotice, IpIntelligenceSection, DomainIntelligenceSection, UrlIntelligenceSection } from "./investigation/NetworkIndicatorSections";
 import { HashIntelligenceSection } from "./investigation/HashSections";
@@ -13,7 +13,6 @@ import { CveIntelligenceSection } from "./investigation/CveSections";
 import { EntityIntelligenceSection } from "./investigation/EntitySections";
 import { ArtifactIntelligenceSection } from "./investigation/ArtifactSections";
 import { AiSummaryPanel, DetectionOpportunitiesPanel, OperationalGuidancePanel } from "./investigation/AiReportSection";
-import { RelationshipCard } from "./investigation/RelationshipCard";
 import { RecommendedActionsPanel } from "./investigation/RecommendedActionsPanel";
 import { RealDetectionsHuntingPanel } from "./investigation/RealDetectionsHuntingPanel";
 import { AiGraphInsightsPanel } from "./investigation/AiGraphInsightsPanel";
@@ -134,27 +133,26 @@ function concreteEvidence(result: InvestigationResult): string[] {
   const leakix = find("LeakIX");
   if (leakix && Number(leakix.leakCount) > 0) evidence.push(`${leakix.leakCount} exposed leak(s) via LeakIX`);
 
-  const network = md.network as Record<string, unknown> | undefined;
-  if (network?.organization) evidence.push(`hosted on ${network.organization}${network.asn ? ` (AS${network.asn})` : ""}`);
-
   const related = md.relatedIndicators as { sameCampaignOrActor?: unknown[]; sameAsn?: unknown[] } | undefined;
   if (related?.sameCampaignOrActor && related.sameCampaignOrActor.length > 0) evidence.push(`linked to ${related.sameCampaignOrActor.length} other indicator(s) in this platform's own tracked data`);
 
   return evidence;
 }
 
-/** One entry per line -- rendered as separate paragraphs so "Evidence:" and its citations don't run on from the severity sentence. */
+/**
+ * Evidence only -- severity/risk/priority/confidence are already on the
+ * Analyst Verdict tiles directly above this, so nothing here repeats them.
+ * Each fact on this page lives in exactly one place; later sections
+ * reference it by name instead of restating the value.
+ */
 function whyShouldICare(result: InvestigationResult): string[] {
   const overview = result.overview;
   const evidence = concreteEvidence(result);
-  const typeLabel = INDICATOR_TYPE_LABEL[result.type as IndicatorType];
-  const lines = [
-    `This indicator, which is ${typeLabel} ${result.indicator}, is currently rated ${overview.severity} severity with ${overview.riskLevel.toLowerCase()} risk (${overview.verdictLabel}), recommended priority ${overview.recommendedPriority}.`,
-  ];
+  const lines: string[] = [];
   if (evidence.length > 0) lines.push(`Evidence: ${evidence.join("; ")}.`);
   if (overview.associatedThreatActors.length > 0) lines.push(`Linked to tracked threat actor(s): ${overview.associatedThreatActors.join(", ")}.`);
   if (overview.activeCampaigns.length > 0) lines.push(`Associated with active campaign(s): ${overview.activeCampaigns.join(", ")}.`);
-  if (overview.overallVerdict === "unknown" && evidence.length === 0) lines.push("No configured source or internal data has meaningful signal on this indicator yet.");
+  if (lines.length === 0) lines.push("No further evidence beyond the verdict above -- no configured source or internal data adds anything on this indicator yet.");
   return lines;
 }
 
@@ -319,27 +317,33 @@ function QuickActions({ result }: { result: InvestigationResult }) {
  * server/investigation/index.js#investigate() (verdict/why-care/related
  * intelligence) with server/investigation/investigationGraph.js (real
  * relationship edges + detection/hunting citations) via
- * useInvestigationWorkspace -- see that hook for exactly how. The full
- * pan/zoom/infinite-pivot canvas (formerly its own "Investigation Graph"
- * tab) is embedded at the bottom as an expandable "Explore Full Relationship
- * Graph" section rather than a second destination requiring a second search.
+ * useInvestigationWorkspace -- see that hook for exactly how.
+ *
+ * The full pan/zoom/multi-hop-expand Investigation Graph (formerly its own
+ * "Investigation Graph" tab, later a collapsed footer toggle) is the
+ * flagship, always-rendered relationship view on this page -- it auto-
+ * selects the searched entity so its own side panel is the one and only
+ * place this page shows that entity's edges (no separate "Relationships"
+ * list duplicating it). Every other fact on this page follows the same
+ * rule: it lives in exactly one place, and later sections reference it by
+ * name rather than restating it (see whyShouldICare()'s comment for the
+ * concrete example).
  *
  * Page order front-loads synthesis before raw evidence: AI Summary (opt-in)
- * -> Verdict -> Why Should I Care -> Key Facts -> Relationships -> AI/vendor
- * reports -> real Detections & Hunting -> Recommended Actions (SOC/Detection
- * Engineering/Threat Intelligence/Incident Response) -> Indicator-Specific
- * raw lookup evidence -> deeper opt-in AI narrative -> Quick Actions ->
- * Explore Full Relationship Graph.
+ * -> Verdict -> Why Should I Care -> Investigation Graph -> AI Investigation
+ * Summary -> Key Facts -> AI/vendor reports -> real Detections & Hunting ->
+ * Recommended Actions (SOC/Detection Engineering/Threat Intelligence/
+ * Incident Response) -> Indicator-Specific raw lookup evidence -> deeper
+ * opt-in AI narrative -> Quick Actions.
  */
 export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampaignSearch, goToMalwareSearch, goToAiSummarySearch, initialQuery }: WorkspaceProps) {
   const [input, setInput] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
-  const [showFullGraph, setShowFullGraph] = useState(false);
   const { selectCve, selectMalware } = useSelection();
 
   const workspace = useInvestigationWorkspace();
   const aiReportM = useGenerateInvestigationAiReport();
-  const { investigateM, result, graphTarget, graphNode, graphEdges, graphUnavailable, graphLoading, graphError, recommendedActions, graphInsights, graphInsightsPending, graphInsightsError } = workspace;
+  const { investigateM, result, graphTarget, graphNode, recommendedActions, graphInsights, graphInsightsPending, graphInsightsError } = workspace;
 
   useEffect(() => {
     if (initialQuery) runInvestigation(initialQuery);
@@ -418,38 +422,31 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
               </div>
             </Section>
 
-            <KeyFactsPanel facts={buildKeyFacts(result)} />
-
-            {graphLoading ? (
-              <Section title="Relationships">
-                <Skeleton className="h-24 w-full" />
-              </Section>
-            ) : graphError ? (
-              <Section title="Relationships">
-                <ErrorState message={graphError} />
-              </Section>
-            ) : (
-              <Section title="Relationships">
-                {graphEdges.length === 0 ? (
-                  <p className="text-xs text-muted">No relationships found in this platform's own tracked data for this entity.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {graphEdges.map((e) => (
-                      <RelationshipCard key={`${e.targetType}:${e.targetKey}`} edge={e} onFocus={() => runInvestigation(e.targetKey)} />
-                    ))}
-                  </div>
-                )}
-                {graphUnavailable.length > 0 && (
-                  <ul className="mt-2 space-y-1 text-[11px] italic text-muted">
-                    {graphUnavailable.map((u) => (
-                      <li key={u.relationshipType}>{u.reason}</li>
-                    ))}
-                  </ul>
-                )}
-              </Section>
+            {/*
+              The Investigation Graph is the primary relationship view on this
+              page -- it already auto-selects the searched entity on load, so
+              its side panel shows exactly the relationships a standalone
+              "Relationships" section here would duplicate. One relationships
+              view, not two. See the standing principle: each fact on this
+              page lives in exactly one place; later sections reference it by
+              name, never restate the value.
+            */}
+            {graphTarget && (
+              <InvestigationGraph
+                initialType={graphTarget.type}
+                initialKey={graphTarget.key}
+                goToTriageInvestigate={runInvestigation}
+                goToCampaignSearch={goToCampaignSearch}
+                goToMalwareSearch={goToMalwareSearch}
+                goToActorSearch={onOpenActor}
+                goToAiSummarySearch={goToAiSummarySearch}
+                overview={result.overview}
+              />
             )}
 
             <AiGraphInsightsPanel insights={graphInsights} pending={graphInsightsPending} error={graphInsightsError} onFocusEntity={runInvestigation} />
+
+            <KeyFactsPanel facts={buildKeyFacts(result)} />
 
             <RelatedAiReportsSection result={result} />
 
@@ -502,30 +499,6 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
             )}
 
             <QuickActions result={result} />
-
-            <Section title="">
-              <button
-                type="button"
-                onClick={() => setShowFullGraph((v) => !v)}
-                className="flex w-full items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs font-semibold text-foreground hover:border-primary/40"
-              >
-                {showFullGraph ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                Explore Full Relationship Graph
-              </button>
-              {showFullGraph && graphTarget && (
-                <div className="mt-3">
-                  <InvestigationGraph
-                    initialType={graphTarget.type}
-                    initialKey={graphTarget.key}
-                    goToTriageInvestigate={runInvestigation}
-                    goToCampaignSearch={goToCampaignSearch}
-                    goToMalwareSearch={goToMalwareSearch}
-                    goToActorSearch={onOpenActor}
-                    goToAiSummarySearch={goToAiSummarySearch}
-                  />
-                </div>
-              )}
-            </Section>
           </div>
         )}
       </CardContent>

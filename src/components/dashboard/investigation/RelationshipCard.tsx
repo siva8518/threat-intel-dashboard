@@ -16,10 +16,12 @@ export function RelationshipCard({ edge, onFocus }: { edge: GraphEdgeWithSource;
         <span className="font-semibold text-foreground">
           {edge.relationship} <span className="font-mono text-primary">{edge.targetLabel}</span>
         </span>
-        <Badge variant={CONFIDENCE_BADGE[edge.confidence]}>{edge.confidence}</Badge>
+        <Badge variant={CONFIDENCE_BADGE[edge.confidence]} title={`${edge.confidence} confidence`}>
+          {edge.confidenceScore}%
+        </Badge>
       </div>
       <p className="mt-1 text-muted" title={edge.why}>
-        {edge.why}
+        {edge.reasoning}
       </p>
       <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted">
         {edge.firstSeen && <span>First seen {edge.firstSeen.slice(0, 10)}</span>}

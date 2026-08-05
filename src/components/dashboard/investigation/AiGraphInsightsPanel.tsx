@@ -17,12 +17,14 @@ interface AiGraphInsightsPanelProps {
   pending: boolean;
   error: string | null;
   onFocusEntity: (entity: string) => void;
+  /** Defaults to the automatic single-node summary's title -- pass a distinct title (e.g. "Full Graph Analysis") for a manually-triggered instance scoped to a larger, multi-hop edge set, so the two are never visually confused. */
+  title?: string;
 }
 
-export function AiGraphInsightsPanel({ insights, pending, error, onFocusEntity }: AiGraphInsightsPanelProps) {
+export function AiGraphInsightsPanel({ insights, pending, error, onFocusEntity, title = "AI Investigation Summary" }: AiGraphInsightsPanelProps) {
   if (pending) {
     return (
-      <Section title="AI Investigation Summary">
+      <Section title={title}>
         <p className="mb-2 flex items-center gap-1.5 text-xs text-muted">
           <Sparkles className="h-3.5 w-3.5 animate-pulse text-primary" />
           Generating AI investigation summary — analyzing the relationships above, this can take up to a minute…
@@ -38,7 +40,7 @@ export function AiGraphInsightsPanel({ insights, pending, error, onFocusEntity }
 
   if (error) {
     return (
-      <Section title="AI Investigation Summary">
+      <Section title={title}>
         <ErrorState message={error} />
       </Section>
     );
@@ -47,7 +49,7 @@ export function AiGraphInsightsPanel({ insights, pending, error, onFocusEntity }
   if (!insights) return null;
 
   return (
-    <Section title="AI Investigation Summary">
+    <Section title={title}>
       <div className="space-y-4">
         <p className="text-sm text-foreground">{insights.summary}</p>
 
