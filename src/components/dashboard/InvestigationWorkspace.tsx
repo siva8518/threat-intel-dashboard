@@ -16,6 +16,8 @@ import { AiSummaryPanel, DetectionOpportunitiesPanel, OperationalGuidancePanel }
 import { RecommendedActionsPanel } from "./investigation/RecommendedActionsPanel";
 import { RealDetectionsHuntingPanel } from "./investigation/RealDetectionsHuntingPanel";
 import { AiGraphInsightsPanel } from "./investigation/AiGraphInsightsPanel";
+import { CorrelationSummaryPanel } from "./investigation/CorrelationSummaryPanel";
+import { SearchCoveragePanel } from "./investigation/SearchCoveragePanel";
 import { InvestigationGraph } from "./InvestigationGraph";
 import { useSelection } from "@/context/SelectionContext";
 import { useGenerateInvestigationAiReport } from "@/hooks/useInvestigate";
@@ -343,7 +345,19 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
 
   const workspace = useInvestigationWorkspace();
   const aiReportM = useGenerateInvestigationAiReport();
-  const { investigateM, result, graphTarget, graphNode, recommendedActions, graphInsights, graphInsightsPending, graphInsightsError } = workspace;
+  const {
+    investigateM,
+    result,
+    graphTarget,
+    graphNode,
+    recommendedActions,
+    graphInsights,
+    graphInsightsPending,
+    graphInsightsError,
+    correlationSummary,
+    correlationSummaryPending,
+    correlationSummaryError,
+  } = workspace;
 
   useEffect(() => {
     if (initialQuery) runInvestigation(initialQuery);
@@ -370,8 +384,10 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
       <CardHeader>
         <CardTitle className="text-base font-semibold text-foreground">Investigation Workspace</CardTitle>
         <p className="mt-1 text-xs text-muted">
-          Paste anything from an alert — an IP, domain, URL, file hash, CVE ID, email, file/process name, registry key, user agent, or a malware/actor/campaign
-          name — and get a complete investigation briefing instead of a raw source dump. Type is auto-detected, no manual selection needed.
+          Paste anything from an alert — an IP, domain, URL, file hash, CVE ID, email, file/process name, registry key, user agent, ransomware group,
+          country, ASN, or a malware/actor/campaign/organization name — and this platform correlates across every intelligence layer it has (live
+          lookups, tracked entity stores, ransomware/dark-web disclosures, AI Summarization reports, the relationship graph) before concluding there's
+          nothing to find. Aliases resolve automatically (e.g. "Cozy Bear" finds APT29). Type is auto-detected, no manual selection needed.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -384,7 +400,7 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
         >
           <Input
             autoFocus
-            placeholder="e.g. CVE-2026-31431, 185.220.101.5, evil-domain.com, a1b2c3…, LockBit, phishing@evil.com"
+            placeholder="e.g. CVE-2026-31431, 185.220.101.5, evil-domain.com, a1b2c3…, LockBit, Cozy Bear, Germany, AS15169, phishing@evil.com"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             className="w-full font-mono text-sm sm:w-[28rem]"
@@ -408,9 +424,18 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
           <div className="space-y-5">
             <p className="text-xs text-muted">
               Detected as <span className="font-mono text-foreground">{INDICATOR_TYPE_LABEL[result.type as IndicatorType]}</span>: <span className="font-mono text-foreground">{result.indicator}</span>
+              {result.resolvedCanonicalName && (
+                <>
+                  {" "}
+                  — searched as <span className="font-mono text-foreground">{result.resolvedCanonicalName}</span>, this platform's tracked name for{" "}
+                  <span className="font-mono text-foreground">{result.indicator}</span>
+                </>
+              )}
             </p>
 
             <VerdictBanner overview={result.overview} />
+
+            <SearchCoveragePanel coverage={result.coverage} />
 
             <Section title="Should I Care?">
               <div className="space-y-1.5">
@@ -446,6 +471,8 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
 
             <AiGraphInsightsPanel insights={graphInsights} pending={graphInsightsPending} error={graphInsightsError} onFocusEntity={runInvestigation} />
 
+            <CorrelationSummaryPanel summary={correlationSummary} pending={correlationSummaryPending} error={correlationSummaryError} onFocusEntity={runInvestigation} />
+
             <KeyFactsPanel facts={buildKeyFacts(result)} />
 
             <RelatedAiReportsSection result={result} />
@@ -473,7 +500,6 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
                 ))}
               {family === "entity" && (
                 <EntityIntelligenceSection
-                  query={result.indicator}
                   data={result.moduleData as unknown as Parameters<typeof EntityIntelligenceSection>[0]["data"]}
                   onOpenMalware={openMalware}
                   onOpenActor={onOpenActor}

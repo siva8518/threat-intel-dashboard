@@ -49,6 +49,7 @@ import {
 import { buildInfrastructureReuse } from "../infrastructureReuse.js";
 import { getGraphNode, GRAPH_NODE_TYPES } from "../investigation/investigationGraph.js";
 import { generateGraphInsights } from "../investigation/graphInsights.js";
+import { generateCorrelationSummary } from "../investigation/correlationSummary.js";
 
 export const router = Router();
 
@@ -977,6 +978,27 @@ router.post("/dashboard/investigation-graph/insights", async (req, res) => {
   try {
     const insights = await generateGraphInsights({ node, edges, unavailableRelationships: unavailableRelationships ?? [], overview: overview ?? null });
     res.json(insights);
+  } catch (error) {
+    if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
+    res.status(502).json({ error: error.message });
+  }
+});
+
+// --- AI Correlation Summary -- see server/investigation/correlationSummary.js ---
+// Same "client posts the already-computed result, no server re-fetch" shape
+// as the route above, but reasons across the FULL unified /investigate
+// result (graph edges, cross-referenced entities, ranked findings, real
+// industry data) rather than one graph node's direct edges -- answers the
+// broader "what is this, why does it matter, what to investigate next" set
+// of questions. Fired automatically alongside the AI Investigation Summary
+// above, not a replacement for it.
+router.post("/dashboard/investigation/correlation-summary", async (req, res) => {
+  const result = req.body ?? {};
+  if (!result.overview) return res.status(400).json({ error: "a full InvestigationResult (with overview) is required" });
+
+  try {
+    const summary = await generateCorrelationSummary(result);
+    res.json(summary);
   } catch (error) {
     if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
     res.status(502).json({ error: error.message });

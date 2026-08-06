@@ -33,6 +33,7 @@ import type {
   GraphEdge,
   GraphNode,
   GraphInsights,
+  CorrelationSummary,
   KevEntry,
   MalwareIntelligenceEntity,
   MalwareProfile,
@@ -327,6 +328,17 @@ export async function generateGraphInsights(payload: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    timeoutMs: 90_000,
+  });
+}
+
+/** Fired automatically alongside generateGraphInsights above (see useInvestigationWorkspace.ts) -- posts the full already-fetched InvestigationResult so the server never re-runs the live-lookup fan-out. Reasons across the whole unified result, not just the graph's direct edges. */
+export async function generateCorrelationSummary(result: InvestigationResult): Promise<CorrelationSummary> {
+  return fetchJson("/api/dashboard/investigation/correlation-summary", {
+    source: "AI Correlation Summary",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(result),
     timeoutMs: 90_000,
   });
 }

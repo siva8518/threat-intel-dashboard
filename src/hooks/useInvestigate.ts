@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { investigate, generateInvestigationAiReport, generateGraphInsights } from "@/api/dashboardApi";
+import { investigate, generateInvestigationAiReport, generateGraphInsights, generateCorrelationSummary } from "@/api/dashboardApi";
 
 /** On-demand, fired on search submit -- see useIocSearch.ts for the same pattern this replaces (broadened from 4 indicator types to all 16, auto-detected server-side). */
 export function useInvestigate() {
@@ -19,5 +19,12 @@ export function useGenerateInvestigationAiReport() {
 export function useGraphInsights() {
   return useMutation({
     mutationFn: generateGraphInsights,
+  });
+}
+
+/** Also fired automatically, alongside useGraphInsights above -- see useInvestigationWorkspace.ts. Reasons across the full unified investigation result, not just the graph's direct edges. */
+export function useCorrelationSummary() {
+  return useMutation({
+    mutationFn: generateCorrelationSummary,
   });
 }

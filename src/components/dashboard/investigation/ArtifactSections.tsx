@@ -9,7 +9,7 @@ export function ArtifactIntelligenceSection({ note, crossReference }: { note: st
   return (
     <div className="space-y-3">
       <div className="rounded-lg border border-dashed border-white/15 bg-white/[0.02] p-3 text-xs text-muted">{note}</div>
-      {hasHits ? (
+      {hasHits && (
         <Section title="Found in This Platform's Own Data">
           <ul className="space-y-1 text-xs text-foreground">
             {crossReference.relatedIocs.map((r, i) => (
@@ -20,9 +20,8 @@ export function ArtifactIntelligenceSection({ note, crossReference }: { note: st
             ))}
           </ul>
         </Section>
-      ) : (
-        <p className="text-xs text-muted">Not found in this platform's own ingested threat intelligence.</p>
       )}
+      {/* No local "not found" fallback here -- the Search Coverage panel above already reports this honestly alongside every other layer checked. */}
     </div>
   );
 }

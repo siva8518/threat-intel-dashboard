@@ -20,6 +20,15 @@ const FAMILY_BY_TYPE: Record<IndicatorType, SectionFamily> = {
   processName: "artifact",
   registryKey: "artifact",
   userAgent: "artifact",
+  // Ransomware group / country / ASN have no Indicator-Specific Intelligence
+  // section of their own -- their real correlation is entirely the
+  // Investigation Graph (already rendered above this section for every
+  // type), so these render as "artifact" (a plain cross-reference note,
+  // same shape as email/fileName/etc.) rather than adding a fourth
+  // never-populated section family.
+  ransomwareGroup: "artifact",
+  country: "artifact",
+  asn: "artifact",
   unknown: "unknown",
 };
 
@@ -35,11 +44,14 @@ export const INDICATOR_TYPE_LABEL: Record<IndicatorType, string> = {
   sha1: "SHA1 Hash",
   md5: "MD5 Hash",
   cve: "CVE",
-  name: "Malware / Threat Actor / Campaign",
+  name: "Malware / Threat Actor / Campaign / Organization",
   email: "Email Address",
   fileName: "File Name",
   processName: "Process Name",
   registryKey: "Registry Key",
   userAgent: "User Agent",
+  ransomwareGroup: "Ransomware Group",
+  country: "Country",
+  asn: "ASN",
   unknown: "Unrecognized",
 };

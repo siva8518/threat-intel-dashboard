@@ -20,21 +20,22 @@ interface EntityModuleData {
 }
 
 export function EntityIntelligenceSection({
-  query,
   data,
   onOpenMalware,
   onOpenActor,
   onOpenCampaign,
 }: {
-  query: string;
   data: EntityModuleData;
   onOpenMalware: (entity: MalwareIntelligenceEntity, detectionRules: DetectionRuleRef[]) => void;
   onOpenActor: (name: string) => void;
   onOpenCampaign: () => void;
 }) {
-  if (data.total === 0) {
-    return <p className="text-sm text-muted">No malware family, threat actor, or campaign matches "{query}" in this platform's own tracked intelligence.</p>;
-  }
+  // No local "no match" message here -- the Search Coverage panel above
+  // already reports this honestly alongside every other layer this search
+  // checked (see server/investigation/coverage.js), so this section simply
+  // renders nothing when data.total is 0 instead of a second, narrower
+  // "no results" message with no visibility into what else was searched.
+  if (data.total === 0) return null;
   return (
     <div className="space-y-4">
       {data.malware.length > 0 && (

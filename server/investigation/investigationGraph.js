@@ -38,6 +38,8 @@ import { checkIndicator as checkCrtsh } from "../lookups/crtsh.js";
 import { checkIndicator as checkRdap } from "../lookups/rdap.js";
 import { detectionRulesFor, detectionRulesForCve, techniqueIdsForFamily } from "../correlate.js";
 import { buildEntityHuntingQueries } from "../huntingLibrary.js";
+import { norm, findByNameOrAlias } from "./entityLookup.js";
+import { resolveCanonicalAlias } from "./knownAliasGroups.js";
 import * as cache from "../cache.js";
 
 export const GRAPH_NODE_TYPES = [
@@ -46,15 +48,6 @@ export const GRAPH_NODE_TYPES = [
 ];
 
 const CROSS_REF_ONLY_TYPES = new Set(["url", "hash", "email", "fileName", "processName", "registryKey", "userAgent"]);
-
-function norm(v) {
-  return (v ?? "").toString().trim().toLowerCase();
-}
-
-function findByNameOrAlias(entities, key) {
-  const target = norm(key);
-  return entities.find((e) => norm(e.name) === target || (e.aliases ?? []).some((a) => norm(a) === target)) ?? null;
-}
 
 function dedupeEdges(edges) {
   const seen = new Set();
@@ -252,7 +245,8 @@ function detectionAndHuntingForFamilies(familyNames) {
 // --- Actor ---------------------------------------------------------------
 
 function gatherActor(key) {
-  const entity = findByNameOrAlias(getActorEntities(), key);
+  const canonical = resolveCanonicalAlias(key);
+  const entity = findByNameOrAlias(getActorEntities(), canonical ?? key);
   const edges = [];
   if (entity) {
     const names = new Set([norm(entity.name), ...entity.aliases.map(norm)]);
@@ -303,7 +297,8 @@ function gatherActor(key) {
 // --- Campaign --------------------------------------------------------------
 
 function gatherCampaign(key) {
-  const entity = findByNameOrAlias(getCampaignEntities(), key);
+  const canonical = resolveCanonicalAlias(key);
+  const entity = findByNameOrAlias(getCampaignEntities(), canonical ?? key);
   const edges = [];
   if (entity) {
     const actorNames = new Set(entity.associatedActors.map(norm));
@@ -356,7 +351,8 @@ function malwareIndicatorEdges(entity) {
 }
 
 function gatherMalware(key) {
-  const entity = findByNameOrAlias(getMalwareEntities(), key);
+  const canonical = resolveCanonicalAlias(key);
+  const entity = findByNameOrAlias(getMalwareEntities(), canonical ?? key);
   const edges = [];
   if (entity) {
     edges.push(...malwareIndicatorEdges(entity));

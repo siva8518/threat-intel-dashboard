@@ -373,7 +373,10 @@ export type IndicatorType =
   | "processName"
   | "registryKey"
   | "userAgent"
-  | "name" // malware family / threat actor / campaign -- resolved against this app's own entity stores
+  | "ransomwareGroup" // matched against a real ransomware.live/RansomWatch/RansomLook group name -- see server/investigation/detect.js
+  | "country" // matched against server/data/country-names.json
+  | "asn"
+  | "name" // malware family / threat actor / campaign / organization / victim -- resolved against this app's own entity stores (see server/investigation/index.js#resolveGraphTarget's victim fallback)
   | "unknown";
 
 export type InvestigationVerdict = "critical" | "high" | "medium" | "low" | "unknown";
@@ -424,6 +427,36 @@ export interface InvestigationResult {
   notConfigured: string[];
   rateLimited: string[];
   skipped: { source: string; reason: string }[];
+  /** This search's seed Investigation Graph node, computed server-side in the same pass -- see server/investigation/index.js#computeGraphResult. Null only when no graph node type could be resolved at all. */
+  graph: GraphNodeResult | null;
+  /** Set only for a `name`-type search that resolved through a known alias (e.g. searched "Cozy Bear", this platform tracks it as "APT29") -- see server/investigation/knownAliasGroups.js. Null for every other search. */
+  resolvedCanonicalName: string | null;
+  /** Every intelligence layer this search actually consulted, and whether each found anything -- see server/investigation/coverage.js. `nothingFound` should only ever be true once every layer below genuinely came up empty. */
+  coverage: SearchCoverage;
+  /** The graph's own edges (plus any cross-referenced AI report not already an edge), flattened and ranked by confidence/recency -- see server/investigation/rankResults.js. */
+  rankedFindings: RankedFinding[];
+}
+
+export interface RankedFinding {
+  label: string;
+  entityType: GraphNodeType | "report";
+  relationship: string;
+  confidenceScore: number;
+  reasoning: string;
+  lastSeen: string | null;
+  sources: string[];
+}
+
+export interface SearchCoverageLayer {
+  name: string;
+  checked: boolean;
+  hitCount: number;
+  summary: string;
+}
+
+export interface SearchCoverage {
+  layers: SearchCoverageLayer[];
+  nothingFound: boolean;
 }
 
 // --- Investigation Graph -- see server/investigation/investigationGraph.js ---
@@ -491,6 +524,34 @@ export interface GraphInsights {
   priorityInvestigationTargets: Array<{ entity: string; entityType: string; reasoning: string }>;
   crossReportPatterns: string[];
   recommendations: string[];
+  model: string;
+  provider: string;
+  generatedAt: string;
+}
+
+/**
+ * AI Correlation Summary -- see server/investigation/correlationSummary.js.
+ * Reasons across a search's FULL unified result (graph edges, cross-
+ * referenced entities, ranked findings, real industry data), not just one
+ * graph node's direct edges the way GraphInsights above does. The narrative
+ * fields (whatIsThis/whyItMatters/relationshipNarrative/
+ * infrastructureReuseAssessment/nextSteps) are model-authored; every list
+ * field below that is real, deterministically-tallied data passed straight
+ * through, never model-authored.
+ */
+export interface CorrelationSummary {
+  whatIsThis: string;
+  whyItMatters: string;
+  relationshipNarrative: string;
+  infrastructureReuseAssessment: string;
+  nextSteps: string[];
+  industriesAffected: Array<{ industry: string; relevance: string; reportTitle: string }>;
+  reusedInfrastructure: Array<{ indicator: string; indicatorType: string; malwareFamily: string | null }>;
+  attackTechniques: Array<{ id: string; name: string }>;
+  victimsTargeted: string[];
+  relatedActors: string[];
+  relatedCampaigns: string[];
+  relatedMalware: string[];
   model: string;
   provider: string;
   generatedAt: string;

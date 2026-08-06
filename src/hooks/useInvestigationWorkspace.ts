@@ -1,61 +1,16 @@
 import { useEffect, useMemo, useRef } from "react";
-import { useInvestigate, useGraphInsights } from "./useInvestigate";
+import { useInvestigate, useGraphInsights, useCorrelationSummary } from "./useInvestigate";
 import { useInvestigationGraph } from "./useInvestigationGraph";
 import { buildRecommendedActions } from "@/lib/recommendedActions";
-import type { CveRecord, GraphNodeType, IndicatorType, InvestigationResult, MalwareIntelligenceEntity, ThreatActorIntelligenceEntity, CampaignIntelligenceEntity, DetectionRuleRef } from "@/types/threat-intel";
-
-const DIRECT_TYPE_MAP: Partial<Record<IndicatorType, GraphNodeType>> = {
-  cve: "cve",
-  ip: "ip",
-  domain: "domain",
-  url: "url",
-  sha256: "hash",
-  sha1: "hash",
-  md5: "hash",
-  email: "email",
-  fileName: "fileName",
-  processName: "processName",
-  registryKey: "registryKey",
-  userAgent: "userAgent",
-};
-
-interface EntityModuleData {
-  malware?: Array<{ entity: MalwareIntelligenceEntity; detectionRules: DetectionRuleRef[] }>;
-  actors?: ThreatActorIntelligenceEntity[];
-  campaigns?: CampaignIntelligenceEntity[];
-}
+import type { CveRecord, GraphNodeType } from "@/types/threat-intel";
 
 /**
- * Which single graph node the Relationships/Recommended-Actions sections
- * should expand for a resolved investigate() result. IOC-shaped types map
- * 1:1 onto a graph node type. `name`-type (malware/actor/campaign search)
- * mirrors server/investigation/entityModule.js's own "best primary match"
- * precedence (lines 32-36: malware first, then APT/ransomware actor, then
- * any actor, then campaign) so the Workspace's single relationship view
- * agrees with which entity the Universal Overview's verdict was computed
- * from -- other buckets that also matched stay reachable via the existing
- * EntityIntelligenceSection chips, just not auto-expanded here.
- */
-function resolveGraphTarget(result: InvestigationResult): { type: GraphNodeType; key: string } | null {
-  const direct = DIRECT_TYPE_MAP[result.type as IndicatorType];
-  if (direct) return { type: direct, key: result.indicator };
-
-  if (result.type === "name") {
-    const md = result.moduleData as unknown as EntityModuleData;
-    if (md.malware && md.malware.length > 0) return { type: "malware", key: md.malware[0].entity.name };
-    const primaryActor = md.actors?.find((a) => a.type === "Ransomware" || a.type === "APT") ?? md.actors?.[0];
-    if (primaryActor) return { type: "actor", key: primaryActor.name };
-    if (md.campaigns && md.campaigns.length > 0) return { type: "campaign", key: md.campaigns[0].name };
-  }
-
-  return null;
-}
-
-/**
- * Composes the existing useInvestigate() (verdict/severity/relatedIntelligence)
- * with the existing useInvestigationGraph() (relationship edges + real
- * detection/hunting metadata) into one merged view for the Investigation
- * Workspace -- one search, both systems, no second search box. See
+ * Composes the existing useInvestigate() (verdict/severity/relatedIntelligence,
+ * now also carrying the seed Investigation Graph node computed server-side
+ * in the same pass -- see server/investigation/index.js#computeGraphResult)
+ * with useInvestigationGraph()'s accumulating multi-hop canvas state into one
+ * merged view for the Investigation Workspace -- one search, no second
+ * network round trip for the graph, no second search box. See
  * src/lib/recommendedActions.ts for the deterministic per-team next-steps
  * layered on top, computed instantly from whatever both systems returned.
  */
@@ -63,14 +18,16 @@ export function useInvestigationWorkspace() {
   const investigateM = useInvestigate();
   const graph = useInvestigationGraph();
   const insightsM = useGraphInsights();
+  const correlationM = useCorrelationSummary();
   const insightsFiredRef = useRef<Set<string>>(new Set());
+  const correlationFiredRef = useRef<Set<string>>(new Set());
   const lastGraphNodeIdRef = useRef<string | null>(null);
 
   const result = investigateM.data;
-  const graphTarget = result ? resolveGraphTarget(result) : null;
+  const graphTarget: { type: GraphNodeType; key: string } | null = result?.graph ? { type: result.graph.node.type, key: result.graph.node.id } : null;
 
   useEffect(() => {
-    if (graphTarget) graph.reset(graphTarget.type, graphTarget.key);
+    if (graphTarget && result?.graph) graph.seed(graphTarget.type, graphTarget.key, result.graph);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graphTarget?.type, graphTarget?.key]);
 
@@ -103,6 +60,25 @@ export function useInvestigationWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graphNodeId, graphLoading, graphNode?.found, graphEdges.length]);
 
+  /**
+   * Auto-fires the AI Correlation Summary the moment a search result comes
+   * back -- unlike the AI Investigation Summary above, this doesn't need to
+   * wait on the graph hook's own state since `result.graph` (and
+   * `result.coverage`/`result.rankedFindings`) are already fully populated
+   * in the same /investigate response (see server/investigation/index.js).
+   * Guarded the same way -- fires once per resolved search, skipped when
+   * there's nothing real to synthesize.
+   */
+  useEffect(() => {
+    if (!result) return;
+    const key = `${result.type}:${result.indicator.toLowerCase()}`;
+    if (correlationFiredRef.current.has(key)) return;
+    if (result.coverage.nothingFound) return;
+    correlationFiredRef.current.add(key);
+    correlationM.mutate(result);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result]);
+
   const recommendedActions = useMemo(() => {
     if (!result) return null;
     return buildRecommendedActions({
@@ -127,6 +103,9 @@ export function useInvestigationWorkspace() {
     graphInsights: insightsM.data ?? null,
     graphInsightsPending: insightsM.isPending,
     graphInsightsError: insightsM.isError ? (insightsM.error as Error).message : null,
+    correlationSummary: correlationM.data ?? null,
+    correlationSummaryPending: correlationM.isPending,
+    correlationSummaryError: correlationM.isError ? (correlationM.error as Error).message : null,
     runInvestigation: (query: string) => investigateM.mutate(query),
   };
 }

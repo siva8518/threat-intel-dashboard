@@ -26,7 +26,12 @@ import { startAiThreatSummaryJob } from "./aiThreatSummaryJob.js";
 import { log } from "./lib/log.js";
 
 const app = express();
-app.use(express.json());
+// Default 100kb limit is too small for the Investigation Correlation
+// Engine's own POST bodies -- a full InvestigationResult (server/investigation/
+// index.js), including its inlined Investigation Graph, can legitimately run
+// to several hundred edges for a well-correlated entity (confirmed live:
+// APT29's own graph alone is ~300 edges), well past 100kb once serialized.
+app.use(express.json({ limit: "5mb" }));
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "..", "dist");
