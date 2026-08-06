@@ -16,11 +16,11 @@ export const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL ?? "nomic-embed
 // between them, adding 7+ seconds of load time to a literally one-word test
 // call. Net effect was slower and less reliable (intermittent "fetch failed"
 // errors), not faster. server/aiThreatSummary.js and server/combinedExtraction.js
-// have both since moved off Ollama entirely onto Groq's hosted API (see
-// server/groqClient.js) for exactly this class of problem -- OLLAMA_CHAT_MODEL
-// here now only ever serves the RAG chatbot, so there's nothing left to share
-// it with, but the single-shared-model lesson still applies if anything else
-// is ever added back onto local Ollama.
+// have both since moved off Ollama entirely onto server/ai/aiRouter.js's
+// hosted-provider failover for exactly this class of problem --
+// OLLAMA_CHAT_MODEL here now only ever serves the RAG chatbot, so there's
+// nothing left to share it with, but the single-shared-model lesson still
+// applies if anything else is ever added back onto local Ollama.
 export const RAG_TOP_K = Number(process.env.RAG_TOP_K) || 6;
 
 // Cosine similarity is in [-1, 1]; nomic-embed-text's real-world scores for

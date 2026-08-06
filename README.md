@@ -471,14 +471,14 @@ intel, executive leadership).
 
 ## AI Router (multi-provider failover)
 
-`server/ai/` is a generic, provider-agnostic AI router with two entry points: `summarize(prompt)` (plain
-text) and `summarizeJson(prompt, { systemPrompt, temperature })` (each provider's native JSON-object
-response mode, plus an optional separate system message). AI Summarization above (`server/aiThreatSummary.js`)
-is wired through the latter — it used to call `server/groqClient.js` directly (Groq only); now it calls
-`aiRouter.summarizeJson()`, so its 25+ section structured report generation gets the same Gemini → Mistral →
-Groq → Cohere failover as everything else here, instead of going fully dark whenever Groq's free tier is
-exhausted. `server/groqClient.js` itself is untouched and still serves its other two callers
-(`server/combinedExtraction.js`'s entity extraction, `server/detectionRuleDraft.js`) directly.
+`server/ai/` is a generic, provider-agnostic AI router with two entry points: `summarize(prompt, opts)` (plain
+text) and `summarizeJson(prompt, { systemPrompt, temperature, tier })` (each provider's native JSON-object
+response mode, plus an optional separate system message). Every LLM caller in this app is wired through one
+of these two — `server/aiThreatSummary.js`, `server/industryBriefing.js`, `server/detectionRuleDraft.js`, and
+`server/combinedExtraction.js` all used to call the old `server/groqClient.js` directly (Groq only, since
+deleted); now every one of them gets the same Gemini → Mistral → Groq → Cohere failover, instead of going
+fully dark whenever Groq's free tier is exhausted. `server/combinedExtraction.js` is the one caller that
+passes `{ tier: "fast" }` — see the next bullet.
 
 ```js
 import { aiRouter } from "./server/ai/aiRouter.js";
@@ -497,13 +497,18 @@ const result = await aiRouter.summarize(prompt);
   other client in this app uses), no vendor SDKs. Adding a 5th provider is a two-file change: one new
   `providers/*.js` file, one line in `server/ai/aiRouter.js`'s `PROVIDERS` array.
 - `server/ai/config.js` centralizes every provider's env var name and default model in one place.
+- Every provider also has a `fastModel` (Gemini Flash-Lite, Ministral 8B, Groq Llama 3.1 8B Instant, Cohere
+  Command R7B) alongside its normal `model`. Passing `{ tier: "fast" }` to either entry point requests that
+  smaller/cheaper tier instead — `server/combinedExtraction.js` is the one caller that opts in, since it runs
+  continuously against dozens of articles per cycle on a lightweight six-category extraction and needs
+  throughput more than the default model's extra quality. Every other caller omits `tier` and behaves exactly
+  as before this existed.
 - Run `npm run ai:example` for a live end-to-end demo of `summarize()`. All four providers are verified
   live on both entry points, each one's actual response parsing confirmed against a real successful call
   (plain text and JSON mode), and each confirmed to correctly win the router when it's next in priority
   order (forcing the ones ahead of it to fail). `summarizeJson()` was additionally verified against a real
   full AI Summarization report generation (16,956-token completion) — this surfaced a real timeout bug
-  (providers defaulted to a 30s request timeout, too short for this app's heaviest LLM call; fixed to 60s,
-  matching what `server/groqClient.js` already used for the same reason).
+  (providers defaulted to a 30s request timeout, too short for this app's heaviest LLM call; fixed to 60s).
 - Two model defaults needed correcting from their originally-documented names because the vendor retired
   them: Gemini's pinned `gemini-2.5-flash` 404s for newer API keys (now defaults to `gemini-flash-latest`,
   Google's maintained alias), and Cohere's undated `command-r` was retired entirely (now defaults to

@@ -13,10 +13,11 @@ const LABEL = "Cohere";
 /**
  * Shared request path for both summarize() and summarizeJson().
  * @param {string} prompt
- * @param {{systemPrompt?: string, temperature?: number, jsonMode?: boolean}} options
+ * @param {{systemPrompt?: string, temperature?: number, jsonMode?: boolean, tier?: "fast"}} options
  */
-async function callCohere(prompt, { systemPrompt, temperature, jsonMode = false } = {}) {
-  const { apiKey, model } = AI_ROUTER_CONFIG.cohere;
+async function callCohere(prompt, { systemPrompt, temperature, jsonMode = false, tier } = {}) {
+  const { apiKey, model: defaultModel, fastModel } = AI_ROUTER_CONFIG.cohere;
+  const model = tier === "fast" ? fastModel : defaultModel;
   const messages = systemPrompt ? [{ role: "system", content: systemPrompt }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }];
 
   let data;
@@ -46,7 +47,7 @@ async function callCohere(prompt, { systemPrompt, temperature, jsonMode = false 
   const summary = textBlock?.text;
   if (!summary) throw classifyProviderError(LABEL, new Error("Cohere returned no usable text content"));
 
-  return { summary, tokensUsed: data.usage?.tokens?.output_tokens };
+  return { summary, model, tokensUsed: data.usage?.tokens?.output_tokens };
 }
 
 export const cohereProvider = {
@@ -57,15 +58,19 @@ export const cohereProvider = {
     return Boolean(AI_ROUTER_CONFIG.cohere.apiKey);
   },
 
-  /** @param {string} prompt @returns {Promise<{summary: string, tokensUsed?: number}>} */
-  async summarize(prompt) {
-    return callCohere(prompt);
+  /**
+   * @param {string} prompt
+   * @param {{tier?: "fast"}} [options]
+   * @returns {Promise<{summary: string, model: string, tokensUsed?: number}>}
+   */
+  async summarize(prompt, options = {}) {
+    return callCohere(prompt, options);
   },
 
   /**
    * @param {string} userPrompt
-   * @param {{systemPrompt?: string, temperature?: number}} [options]
-   * @returns {Promise<{summary: string, tokensUsed?: number}>}
+   * @param {{systemPrompt?: string, temperature?: number, tier?: "fast"}} [options]
+   * @returns {Promise<{summary: string, model: string, tokensUsed?: number}>}
    */
   async summarizeJson(userPrompt, options = {}) {
     return callCohere(userPrompt, { ...options, jsonMode: true });

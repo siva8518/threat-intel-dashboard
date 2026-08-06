@@ -6,9 +6,16 @@
 // server/lib/retry.js) before failing over to the next, and return a
 // normalized result no matter which provider actually answered.
 //
+// Both methods also accept an optional {tier: "fast"} to request each
+// provider's smaller/cheaper model (see server/ai/config.js's per-provider
+// fastModel) instead of its default -- for high-volume callers like
+// server/combinedExtraction.js that need throughput more than the default
+// model's extra quality. Omitting `tier` behaves exactly as before this
+// existed.
+//
 // Adding a 6th provider is a two-file change: write one more
 // server/ai/providers/*.js implementing { label, model, isConfigured(),
-// summarize(prompt), summarizeJson(prompt, opts) }, then add it to the
+// summarize(prompt, opts), summarizeJson(prompt, opts) }, then add it to the
 // PROVIDERS array below. Nothing else here, or in any caller, needs to
 // change.
 import { log } from "../lib/log.js";
@@ -88,7 +95,11 @@ async function runWithFailover(method, callArgs) {
       const failoverPart = attempts.length > 0 ? ` | Failovers: ${attempts.length}` : "";
       log.info("ai-router", `Provider: ${provider.label} | Status: Success | Latency: ${(latency / 1000).toFixed(1)}s${tokenPart}${failoverPart}`);
 
-      return { provider: provider.label, model: provider.model, summary: result.summary, latency, success: true };
+      // result.model is the actual model that answered -- differs from
+      // provider.model (the provider's default) whenever the caller passed
+      // {tier: "fast"}, so a fast-tier response never gets misreported as
+      // having come from the default model.
+      return { provider: provider.label, model: result.model ?? provider.model, summary: result.summary, latency, success: true };
     } catch (rawError) {
       // Providers already classify their own errors before throwing (see
       // aiProviderError.js) -- this fallback only matters if one somehow
@@ -113,10 +124,15 @@ async function runWithFailover(method, callArgs) {
  * skipped as a failover. Only throws once every configured provider has
  * failed.
  * @param {string} prompt
+ * @param {{tier?: "fast"}} [options] - pass {tier: "fast"} to request each
+ *   provider's smaller/cheaper model instead of its default (see
+ *   AI_ROUTER_CONFIG's per-provider fastModel) -- for high-volume callers
+ *   like server/combinedExtraction.js where throughput matters more than
+ *   the default model's extra quality.
  * @returns {Promise<AISummaryResult>}
  */
-export async function summarize(prompt) {
-  return runWithFailover("summarize", [prompt]);
+export async function summarize(prompt, options = {}) {
+  return runWithFailover("summarize", [prompt, options]);
 }
 
 /**
@@ -125,10 +141,9 @@ export async function summarize(prompt) {
  * prompt -- for structured-report callers like server/aiThreatSummary.js
  * that need a schema-following JSON response, not free text. `result.summary`
  * is the raw JSON text (still a string); parsing/validating it against the
- * caller's own schema is the caller's job, same as it already was when
- * server/aiThreatSummary.js called server/groqClient.js directly.
+ * caller's own schema is the caller's job.
  * @param {string} userPrompt
- * @param {{systemPrompt?: string, temperature?: number}} [options]
+ * @param {{systemPrompt?: string, temperature?: number, tier?: "fast"}} [options] - see summarize()'s `tier` doc above.
  * @returns {Promise<AISummaryResult>}
  */
 export async function summarizeJson(userPrompt, options = {}) {

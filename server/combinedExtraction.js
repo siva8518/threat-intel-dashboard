@@ -10,22 +10,21 @@
 // resolveTechniques still runs unchanged afterward -- only the "ask the
 // model" step is merged.
 //
-// Runs on Groq's free hosted API (same one server/aiThreatSummary.js already
-// uses), not local Ollama -- deliberately swapped so this pipeline (and the
-// five Intelligence tabs it feeds: Malware/Actor/Campaign/Dark Web/Tools)
-// works in any environment with a GROQ_API_KEY, including a hosted demo
-// deploy with no local model installed. The RAG chatbot (server/rag/) is a
-// separate consumer and stays on local Ollama -- Groq has no embedding
-// endpoint, so it can't serve that half regardless.
-import { groqJson } from "./groqClient.js";
-
-// A smaller/faster model than AI Summarization's own GROQ_CHAT_MODEL default
-// (llama-3.3-70b-versatile) -- this prompt is a much lighter six-category
-// name/ID extraction, not a 25+ section report, and an 8B-class model
-// carries a materially higher free-tier rate limit, which matters more here
-// since this job runs continuously against dozens of articles per cycle
-// rather than once a day.
-const GROQ_EXTRACTION_MODEL = process.env.GROQ_EXTRACTION_MODEL || "llama-3.1-8b-instant";
+// Runs through server/ai/aiRouter.js's Gemini->Mistral->Groq->Cohere
+// failover, not local Ollama -- deliberately swapped so this pipeline (and
+// the five Intelligence tabs it feeds: Malware/Actor/Campaign/Dark Web/
+// Tools) works in any environment with at least one configured provider key,
+// including a hosted demo deploy with no local model installed, and keeps
+// running if any single provider is down/rate-limited. Requests each
+// provider's {tier: "fast"} model (see server/ai/config.js) -- this prompt
+// is a much lighter six-category name/ID extraction, not a 25+ section
+// report, and the smaller/cheaper tier carries a materially higher
+// free-tier rate limit, which matters more here since this job runs
+// continuously against dozens of articles per cycle rather than once a day.
+// The RAG chatbot (server/rag/) is a separate consumer and stays on local
+// Ollama -- none of these providers has an embedding endpoint, so none can
+// serve that half regardless.
+import { aiRouter } from "./ai/aiRouter.js";
 
 const SYSTEM_PROMPT =
   "You are a threat intelligence analyst. You will be given one security news article's headline and, if available, its summary. " +
@@ -74,13 +73,6 @@ function parseJsonObject(text) {
  */
 export async function extractAllEntities({ title, summary }) {
   const userContent = summary ? `Headline: ${title}\nSummary: ${summary}` : `Headline: ${title}`;
-  const response = await groqJson({
-    model: GROQ_EXTRACTION_MODEL,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userContent },
-    ],
-    temperature: 0,
-  });
-  return parseJsonObject(response.message?.content ?? "");
+  const response = await aiRouter.summarizeJson(userContent, { systemPrompt: SYSTEM_PROMPT, temperature: 0, tier: "fast" });
+  return parseJsonObject(response.summary ?? "");
 }

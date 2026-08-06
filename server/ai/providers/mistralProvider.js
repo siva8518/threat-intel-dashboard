@@ -15,10 +15,11 @@ const LABEL = "Mistral";
 /**
  * Shared request path for both summarize() and summarizeJson().
  * @param {string} prompt
- * @param {{systemPrompt?: string, temperature?: number, jsonMode?: boolean}} options
+ * @param {{systemPrompt?: string, temperature?: number, jsonMode?: boolean, tier?: "fast"}} options
  */
-async function callMistral(prompt, { systemPrompt, temperature, jsonMode = false } = {}) {
-  const { apiKey, model } = AI_ROUTER_CONFIG.mistral;
+async function callMistral(prompt, { systemPrompt, temperature, jsonMode = false, tier } = {}) {
+  const { apiKey, model: defaultModel, fastModel } = AI_ROUTER_CONFIG.mistral;
+  const model = tier === "fast" ? fastModel : defaultModel;
   const messages = systemPrompt ? [{ role: "system", content: systemPrompt }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }];
 
   let data;
@@ -42,7 +43,7 @@ async function callMistral(prompt, { systemPrompt, temperature, jsonMode = false
   const summary = data.choices?.[0]?.message?.content;
   if (!summary) throw classifyProviderError(LABEL, new Error("Mistral returned no usable content"));
 
-  return { summary, tokensUsed: data.usage?.total_tokens };
+  return { summary, model, tokensUsed: data.usage?.total_tokens };
 }
 
 export const mistralProvider = {
@@ -53,15 +54,19 @@ export const mistralProvider = {
     return Boolean(AI_ROUTER_CONFIG.mistral.apiKey);
   },
 
-  /** @param {string} prompt @returns {Promise<{summary: string, tokensUsed?: number}>} */
-  async summarize(prompt) {
-    return callMistral(prompt);
+  /**
+   * @param {string} prompt
+   * @param {{tier?: "fast"}} [options]
+   * @returns {Promise<{summary: string, model: string, tokensUsed?: number}>}
+   */
+  async summarize(prompt, options = {}) {
+    return callMistral(prompt, options);
   },
 
   /**
    * @param {string} userPrompt
-   * @param {{systemPrompt?: string, temperature?: number}} [options]
-   * @returns {Promise<{summary: string, tokensUsed?: number}>}
+   * @param {{systemPrompt?: string, temperature?: number, tier?: "fast"}} [options]
+   * @returns {Promise<{summary: string, model: string, tokensUsed?: number}>}
    */
   async summarizeJson(userPrompt, options = {}) {
     return callMistral(userPrompt, { ...options, jsonMode: true });

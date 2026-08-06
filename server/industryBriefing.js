@@ -23,7 +23,7 @@
 // `references` is never model-authored -- it's built directly from the real
 // grounding pool's own {title, source, link, publishedDate}, so "citing
 // CISA" only happens when the underlying article really is from a CISA feed.
-import { groqJson, GroqUnavailableError } from "./groqClient.js";
+import { aiRouter, AllProvidersFailedError } from "./ai/aiRouter.js";
 import { INDUSTRY_CATALOG } from "./aiThreatSummary.js";
 import { matchIndustries } from "./emergingThreatsRanking.js";
 import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
@@ -31,8 +31,6 @@ import { getAllEntities as getActorEntities } from "./threatActorIntelligence.js
 import { getAllEntities as getCampaignEntities } from "./campaignIntelligence.js";
 import { buildEntityHuntingQueries } from "./huntingLibrary.js";
 import * as cache from "./cache.js";
-
-const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || "llama-3.3-70b-versatile";
 
 // Wider than the 30-day pool the rest of Emerging Threats uses -- this
 // feature's own spec explicitly asks for a 60-90 day outlook grounded in
@@ -571,18 +569,11 @@ export async function generateIndustryBriefing(industry, { taggedNewsItems, repo
 
   let parsed;
   try {
-    const response = await groqJson({
-      model: GROQ_CHAT_MODEL,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-      temperature: 0.3,
-    });
-    parsed = JSON.parse(response.message.content);
+    const response = await aiRouter.summarizeJson(userMessage, { systemPrompt: SYSTEM_PROMPT, temperature: 0.3 });
+    parsed = JSON.parse(response.summary);
   } catch (error) {
-    if (error instanceof GroqUnavailableError) throw error;
-    throw new GroqUnavailableError(`failed to parse briefing response (${error.message})`);
+    if (error instanceof AllProvidersFailedError) throw error;
+    throw new Error(`failed to parse briefing response (${error.message})`);
   }
 
   const topAttackTechniques = safeTopAttackTechniques(parsed.topAttackTechniques, pool, validTechniqueIds, idToTechnique);

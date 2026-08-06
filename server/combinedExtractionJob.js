@@ -1,6 +1,7 @@
 // Drains the news pool through the combined per-article extraction call (see
-// server/combinedExtraction.js, which runs on Groq's free hosted API) and
-// upserts confirmed entities into all six canonical entity stores (malware/
+// server/combinedExtraction.js, which runs through server/ai/aiRouter.js's
+// multi-provider failover) and upserts confirmed entities into all six
+// canonical entity stores (malware/
 // actor/campaign/technique/dark-web/tool intelligence). Replaces the
 // separate jobs that used to each make their own sequential LLM call per
 // article (malwareExtractionJob.js, threatActorExtractionJob.js,
@@ -31,7 +32,7 @@ import * as campaignIntel from "./campaignIntelligence.js";
 import * as techniqueIntel from "./attackTechniqueIntelligence.js";
 import * as darkWebIntel from "./darkWebIntelligence.js";
 import * as toolIntel from "./toolIntelligence.js";
-import { GroqUnavailableError } from "./groqClient.js";
+import { AllProvidersFailedError } from "./ai/aiRouter.js";
 import { log } from "./lib/log.js";
 
 // Was 15 when this job (and its four now-merged predecessors) were designed
@@ -249,7 +250,7 @@ async function runCycle() {
         darkweb.length - validDarkWeb.length +
         tools.length - validTools.length;
     } catch (error) {
-      if (error instanceof GroqUnavailableError) throw error; // stop the whole cycle -- Groq being down/rate-limited affects every remaining article the same way
+      if (error instanceof AllProvidersFailedError) throw error; // stop the whole cycle -- every provider being down/rate-limited affects every remaining article the same way
       log.error("combined-extraction", `failed to process "${article.title.slice(0, 60)}...": ${error.message}`);
     } finally {
       markProcessedEverywhere(article.link);
@@ -285,9 +286,9 @@ async function safeCycle() {
     await runCycle();
     hasWarnedUnavailable = false;
   } catch (error) {
-    if (error instanceof GroqUnavailableError) {
+    if (error instanceof AllProvidersFailedError) {
       if (!hasWarnedUnavailable) {
-        log.warn("combined-extraction", `${error.message} -- combined extraction will report itself unavailable until GROQ_API_KEY is set / Groq is reachable again.`);
+        log.warn("combined-extraction", `${error.message} -- combined extraction will report itself unavailable until at least one AI provider is configured/reachable again.`);
         hasWarnedUnavailable = true;
       }
     } else {

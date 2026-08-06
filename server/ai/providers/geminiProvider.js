@@ -20,10 +20,11 @@ const LABEL = "Gemini";
  * fetch/error-classify/response-parse logic lives here once instead of
  * being duplicated per method.
  * @param {string} prompt
- * @param {{systemPrompt?: string, temperature?: number, jsonMode?: boolean}} options
+ * @param {{systemPrompt?: string, temperature?: number, jsonMode?: boolean, tier?: "fast"}} options
  */
-async function callGemini(prompt, { systemPrompt, temperature, jsonMode = false } = {}) {
-  const { apiKey, model } = AI_ROUTER_CONFIG.gemini;
+async function callGemini(prompt, { systemPrompt, temperature, jsonMode = false, tier } = {}) {
+  const { apiKey, model: defaultModel, fastModel } = AI_ROUTER_CONFIG.gemini;
+  const model = tier === "fast" ? fastModel : defaultModel;
   const body = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
@@ -53,7 +54,7 @@ async function callGemini(prompt, { systemPrompt, temperature, jsonMode = false 
   const summary = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!summary) throw classifyProviderError(LABEL, new Error("Gemini returned no usable content (likely blocked by safety filters or an empty candidate list)"));
 
-  return { summary, tokensUsed: data.usageMetadata?.totalTokenCount };
+  return { summary, model, tokensUsed: data.usageMetadata?.totalTokenCount };
 }
 
 /**
@@ -70,9 +71,13 @@ export const geminiProvider = {
     return Boolean(AI_ROUTER_CONFIG.gemini.apiKey);
   },
 
-  /** @param {string} prompt @returns {Promise<{summary: string, tokensUsed?: number}>} */
-  async summarize(prompt) {
-    return callGemini(prompt);
+  /**
+   * @param {string} prompt
+   * @param {{tier?: "fast"}} [options]
+   * @returns {Promise<{summary: string, model: string, tokensUsed?: number}>}
+   */
+  async summarize(prompt, options = {}) {
+    return callGemini(prompt, options);
   },
 
   /**
@@ -81,8 +86,8 @@ export const geminiProvider = {
    * server/aiThreatSummary.js that need a schema-following JSON response,
    * not free-text.
    * @param {string} userPrompt
-   * @param {{systemPrompt?: string, temperature?: number}} [options]
-   * @returns {Promise<{summary: string, tokensUsed?: number}>}
+   * @param {{systemPrompt?: string, temperature?: number, tier?: "fast"}} [options]
+   * @returns {Promise<{summary: string, model: string, tokensUsed?: number}>}
    */
   async summarizeJson(userPrompt, options = {}) {
     return callGemini(userPrompt, { ...options, jsonMode: true });

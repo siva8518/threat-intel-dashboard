@@ -29,8 +29,8 @@ const REQUEST_TIMEOUT_MS = 120_000;
 // their own 2min cycles only ~10s apart on top of local Ollama, each
 // generation call commonly taking 20-40s+, so their requests were very
 // plausibly overlapping in-flight most cycles -- both have since moved to
-// Groq's hosted API (see server/groqClient.js), leaving the RAG chat route
-// as this file's only real caller. Kept anyway as cheap insurance: a simple
+// server/ai/aiRouter.js's hosted-provider failover, leaving the RAG chat
+// route as this file's only real caller. Kept anyway as cheap insurance: a simple
 // promise-chain queue means this whole app never has more than one Ollama
 // request in flight at a time, regardless of what future feature might get
 // added back onto local Ollama. queueTail always resolves (even when the

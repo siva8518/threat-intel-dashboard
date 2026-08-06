@@ -38,7 +38,6 @@ import { buildDetectionBacklog } from "../detectionBacklog.js";
 import { generateDraftArtifacts } from "../detectionRuleDraft.js";
 import { buildEmergingThreatsRanking, computeAggregateIndustryHeatmap } from "../emergingThreatsRanking.js";
 import { generateIndustryBriefing, InsufficientCoverageError } from "../industryBriefing.js";
-import { GroqUnavailableError } from "../groqClient.js";
 import { INDUSTRY_CATALOG, REPORT_SECTION_PROVENANCE } from "../aiThreatSummary.js";
 import {
   getAllStatuses as getAllDetectionBacklogStatuses,
@@ -462,7 +461,7 @@ router.get("/dashboard/industry-briefing", async (req, res) => {
     res.json(briefing);
   } catch (error) {
     if (error instanceof InsufficientCoverageError) return res.status(422).json({ error: error.message });
-    if (error instanceof GroqUnavailableError) return res.status(503).json({ error: error.message });
+    if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
     res.status(502).json({ error: error.message });
   }
 });
@@ -533,7 +532,7 @@ router.delete("/dashboard/detection-backlog/:id", (req, res) => {
 // independently Generated/Not Generated) for one backlog item -- see
 // server/detectionRuleDraft.js. Generated per-click, not bulk/scheduled (see
 // that module's own header for why), so this can be a plain synchronous
-// request/response despite the multi-second Groq round trip.
+// request/response despite the multi-second AI round trip.
 router.post("/dashboard/detection-backlog/:id/draft-artifacts", async (req, res) => {
   const id = decodeURIComponent(req.params.id);
   const { items, ruleIndex } = getDetectionBacklogItems();
@@ -545,7 +544,7 @@ router.post("/dashboard/detection-backlog/:id/draft-artifacts", async (req, res)
     const record = setDetectionBacklogDraftArtifacts(id, draft);
     res.json({ id, ...record });
   } catch (error) {
-    if (error instanceof GroqUnavailableError) return res.status(503).json({ error: error.message });
+    if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
     res.status(502).json({ error: error.message });
   }
 });

@@ -1,8 +1,8 @@
 // AI-drafted detection artifacts for one Detection Backlog gap -- closes the
 // loop from "we don't have a rule for this" (server/detectionBacklog.js) to
 // actual starting-point artifacts a human can review, instead of only ever
-// flagging the gap. Same Groq wiring as server/aiThreatSummary.js and
-// server/industryBriefing.js.
+// flagging the gap. Same aiRouter wiring (Gemini -> Mistral -> Groq -> Cohere
+// failover) as server/aiThreatSummary.js and server/industryBriefing.js.
 //
 // Unlike the single-rule version this replaced, every one of the 12 artifact
 // types below is independently assessed: each is either genuinely supported
@@ -25,9 +25,7 @@
 // scheduled/bulk -- with 200+ open gaps in the backlog at once, eagerly
 // drafting all of them would be both slow and mostly wasted work against
 // gaps nobody's actively triaging yet.
-import { groqJson, GroqUnavailableError } from "./groqClient.js";
-
-const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || "llama-3.3-70b-versatile";
+import { aiRouter, AllProvidersFailedError } from "./ai/aiRouter.js";
 
 const CONFIDENCE_LEVELS = new Set(["High", "Medium", "Low"]);
 const MAX_RELATED_RULES = 5;
@@ -251,27 +249,21 @@ export async function generateDraftArtifacts(item, ruleIndex = []) {
     relatedBlock +
     `\nAssess all 12 artifact types independently for a Detection Engineer to review.`;
 
+  let response;
   let artifacts;
   try {
-    const response = await groqJson({
-      model: GROQ_CHAT_MODEL,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userContent },
-      ],
-      temperature: 0.2,
-    });
-    artifacts = parseArtifacts(response.message?.content ?? "");
+    response = await aiRouter.summarizeJson(userContent, { systemPrompt: SYSTEM_PROMPT, temperature: 0.2 });
+    artifacts = parseArtifacts(response.summary ?? "");
   } catch (error) {
-    if (error instanceof GroqUnavailableError) throw error;
-    throw new GroqUnavailableError(`failed to generate draft artifacts (${error.message})`);
+    if (error instanceof AllProvidersFailedError) throw error;
+    throw new Error(`failed to generate draft artifacts (${error.message})`);
   }
-  if (!artifacts) throw new GroqUnavailableError("model returned an unusable response -- try again");
+  if (!artifacts) throw new Error("model returned an unusable response -- try again");
 
   return {
     artifacts,
     relatedRules: related.map((r) => ({ label: r.label, path: r.path, url: r.url })),
-    model: GROQ_CHAT_MODEL,
+    model: response.model,
     generatedAt: new Date().toISOString(),
   };
 }
