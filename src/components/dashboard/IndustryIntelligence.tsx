@@ -176,9 +176,9 @@ export function IndustryIntelligence() {
     () =>
       (data?.activeThreatActors ?? [])
         .slice()
-        .sort((a, b) => b.reportCount - a.reportCount)
+        .sort((a, b) => b.confidenceScore - a.confidenceScore || b.reportCount - a.reportCount)
         .slice(0, 10)
-        .map((a) => ({ name: a.actor, count: a.reportCount, detail: `${a.confidence} confidence${a.country ? ` · ${a.country}` : ""}` })),
+        .map((a) => ({ name: a.actor, count: a.reportCount, detail: `${a.confidenceScore}% confidence (${a.tier})${a.country ? ` · ${a.country}` : ""}` })),
     [data],
   );
 
@@ -186,9 +186,9 @@ export function IndustryIntelligence() {
     () =>
       (data?.malwareFamilies ?? [])
         .slice()
-        .sort((a, b) => b.sourceArticles.length - a.sourceArticles.length)
+        .sort((a, b) => b.confidenceScore - a.confidenceScore || b.sourceArticles.length - a.sourceArticles.length)
         .slice(0, 10)
-        .map((m) => ({ name: m.name, count: m.sourceArticles.length, detail: `${m.type} · ${m.severity}` })),
+        .map((m) => ({ name: m.name, count: Math.max(m.sourceArticles.length, 1), detail: `${m.confidenceScore}% confidence (${m.tier}) · ${m.type}` })),
     [data],
   );
 
@@ -196,9 +196,9 @@ export function IndustryIntelligence() {
     () =>
       (data?.activeCampaigns ?? [])
         .slice()
-        .sort((a, b) => b.mentionCount - a.mentionCount)
+        .sort((a, b) => b.confidenceScore - a.confidenceScore || b.mentionCount - a.mentionCount)
         .slice(0, 10)
-        .map((c) => ({ name: c.name, count: c.mentionCount, detail: c.associatedActors.join(", ") || "Unattributed" })),
+        .map((c) => ({ name: c.name, count: Math.max(c.mentionCount, 1), detail: `${c.confidenceScore}% confidence (${c.tier}) · ${c.associatedActors.join(", ") || "Unattributed"}` })),
     [data],
   );
 

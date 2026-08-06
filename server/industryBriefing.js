@@ -28,8 +28,8 @@ import { INDUSTRY_CATALOG } from "./aiThreatSummary.js";
 import { matchIndustries } from "./emergingThreatsRanking.js";
 import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
 import { getAllEntities as getActorEntities } from "./threatActorIntelligence.js";
-import { getAllEntities as getCampaignEntities } from "./campaignIntelligence.js";
 import { buildEntityHuntingQueries } from "./huntingLibrary.js";
+import { rankActorsForIndustry, rankMalwareForIndustry, rankCampaignsForIndustry, iocEligibleMalwareNames } from "./industryCorrelation.js";
 import * as cache from "./cache.js";
 
 // Wider than the 30-day pool the rest of Emerging Threats uses -- this
@@ -264,22 +264,42 @@ function safeTopEmergingThreats(value, pool) {
   });
 }
 
-function safeActiveThreatActors(value, pool) {
-  if (!Array.isArray(value)) return [];
-  const knownActors = new Set(pool.flatMap((a) => a.actors.map((n) => n.toLowerCase())));
-  return value
-    .filter((t) => typeof t?.actor === "string" && knownActors.has(t.actor.toLowerCase()))
-    .slice(0, 10)
-    .map((t) => ({
-      actor: t.actor.trim(),
-      country: safeNullableString(t.country),
-      confidence: CONFIDENCE_LEVELS.has(t.confidence) ? t.confidence : "Medium",
-      motivation: safeString(t.motivation, "Not stated in available reporting"),
-      typicalTargets: safeString(t.typicalTargets, "Not stated in available reporting"),
-      recentCampaigns: safeString(t.recentCampaigns, "Not stated in available reporting"),
-      ttps: safeString(t.ttps, "Not stated in available reporting"),
-      sourceArticles: groundedArticles(t.sourceArticleIds, pool).map(toArticleRef),
-    }));
+const NO_DETAIL_FALLBACK = "Not enough article-level detail in this platform's corpus for this sector specifically -- see this entity's full profile in Threat Actor/Malware Intelligence.";
+const TIER_TO_CONFIDENCE = { direct: "High", "cross-linked": "Medium", historical: "Low" };
+
+/**
+ * Left-joins the model's own (already-shape-validated) narrative onto the
+ * deterministic, real ranked actor list from industryCorrelation.js -- every
+ * ranked actor survives even when the model wrote nothing about it (using
+ * real entity data as fallback text), instead of the old behavior of
+ * silently dropping any actor the model's own JSON didn't happen to name.
+ */
+function mergeActorNarrative(rankedActors, value, pool) {
+  const modelByName = new Map();
+  for (const raw of Array.isArray(value) ? value : []) {
+    if (typeof raw?.actor === "string" && raw.actor.trim()) modelByName.set(norm(raw.actor), raw);
+  }
+
+  return rankedActors.map(({ entity, tier, confidenceScore, reason }) => {
+    const m = modelByName.get(norm(entity.name)) ?? entity.aliases.map((a) => modelByName.get(norm(a))).find(Boolean);
+    const sources = groundedArticles(m?.sourceArticleIds, pool);
+    return {
+      actor: entity.name,
+      country: m ? safeNullableString(m.country) : entity.country,
+      confidence: CONFIDENCE_LEVELS.has(m?.confidence) ? m.confidence : TIER_TO_CONFIDENCE[tier],
+      motivation: m ? safeString(m.motivation, NO_DETAIL_FALLBACK) : entity.motivations?.length ? entity.motivations.join(", ") : NO_DETAIL_FALLBACK,
+      typicalTargets: m ? safeString(m.typicalTargets, NO_DETAIL_FALLBACK) : NO_DETAIL_FALLBACK,
+      recentCampaigns: m ? safeString(m.recentCampaigns, NO_DETAIL_FALLBACK) : entity.malwareUsed?.length ? `Associated with ${entity.malwareUsed.slice(0, 3).join(", ")}.` : NO_DETAIL_FALLBACK,
+      ttps: m ? safeString(m.ttps, NO_DETAIL_FALLBACK) : entity.techniqueIds?.length ? `${entity.techniqueIds.length} MITRE ATT&CK technique(s) on record for this actor.` : NO_DETAIL_FALLBACK,
+      sourceArticles: sources.map(toArticleRef),
+      reportCount: entity.mentionCount ?? sources.length,
+      firstSeen: entity.firstSeen ?? null,
+      lastSeen: entity.lastSeen ?? null,
+      tier,
+      confidenceScore,
+      correlationReason: reason,
+    };
+  });
 }
 
 /** techniqueId validated against the real synced ATT&CK catalog (validTechniqueIds), never trusted from the model -- an invented/near-miss ID is dropped to null rather than shown as real. */
@@ -320,28 +340,51 @@ function computeTacticsSummary(topAttackTechniques) {
     .map(([tactic, techniqueCount]) => ({ tactic, techniqueCount }));
 }
 
-/** name validated against the pool's own tagged malware list -- an invented family name is dropped rather than shown as real. */
-function safeMalwareFamilies(value, pool) {
-  if (!Array.isArray(value)) return [];
-  const knownMalware = new Set(pool.flatMap((a) => a.malware.map((n) => n.toLowerCase())));
-  return value
-    .filter((m) => typeof m?.name === "string" && knownMalware.has(m.name.toLowerCase()))
-    .slice(0, 10)
-    .map((m) => {
-      const sources = groundedArticles(m.sourceArticleIds, pool);
-      return {
-        name: m.name.trim(),
-        type: safeString(m.type, "Malware"),
-        primaryPurpose: safeString(m.primaryPurpose, "Not stated in available reporting"),
-        initialInfectionMethod: safeString(m.initialInfectionMethod, "Not stated in available reporting"),
-        persistenceMechanism: safeString(m.persistenceMechanism, "Not stated in available reporting"),
-        commonPayload: safeString(m.commonPayload, "Not stated in available reporting"),
-        typicalVictims: safeString(m.typicalVictims, "Not stated in available reporting"),
-        severity: RELEVANCE_LEVELS.has(m.severity) ? m.severity : "Medium",
-        trend: computeTrend(sources),
-        sourceArticles: sources.map(toArticleRef),
-      };
-    });
+// Cheap keyword classifier over a malware entity's own real ATT&CK-sourced
+// description -- used only as a fallback `type` when the model didn't
+// independently describe this family (malwareIntelligence.js entities carry
+// no structured `type` field of their own). Defaults to "Malware" when
+// nothing matches, never invents a more specific type than the text supports.
+function inferMalwareType(entity) {
+  const text = (entity.description ?? "").toLowerCase();
+  if (text.includes("ransomware")) return "Ransomware";
+  if (text.includes("stealer")) return "Stealer";
+  if (text.includes("loader") || text.includes("downloader")) return "Loader";
+  if (text.includes("banking trojan") || text.includes("banking malware")) return "Banking Trojan";
+  if (text.includes("trojan")) return "Trojan";
+  if (text.includes("backdoor")) return "Backdoor";
+  if (text.includes("botnet") || text.includes("bot ")) return "Botnet";
+  if (text.includes("wiper")) return "Wiper";
+  if (text.includes("remote access") || /\brat\b/.test(text)) return "RAT";
+  return "Malware";
+}
+
+/** Left-joins the model's own narrative onto the deterministic, real ranked malware list from industryCorrelation.js -- same "never drop a real ranked entity just because the model didn't independently name it" discipline as mergeActorNarrative above. */
+function mergeMalwareNarrative(rankedMalware, value, pool) {
+  const modelByName = new Map();
+  for (const raw of Array.isArray(value) ? value : []) {
+    if (typeof raw?.name === "string" && raw.name.trim()) modelByName.set(norm(raw.name), raw);
+  }
+
+  return rankedMalware.map(({ entity, tier, confidenceScore, reason }) => {
+    const m = modelByName.get(norm(entity.name)) ?? entity.aliases.map((a) => modelByName.get(norm(a))).find(Boolean);
+    const sources = groundedArticles(m?.sourceArticleIds, pool);
+    return {
+      name: entity.name,
+      type: m ? safeString(m.type, inferMalwareType(entity)) : inferMalwareType(entity),
+      primaryPurpose: m ? safeString(m.primaryPurpose, entity.description ?? NO_DETAIL_FALLBACK) : (entity.description ?? NO_DETAIL_FALLBACK),
+      initialInfectionMethod: m ? safeString(m.initialInfectionMethod, NO_DETAIL_FALLBACK) : NO_DETAIL_FALLBACK,
+      persistenceMechanism: m ? safeString(m.persistenceMechanism, NO_DETAIL_FALLBACK) : NO_DETAIL_FALLBACK,
+      commonPayload: m ? safeString(m.commonPayload, NO_DETAIL_FALLBACK) : NO_DETAIL_FALLBACK,
+      typicalVictims: m ? safeString(m.typicalVictims, NO_DETAIL_FALLBACK) : NO_DETAIL_FALLBACK,
+      severity: RELEVANCE_LEVELS.has(m?.severity) ? m.severity : "Medium",
+      trend: computeTrend(sources),
+      sourceArticles: sources.map(toArticleRef),
+      tier,
+      confidenceScore,
+      correlationReason: reason,
+    };
+  });
 }
 
 function safeAttackTechniques(value, pool) {
@@ -380,45 +423,6 @@ function vulnerabilityTrendsFromPool(pool) {
 
 function norm(v) {
   return (v ?? "").toString().trim().toLowerCase();
-}
-
-/**
- * Real server/campaignIntelligence.js entities targeting this industry --
- * either tagged directly via the entity's own targetedIndustries (see
- * server/newsCorrelation.js#matchIndustries, same keyword signal this
- * module's own poolForIndustry uses), or run by one of this briefing's own
- * validated actors. Deterministic, no new correlation invented -- same
- * reverse-lookup-by-targetedIndustries pattern already proven in
- * server/investigation/investigationGraph.js's victim-edge derivation.
- */
-function activeCampaignsForIndustry(industry, activeThreatActors) {
-  const actorNames = new Set(activeThreatActors.map((a) => norm(a.actor)));
-  return getCampaignEntities()
-    .filter((c) => (c.targetedIndustries ?? []).includes(industry) || (c.associatedActors ?? []).some((a) => actorNames.has(norm(a))))
-    .slice(0, 10)
-    .map((c) => ({
-      name: c.name,
-      associatedActors: c.associatedActors ?? [],
-      associatedMalware: c.associatedMalware ?? [],
-      firstSeen: c.firstSeen ?? null,
-      lastSeen: c.lastSeen ?? null,
-      verified: Boolean(c.verified),
-      mentionCount: c.mentionCount ?? 0,
-    }));
-}
-
-/** Enriches each validated actor with real entity data (mentionCount/firstSeen/lastSeen from server/threatActorIntelligence.js) instead of relying only on the model's own citation count -- same "prefer the real entity over the model's own citation count" discipline investigationGraph.js already established. Falls back to the briefing's own citation count when no canonical entity exists (e.g. a ransomware-only actor not yet in the news-derived store). */
-function enrichActorsWithEntityData(actors) {
-  const entities = getActorEntities();
-  return actors.map((a) => {
-    const entity = entities.find((e) => norm(e.name) === norm(a.actor) || (e.aliases ?? []).some((al) => norm(al) === norm(a.actor)));
-    return {
-      ...a,
-      reportCount: entity?.mentionCount ?? a.sourceArticles.length,
-      firstSeen: entity?.firstSeen ?? null,
-      lastSeen: entity?.lastSeen ?? null,
-    };
-  });
 }
 
 /**
@@ -461,10 +465,13 @@ function criticalCvesForPool(pool) {
  * malware families' own tracked indicators (server/malwareIntelligence.js's
  * iocs/articleIocs -- same fields server/investigation/investigationGraph.js
  * already reads), plus real email addresses from the pool's own matched AI
- * Summarization reports. Deterministic, capped, deduped.
+ * Summarization reports. `names` is broadened beyond the shown malwareFamilies
+ * cards to include malware used by a direct-tier actor for this industry (see
+ * industryCorrelation.js#iocEligibleMalwareNames) -- a real actor<->malware
+ * link still surfaces indicators even when the malware family itself had no
+ * direct sector text match. Deterministic, capped, deduped.
  */
-function buildIndustryIocFeed(malwareFamilies, pool, reports) {
-  const names = new Set(malwareFamilies.map((m) => norm(m.name)));
+function buildIndustryIocFeed(names, pool, reports) {
   const entities = getMalwareEntities().filter((e) => names.has(norm(e.name)));
 
   const indicators = [];
@@ -551,11 +558,35 @@ function detectionAndHuntingForIndustry(malwareFamilies, activeThreatActors) {
  * @param {{taggedNewsItems: Array, reports: Array, kevIds: Set<string>, attackTechniques?: Array}} sources
  * @param {Array} [sources.attackTechniques] - this app's synced MITRE ATT&CK technique catalog, {id, name, tactic}[] (see server/connectors/attack.js) -- optional; topAttackTechniques/tacticsSummary come back empty without it rather than erroring.
  */
+function buildKnownEntitiesBlock(rankedActors, rankedMalware) {
+  if (rankedActors.length === 0 && rankedMalware.length === 0) return "";
+  const actorLines = rankedActors.map((r) => r.entity.name).join(", ");
+  const malwareLines = rankedMalware.map((r) => r.entity.name).join(", ");
+  return (
+    "\n\nKNOWN RELEVANT ENTITIES (real actors/malware this platform has already correlated to this industry -- " +
+    "write real, specific narrative detail (motivation/typicalTargets/recentCampaigns/ttps, or type/primaryPurpose/etc.) " +
+    "for as many of these as the table above genuinely supports; it is fine to describe one briefly even with thin table coverage " +
+    "as long as you don't invent specifics beyond what's grounded -- these names do not need to appear in the table to be included):\n" +
+    (actorLines ? `Actors: ${actorLines}\n` : "") +
+    (malwareLines ? `Malware: ${malwareLines}` : "")
+  );
+}
+
 export async function generateIndustryBriefing(industry, { taggedNewsItems, reports, kevIds, attackTechniques = [] }) {
   if (!INDUSTRY_CATALOG.includes(industry)) throw new Error(`Unknown industry: ${industry}`);
 
   const pool = poolForIndustry(industry, taggedNewsItems, reports, kevIds);
   if (pool.length < 3) throw new InsufficientCoverageError(industry);
+
+  // Deterministic, real, tiered/confidence-scored correlation -- computed
+  // BEFORE the model call and independent of the (much smaller) article pool
+  // above, so Active Threat Actors / Active Campaigns / Trending Malware /
+  // the IOC feed stay populated from this platform's full entity stores and
+  // ransomware-disclosure data even when this industry's own news pool is
+  // thin. See server/industryCorrelation.js for the tiering rationale.
+  const rankedActors = rankActorsForIndustry(industry);
+  const rankedMalware = rankMalwareForIndustry(industry, rankedActors);
+  const rankedCampaigns = rankCampaignsForIndustry(industry, rankedActors, rankedMalware);
 
   const candidateTechniques = selectCandidateTechniques(pool, attackTechniques);
   const validTechniqueIds = new Set(attackTechniques.map((t) => t.id));
@@ -564,7 +595,8 @@ export async function generateIndustryBriefing(industry, { taggedNewsItems, repo
   const groundingTable = buildGroundingTable(pool);
   const userMessage =
     `Industry: ${industry}\n\nSOURCE ARTICLE TABLE (cite by #):\n${groundingTable}\n\n` +
-    `${buildTechniqueCandidatesBlock(candidateTechniques)}\n\n` +
+    `${buildTechniqueCandidatesBlock(candidateTechniques)}` +
+    `${buildKnownEntitiesBlock(rankedActors, rankedMalware)}\n\n` +
     `Generate the briefing JSON for this industry using ONLY what this table (and well-established category-level patterns) supports.`;
 
   let parsed;
@@ -577,8 +609,8 @@ export async function generateIndustryBriefing(industry, { taggedNewsItems, repo
   }
 
   const topAttackTechniques = safeTopAttackTechniques(parsed.topAttackTechniques, pool, validTechniqueIds, idToTechnique);
-  const activeThreatActors = enrichActorsWithEntityData(safeActiveThreatActors(parsed.activeThreatActors, pool));
-  const malwareFamilies = safeMalwareFamilies(parsed.malwareFamilies, pool);
+  const activeThreatActors = mergeActorNarrative(rankedActors, parsed.activeThreatActors, pool);
+  const malwareFamilies = mergeMalwareNarrative(rankedMalware, parsed.malwareFamilies, pool);
   const { detectionOpportunities, huntingOpportunities } = detectionAndHuntingForIndustry(malwareFamilies, activeThreatActors);
 
   return {
@@ -589,7 +621,7 @@ export async function generateIndustryBriefing(industry, { taggedNewsItems, repo
     executiveSummary: safeString(parsed.executiveSummary, "Insufficient grounded detail to produce an executive summary."),
     topEmergingThreats: safeTopEmergingThreats(parsed.topEmergingThreats, pool),
     activeThreatActors,
-    activeCampaigns: activeCampaignsForIndustry(industry, activeThreatActors),
+    activeCampaigns: rankedCampaigns,
     emergingAttackTechniques: safeAttackTechniques(parsed.emergingAttackTechniques, pool),
     topAttackTechniques,
     tacticsSummary: computeTacticsSummary(topAttackTechniques),
@@ -597,7 +629,7 @@ export async function generateIndustryBriefing(industry, { taggedNewsItems, repo
     commonTargets: safeStringArray(parsed.commonTargets, 8),
     vulnerabilityTrends: { ...vulnerabilityTrendsFromPool(pool), commentary: safeString(parsed.vulnerabilityTrendsCommentary) },
     criticalCves: criticalCvesForPool(pool),
-    industryIocFeed: buildIndustryIocFeed(malwareFamilies, pool, reports),
+    industryIocFeed: buildIndustryIocFeed(iocEligibleMalwareNames(rankedMalware, rankedActors), pool, reports),
     recentReports: recentReportsForPool(pool, reports),
     detectionOpportunities,
     huntingOpportunities,

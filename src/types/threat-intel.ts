@@ -1573,6 +1573,9 @@ export interface IndustryBriefingThreat {
   sourceArticles: IndustryBriefingArticleRef[];
 }
 
+/** How this actor/malware/campaign was correlated to the industry -- see server/industryCorrelation.js. "direct": the entity's own real text/ransomware-victim data matches this industry. "cross-linked": linked to another directly-matched entity (shared malware/campaign). "historical": curated, widely-published sector affinity, only ever a real platform entity, used to fill remaining slots. */
+export type IndustryCorrelationTier = "direct" | "cross-linked" | "historical";
+
 export interface IndustryBriefingActor {
   actor: string;
   /** Only set when this actor's national attribution is well-established and widely reported -- null if unattributed/uncertain, never guessed. */
@@ -1583,10 +1586,14 @@ export interface IndustryBriefingActor {
   recentCampaigns: string;
   ttps: string;
   sourceArticles: IndustryBriefingArticleRef[];
-  /** Real threatActorIntelligence.js entity mentionCount/dates when this actor resolves to a known entity -- falls back to sourceArticles.length/null when it doesn't (see enrichActorsWithEntityData in server/industryBriefing.js). */
+  /** Real threatActorIntelligence.js entity mentionCount/dates when this actor resolves to a known entity -- falls back to sourceArticles.length/null when it doesn't (see mergeActorNarrative in server/industryBriefing.js). */
   reportCount: number;
   firstSeen: string | null;
   lastSeen: string | null;
+  /** Deterministic correlation tier/score/reason from server/industryCorrelation.js -- independent of confidence above (the model's own High/Medium/Low judgment call on this specific narrative). */
+  tier: IndustryCorrelationTier;
+  confidenceScore: number;
+  correlationReason: string;
 }
 
 export interface IndustryBriefingTechnique {
@@ -1613,7 +1620,7 @@ export interface IndustryBriefingTacticSummary {
 }
 
 export interface IndustryBriefingMalwareFamily {
-  /** Must literally appear in the grounding pool's own tagged malware names -- an invented family name is dropped before this ever reaches the client. */
+  /** A real server/malwareIntelligence.js entity name -- always a platform-known family, from the deterministic tiered ranking in server/industryCorrelation.js, never invented (see mergeMalwareNarrative in server/industryBriefing.js). */
   name: string;
   type: string;
   primaryPurpose: string;
@@ -1624,9 +1631,12 @@ export interface IndustryBriefingMalwareFamily {
   severity: "Critical" | "High" | "Medium" | "Low";
   trend: "Increasing" | "Stable" | "Declining";
   sourceArticles: IndustryBriefingArticleRef[];
+  tier: IndustryCorrelationTier;
+  confidenceScore: number;
+  correlationReason: string;
 }
 
-/** Real campaignIntelligence.js entity, reverse-matched by targetedIndustries/associatedActors -- never model-authored (see activeCampaignsForIndustry in server/industryBriefing.js). */
+/** Real campaignIntelligence.js entity or ransomware-group victim cluster, tiered/confidence-scored by server/industryCorrelation.js -- never model-authored (see rankCampaignsForIndustry in server/industryBriefing.js). */
 export interface IndustryBriefingCampaign {
   name: string;
   associatedActors: string[];
@@ -1635,6 +1645,9 @@ export interface IndustryBriefingCampaign {
   lastSeen: string | null;
   verified: boolean;
   mentionCount: number;
+  tier: IndustryCorrelationTier;
+  confidenceScore: number;
+  reason: string;
 }
 
 /** Real CVSS/EPSS/KEV data from the NVD/KEV/EPSS caches -- never model-authored (see criticalCvesForPool in server/industryBriefing.js). */
