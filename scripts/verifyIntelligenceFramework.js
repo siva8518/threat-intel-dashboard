@@ -7,14 +7,16 @@
 // click-through, never a hermetic test suite. Run via:
 //   node scripts/verifyIntelligenceFramework.js
 //
-// Scenarios 1-5 are pure unit tests against evidence.js/cveExploitState.js/
-// verdictEngine.js with synthetic input -- no network, always run.
-// Scenarios 6, 9, 10, 11 call investigate() for entity types that never
-// touch a live network connector (name/artifact/ransomwareGroup/asn) --
-// deterministic, always run. Scenario 7 calls investigate() for a real IP
-// already linked to AsyncRAT in this platform's own data -- its assertion
-// only depends on local cross-reference, not live lookups, so it's treated
-// as reliable even though the underlying module also attempts live calls.
+// Scenarios 1-5, 13-14 are pure unit tests against evidence.js/
+// cveExploitState.js/verdictEngine.js with synthetic input -- no network,
+// always run. Scenarios 6, 9, 10, 11 call investigate() for entity types
+// that never touch a live network connector (name/artifact/ransomwareGroup/
+// asn) -- deterministic, always run. Scenario 7 calls investigate() for a
+// real IP dynamically resolved from whichever malware family currently has
+// a live IP IOC on file (ThreatFox-sourced IOCs rotate as the background
+// scheduler refreshes them) -- its assertion only depends on local
+// cross-reference, not live lookups, so it's treated as reliable even
+// though the underlying module also attempts live calls.
 // Scenario 8 and the network-touching legs of scenario 12 are wrapped to
 // print SKIPPED (offline/unreachable) rather than fail the run, since they
 // depend on external services this script has no control over.
@@ -23,6 +25,7 @@ import { buildEvidence } from "../server/investigation/evidence.js";
 import { assessCveExploitationState } from "../server/investigation/cveExploitState.js";
 import { computeVerdict } from "../server/investigation/verdictEngine.js";
 import { investigate } from "../server/investigation/index.js";
+import { getAllEntities as getMalwareEntities } from "../server/malwareIntelligence.js";
 
 let pass = 0;
 let fail = 0;
@@ -106,12 +109,13 @@ async function main() {
       const verdict = computeVerdict({ entityType: "ip", evidence, context: {} });
       const hasMaliciousPolarity = evidence.items.some((i) => i.polarity === "malicious" || i.polarity === "suspicious");
       const badState = verdict.state === "Malicious" || verdict.state === "Confirmed Malicious" || verdict.state === "Suspicious";
-      if (hasMaliciousPolarity || badState) {
+      const badBlock = verdict.blockRecommendation === "Block";
+      if (hasMaliciousPolarity || badState || badBlock) {
         allSafe = false;
-        console.log(`      -- ${holder}: hasMaliciousPolarity=${hasMaliciousPolarity} state=${verdict.state}`);
+        console.log(`      -- ${holder}: hasMaliciousPolarity=${hasMaliciousPolarity} state=${verdict.state} blockRecommendation=${verdict.blockRecommendation}`);
       }
     }
-    ok("5. Shared-hosting-provider ASN alone never reaches Malicious/Suspicious (8 providers)", allSafe);
+    ok("5. Shared-hosting-provider ASN alone never reaches Malicious/Suspicious/Block (8 providers)", allSafe);
   }
 
   // 6. Alias resolution -- "Cozy Bear" resolves to the real stored APT29 entity.
@@ -127,20 +131,30 @@ async function main() {
     skip("6. Alias search \"Cozy Bear\"", error.message);
   }
 
-  // 7. Real malware-linked IP -- crossRef matches AsyncRAT, source counted once.
+  // 7. Real malware-linked IP -- crossRef matches its own family, source
+  // counted once. Resolved dynamically against whichever malware family
+  // currently has a live IP IOC on file (ThreatFox-sourced IOCs rotate as
+  // the background scheduler refreshes them, so a hardcoded IP here would
+  // eventually go stale and produce a false failure, not a real one).
   try {
-    const result = await investigate("34.106.101.107");
-    const matchedAsyncRat = result.relatedIntelligence?.matchedMalwareFamilies?.includes("AsyncRAT");
-    const evidence = result.overview.verdict.evidence;
-    const platformItems = evidence.items.filter((i) => i.source === "This platform's own tracked intelligence");
-    const platformSourceCountedOnce = new Set(platformItems.map((i) => i.source)).size <= 1;
-    ok(
-      "7. Real AsyncRAT-linked IP -> matched, platform correlation counted as one source",
-      Boolean(matchedAsyncRat) && platformSourceCountedOnce,
-      `matchedAsyncRat=${matchedAsyncRat} platformItems=${platformItems.length} independentSourceCount=${evidence.independentSourceCount}`,
-    );
+    const withLiveIp = getMalwareEntities().find((e) => (e.iocs ?? []).some((i) => i.indicatorType === "ip"));
+    if (!withLiveIp) {
+      skip("7. Real malware-linked IP", "no malware entity in this platform's current data has a live IP IOC on file");
+    } else {
+      const testIp = withLiveIp.iocs.find((i) => i.indicatorType === "ip").indicator;
+      const result = await investigate(testIp);
+      const matchedFamily = result.relatedIntelligence?.matchedMalwareFamilies?.includes(withLiveIp.name);
+      const evidence = result.overview.verdict.evidence;
+      const platformItems = evidence.items.filter((i) => i.source === "This platform's own tracked intelligence");
+      const platformSourceCountedOnce = new Set(platformItems.map((i) => i.source)).size <= 1;
+      ok(
+        `7. Real ${withLiveIp.name}-linked IP (${testIp}) -> matched, platform correlation counted as one source`,
+        Boolean(matchedFamily) && platformSourceCountedOnce,
+        `matchedFamily=${matchedFamily} platformItems=${platformItems.length} independentSourceCount=${evidence.independentSourceCount}`,
+      );
+    }
   } catch (error) {
-    skip("7. Real AsyncRAT-linked IP 34.106.101.107", error.message);
+    skip("7. Real malware-linked IP", error.message);
   }
 
   // 8. Known-benign IP -- network-dependent, skip gracefully offline.
@@ -206,6 +220,41 @@ async function main() {
     }
   }
   ok(`12. Cross-type structural parity (${structuralPass}/${structuralChecked} checked passed)`, structuralChecked > 0 && structuralPass === structuralChecked);
+
+  // 13. The literal worked example from the "make verdicts evidence-driven"
+  // priority change: OTX=suspicious, VT=0 malicious/54 harmless, AbuseIPDB=
+  // 0 reports/0% confidence, MISP=known Cloudflare range, RIPEstat=Cloudflare
+  // ASN. Must NOT produce CRITICAL/MALICIOUS/HIGH CONFIDENCE.
+  {
+    const lookupResults = [
+      { source: "OTX", pulseCount: 3, lastSeen: new Date().toISOString() },
+      { source: "VirusTotal", malicious: 0, suspicious: 0, harmless: 54 },
+      { source: "AbuseIPDB", abuseConfidenceScore: 0, totalReports: 0 },
+      { source: "MISP Warning Lists", matchedLists: ["List of known Cloudflare IP ranges"] },
+      { source: "RIPEstat", asn: "13335", holder: "Cloudflare, Inc." },
+    ];
+    const evidence = buildEvidence({ type: "ip", lookupResults, crossRef: null, moduleData: {} });
+    const verdict = computeVerdict({ entityType: "ip", evidence, context: {} });
+    ok(
+      "13. Worked example (OTX-suspicious vs VT/AbuseIPDB/MISP-clean, Cloudflare ASN) -> Conflicting Intelligence, not Critical/Malicious/High-confidence",
+      verdict.state !== "Confirmed Malicious" && verdict.state !== "Malicious" && verdict.confidence !== "High" && verdict.severity !== "CRITICAL" && verdict.state === "Conflicting Intelligence" && verdict.blockRecommendation !== "Block",
+      `state=${verdict.state} severity=${verdict.severity} confidence=${verdict.confidence} blockRecommendation=${verdict.blockRecommendation}`,
+    );
+  }
+
+  // 14. Block Recommendation is never "Block" for Suspicious/Conflicting/
+  // weaker states, regardless of how elevated severity reads -- the whole
+  // point of separating "how bad if true" from "should we act now".
+  {
+    const lookupResults = [{ source: "OTX", pulseCount: 2, lastSeen: new Date().toISOString() }];
+    const evidence = buildEvidence({ type: "domain", lookupResults, crossRef: null, moduleData: {} });
+    const verdict = computeVerdict({ entityType: "domain", evidence, context: {} });
+    ok(
+      "14. Suspicious state from a single weak corroborating signal -> never \"Block\"",
+      verdict.state === "Suspicious" && verdict.blockRecommendation === "Monitor — Do Not Block",
+      `state=${verdict.state} blockRecommendation=${verdict.blockRecommendation}`,
+    );
+  }
 
   console.log(`\n--- ${pass} passed, ${fail} failed, ${skipped} skipped ---`);
   if (fail > 0) process.exitCode = 1;

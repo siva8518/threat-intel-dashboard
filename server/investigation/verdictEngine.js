@@ -180,14 +180,26 @@ function computeSeverityLevel(entityType, evidence, context) {
     if (malware || actor || campaign) return "MEDIUM";
     return "UNKNOWN";
   }
+  // Deliberately NOT driven by evidence weight/agreement (that's what
+  // confidence is for -- see requirement "Severity != Confidence"). A
+  // single weak, unattributed, even CONFLICTING signal still means "we
+  // don't know the potential impact", which is MEDIUM by default, not LOW
+  // (LOW would wrongly imply a known-small impact) and not tied to how
+  // many sources happen to agree. Severity only rises above that baseline
+  // when there's a specific impact driver (attribution to a known malware
+  // family, multiple independent direct confirmations, or one very strong
+  // direct signal), and only drops to LOW when the evidence is exclusively
+  // negative/clean, or UNKNOWN when there's no evidence at all.
   const bearing = evidenceBearingItems(evidence);
-  const maxWeight = bearing.reduce((max, i) => Math.max(max, i.weight), 0);
+  if (bearing.length === 0) return "UNKNOWN";
+  const maliciousLike = bearing.filter((i) => i.polarity === "malicious" || i.polarity === "suspicious");
+  if (maliciousLike.length === 0) return "LOW"; // only negative/clean/neutral evidence found
   const malwareFamilies = context.crossRef?.matchedMalwareFamilies ?? [];
-  if (malwareFamilies.length > 0 && maxWeight >= 0.6) return "CRITICAL";
-  if (maxWeight >= 0.8) return "HIGH";
-  if (malwareFamilies.length > 0 || maxWeight >= 0.5) return "MEDIUM";
-  if (maxWeight > 0) return "LOW";
-  return "UNKNOWN";
+  const maxWeight = bearing.reduce((max, i) => Math.max(max, i.weight), 0);
+  const independentDirectMaliciousSources = new Set(maliciousLike.filter((i) => i.category === "direct").map((i) => i.source)).size;
+  if (malwareFamilies.length > 0 && independentDirectMaliciousSources >= 1) return "CRITICAL"; // attributed to a known malware family with direct confirmation
+  if (independentDirectMaliciousSources >= 2 || maxWeight >= 0.8) return "HIGH"; // strong or multiply-confirmed malicious signal, even without family attribution
+  return "MEDIUM"; // a malicious/suspicious signal exists but isn't yet strongly corroborated -- uncharacterized potential impact, never downgraded to LOW just because the evidence is weak or conflicting
 }
 
 // --- Verdict state -- the one decision table every entity type shares.
@@ -236,6 +248,39 @@ function buildReasoning(state, evidence, cveExploitationState) {
   return `${state} based on ${bearing.length} evidence item(s) from ${evidence.independentSourceCount} independent source(s): ${named.join(", ")}${bearing.length > 3 ? ", …" : ""}.`;
 }
 
+// Blocking is only ever a meaningful action for network/file IOCs -- never
+// for a CVE (you patch it, you don't "block" a vulnerability), an actor/
+// malware/campaign name, a ransomware group, or any of the other entity
+// types this framework covers.
+const BLOCKABLE_TYPES = new Set(["ip", "domain", "url", "sha256", "sha1", "md5"]);
+
+/**
+ * Deterministic, evidence-derived block/don't-block call -- a fifth output
+ * alongside state/severity/confidence/priority, computed from the verdict
+ * STATE alone (never from severity or raw evidence weight directly), so weak
+ * or conflicting reputation data can never produce "Block" no matter how
+ * elevated severity happens to be (e.g. Conflicting Intelligence always
+ * routes to "Monitor -- Do Not Block", even when severity reads HIGH).
+ */
+function computeBlockRecommendation(entityType, state) {
+  if (!BLOCKABLE_TYPES.has(entityType)) {
+    return { blockRecommendation: "Not Applicable", blockRecommendationReasoning: `Blocking is not a meaningful action for a "${entityType}" entity.` };
+  }
+  if (state === "Confirmed Malicious") {
+    return { blockRecommendation: "Block", blockRecommendationReasoning: "Multiple independent, corroborating sources (or one very strong, high-confidence source) confirm malicious activity." };
+  }
+  if (state === "Malicious") {
+    return { blockRecommendation: "Block", blockRecommendationReasoning: "Direct evidence of malicious activity from at least one reliable source, with no conflicting negative evidence." };
+  }
+  if (state === "Suspicious") {
+    return { blockRecommendation: "Monitor — Do Not Block", blockRecommendationReasoning: "Evidence suggests risk but is not strong or corroborated enough alone to justify blocking." };
+  }
+  if (state === "Conflicting Intelligence") {
+    return { blockRecommendation: "Monitor — Do Not Block", blockRecommendationReasoning: "Sources disagree -- do not block based on current, conflicting threat-intelligence evidence." };
+  }
+  return { blockRecommendation: "Do Not Block", blockRecommendationReasoning: "No sufficient malicious evidence in this platform's current data to justify blocking." };
+}
+
 /**
  * Confidence + Severity/Priority + final verdict state -- the one function
  * every entity type routes through.
@@ -251,6 +296,7 @@ export function computeVerdict({ entityType, evidence, cveExploitationState = nu
   const severity = computeSeverityLevel(entityType, evidence, context);
   const label = buildLabel(entityType, state, cveExploitationState, context);
   const reasoning = buildReasoning(state, evidence, cveExploitationState);
+  const { blockRecommendation, blockRecommendationReasoning } = computeBlockRecommendation(entityType, state);
 
   return {
     state,
@@ -261,6 +307,8 @@ export function computeVerdict({ entityType, evidence, cveExploitationState = nu
     severityFactors,
     riskLevel: SEVERITY_TO_RISK[severity] ?? "Low",
     recommendedPriority: SEVERITY_TO_PRIORITY[severity] ?? "Low",
+    blockRecommendation,
+    blockRecommendationReasoning,
     reasoning,
     evidence,
     conflicts: evidence.hasConflict ? [evidence.conflictDescription] : [],

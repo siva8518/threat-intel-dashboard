@@ -12,16 +12,20 @@ function action(text, rationale, role, priority) {
   return { action: text, rationale, role, priority };
 }
 
+// Actions branch on verdict.blockRecommendation (server/investigation/verdictEngine.js#computeBlockRecommendation)
+// rather than re-deriving their own block/don't-block reading of verdict.state
+// -- one source of truth for "should this be blocked", so this text can
+// never drift out of sync with the Block Recommendation shown elsewhere.
 function iocActions(type, indicator, verdict, moduleData) {
   const label = { ip: "IP address", domain: "domain", url: "URL" }[type] ?? "indicator";
   const actions = [];
   const recencyNote = verdict.confidenceFactors.recencyDays != null ? ` (most recently seen ${verdict.confidenceFactors.recencyDays} day(s) ago)` : "";
 
-  if (verdict.state === "Confirmed Malicious" || verdict.state === "Malicious") {
+  if (verdict.blockRecommendation === "Block") {
     actions.push(action(`Block ${label} "${indicator}" at the perimeter firewall/proxy (egress and ingress) and add it to the SIEM watchlist.`, verdict.reasoning, "socAnalyst", verdict.recommendedPriority));
     actions.push(action(`Hunt for prior connections to "${indicator}" across the last 90 days${recencyNote}.`, "This platform's own evidence indicates active malicious use -- retroactive hunting finds any already-occurred exposure.", "threatHunter", verdict.recommendedPriority));
-  } else if (verdict.state === "Suspicious" || verdict.state === "Conflicting Intelligence") {
-    actions.push(action(`Add "${indicator}" to a monitoring watchlist rather than an outright block, and re-check once more evidence accumulates.`, verdict.reasoning, "socAnalyst", "Normal"));
+  } else if (verdict.blockRecommendation === "Monitor — Do Not Block") {
+    actions.push(action(`Add "${indicator}" to a monitoring watchlist rather than an outright block -- ${verdict.blockRecommendationReasoning.charAt(0).toLowerCase()}${verdict.blockRecommendationReasoning.slice(1)}`, verdict.reasoning, "socAnalyst", "Normal"));
   } else if (verdict.state === "Clean-Benign") {
     actions.push(action(`No blocking action needed for "${indicator}" based on current evidence.`, verdict.reasoning, "socAnalyst", "Low"));
   } else {
@@ -33,10 +37,12 @@ function iocActions(type, indicator, verdict, moduleData) {
 function hashActions(indicator, verdict, moduleData) {
   const actions = [];
   const malwareFamily = moduleData?.malwareFamily ?? null;
-  if (verdict.state === "Confirmed Malicious" || verdict.state === "Malicious") {
+  if (verdict.blockRecommendation === "Block") {
     actions.push(action(`Add hash "${indicator}" to the EDR block-list.`, verdict.reasoning, "socAnalyst", verdict.recommendedPriority));
     actions.push(action(`Retro-hunt for file writes/executions of "${indicator}" across all endpoints.`, "Confirmed/likely-malicious file -- retroactive hunting finds any already-occurred execution.", "threatHunter", verdict.recommendedPriority));
     if (malwareFamily) actions.push(action(`Deploy the matched YARA/Sigma detection rule(s) for "${malwareFamily}" (see Detection & Hunting).`, `Sandbox/engine analysis matched this file to the "${malwareFamily}" family.`, "detectionEngineer", "High"));
+  } else if (verdict.blockRecommendation === "Monitor — Do Not Block") {
+    actions.push(action(`Add hash "${indicator}" to a monitoring watchlist rather than an outright block -- ${verdict.blockRecommendationReasoning.charAt(0).toLowerCase()}${verdict.blockRecommendationReasoning.slice(1)}`, verdict.reasoning, "socAnalyst", "Normal"));
   } else if (verdict.state === "Clean-Benign") {
     actions.push(action(`No blocking action needed for hash "${indicator}" based on current evidence.`, verdict.reasoning, "socAnalyst", "Low"));
   } else {

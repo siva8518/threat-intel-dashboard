@@ -421,6 +421,9 @@ export interface VerdictSeverityFactors {
 }
 
 /** The full output of the Confidence + Severity/Priority stages -- see server/investigation/verdictEngine.js#computeVerdict. Confidence and severity are computed independently (separate factor lists above) then combined with the evidence pattern into one `state`. */
+/** Whether to block this indicator at the perimeter/EDR -- a fifth, independently-derived output alongside state/severity/confidence/priority, not folded into any of them. Only ever "Block" when the verdict state itself reflects corroborated malicious evidence (Confirmed Malicious/Malicious); weak or conflicting reputation data alone never produces "Block", even when severity happens to be elevated. "Not Applicable" for entity types blocking doesn't apply to (CVEs, actors, campaigns, artifacts, etc.). */
+export type BlockRecommendation = "Block" | "Monitor — Do Not Block" | "Do Not Block" | "Not Applicable";
+
 export interface VerdictResult {
   state: VerdictState;
   label: string;
@@ -430,6 +433,8 @@ export interface VerdictResult {
   severityFactors: VerdictSeverityFactors;
   riskLevel: "Critical" | "High" | "Medium" | "Low";
   recommendedPriority: "Immediate" | "High" | "Normal" | "Low";
+  blockRecommendation: BlockRecommendation;
+  blockRecommendationReasoning: string;
   reasoning: string;
   evidence: EvidenceReconciliation;
   /** Human-readable descriptions of every detected disagreement between sources -- empty unless evidence.hasConflict. */

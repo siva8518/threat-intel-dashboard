@@ -101,6 +101,14 @@ function VerdictBanner({ overview }: { overview: InvestigationResult["overview"]
             <span className="text-muted">Confidence: </span>
             <span className="font-semibold text-foreground">{verdict.confidence}</span>
           </div>
+          {verdict.blockRecommendation !== "Not Applicable" && (
+            <div>
+              <span className="text-muted">Block Recommendation: </span>
+              <span className="font-semibold text-foreground" title={verdict.blockRecommendationReasoning}>
+                {verdict.blockRecommendation}
+              </span>
+            </div>
+          )}
           <div>
             <span className="text-muted">First Seen: </span>
             <span className="font-semibold text-foreground">{overview.firstSeen ? new Date(overview.firstSeen).toLocaleDateString() : "Not Reported"}</span>

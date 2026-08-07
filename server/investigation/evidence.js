@@ -243,18 +243,30 @@ const SOURCE_RULES = {
 // feeds, so it must always count as exactly one independent source family
 // no matter how many malware/actor/campaign names it matched (see
 // independentSourceCount below).
+// Confirmed live: this platform's own cross-reference is a same-indicator
+// match against news-article-derived IOC extraction (server/malwareExtraction.js
+// et al.), not a first-party vetted detection -- that pipeline is real but
+// meaningfully noisier than a structured feed (this session already found
+// junk entity records like a malware family literally named "malware" and
+// an actor literally named "CISA"; live-tested here, the extremely common
+// placeholder/example address 1.1.1.1 matched "BRICKSTORM"/"BeaverTail" via
+// this exact path, driving severity straight to CRITICAL off a single noisy
+// internal correlation with no external confirmation at all). Categorized
+// "corroborating", not "direct" -- it can support and add weight to a real
+// external detection, but must never alone carry the same evidentiary
+// weight as a first-party feed with its own detection methodology.
 function crossReferenceEvidence(crossRef) {
   if (!crossRef) return [];
   const items = [];
   const SOURCE = "This platform's own tracked intelligence";
   if (crossRef.matchedMalwareFamilies?.length > 0) {
-    items.push(item({ category: "direct", source: SOURCE, claim: `Matched known malware famil${crossRef.matchedMalwareFamilies.length === 1 ? "y" : "ies"}: ${crossRef.matchedMalwareFamilies.join(", ")}`, polarity: "malicious", weight: 0.7, rawField: "matchedMalwareFamilies" }));
+    items.push(item({ category: "corroborating", source: SOURCE, claim: `Matched known malware famil${crossRef.matchedMalwareFamilies.length === 1 ? "y" : "ies"}: ${crossRef.matchedMalwareFamilies.join(", ")}`, polarity: "malicious", weight: 0.45, rawField: "matchedMalwareFamilies" }));
   }
   if (crossRef.associatedThreatActors?.length > 0) {
-    items.push(item({ category: "attribution", source: SOURCE, claim: `Associated with tracked threat actor(s): ${crossRef.associatedThreatActors.join(", ")}`, polarity: "malicious", weight: 0.6, rawField: "associatedThreatActors" }));
+    items.push(item({ category: "attribution", source: SOURCE, claim: `Associated with tracked threat actor(s): ${crossRef.associatedThreatActors.join(", ")}`, polarity: "malicious", weight: 0.4, rawField: "associatedThreatActors" }));
   }
   if (crossRef.activeCampaigns?.length > 0) {
-    items.push(item({ category: "corroborating", source: SOURCE, claim: `Linked to active campaign(s): ${crossRef.activeCampaigns.join(", ")}`, polarity: "malicious", weight: 0.5, rawField: "activeCampaigns" }));
+    items.push(item({ category: "corroborating", source: SOURCE, claim: `Linked to active campaign(s): ${crossRef.activeCampaigns.join(", ")}`, polarity: "malicious", weight: 0.35, rawField: "activeCampaigns" }));
   }
   return items;
 }
