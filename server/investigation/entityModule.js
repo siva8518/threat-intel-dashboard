@@ -8,7 +8,6 @@ import * as cache from "../cache.js";
 import { detectionRulesFor, mergeThreatActors } from "../correlate.js";
 import { ransomwareCampaigns as getRansomwareCampaigns } from "../ransomwareCampaigns.js";
 import { searchEntitiesByName } from "./crossReference.js";
-import { computeEntityVerdict } from "./verdict.js";
 
 export const type = "name";
 
@@ -26,14 +25,13 @@ export async function gather(value) {
 
   const total = malware.length + actors.length + campaigns.length + ransomwareOnly.length;
 
-  // Best single "primary" match for the Universal Overview verdict --
-  // prefer whichever bucket returned a hit, malware first (most often what
-  // a SOC analyst is pivoting from an IOC to check).
-  let verdict = null;
-  if (malware.length > 0) verdict = computeEntityVerdict("malware", malware[0]);
-  else if (actors.some((a) => a.type === "Ransomware" || a.type === "APT")) verdict = computeEntityVerdict("actor", actors.find((a) => a.type === "Ransomware" || a.type === "APT"));
-  else if (actors.length > 0) verdict = computeEntityVerdict("actor", actors[0]);
-  else if (campaigns.length > 0) verdict = computeEntityVerdict("campaign", campaigns[0]);
+  // Preferred primary match order -- malware first (most often what a SOC
+  // analyst is pivoting from an IOC to check), then a Ransomware/APT actor,
+  // then any actor, then a campaign. See server/investigation/evidence.js#nameEntityEvidence
+  // and verdictEngine.js, which now read `actors[0]`/`campaigns[0]` directly
+  // using this same precedence -- reorder here so both agree.
+  const primaryActor = actors.find((a) => a.type === "Ransomware" || a.type === "APT") ?? actors[0];
+  const orderedActors = primaryActor ? [primaryActor, ...actors.filter((a) => a !== primaryActor)] : actors;
 
-  return { malware: malwareWithRules, actors, campaigns, ransomwareOnly, total, verdict };
+  return { malware: malwareWithRules, actors: orderedActors, campaigns, ransomwareOnly, total };
 }

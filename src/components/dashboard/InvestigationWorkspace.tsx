@@ -18,13 +18,14 @@ import { RealDetectionsHuntingPanel } from "./investigation/RealDetectionsHuntin
 import { AiGraphInsightsPanel } from "./investigation/AiGraphInsightsPanel";
 import { CorrelationSummaryPanel } from "./investigation/CorrelationSummaryPanel";
 import { SearchCoveragePanel } from "./investigation/SearchCoveragePanel";
+import { EvidencePanel } from "./investigation/EvidencePanel";
 import { InvestigationGraph } from "./InvestigationGraph";
 import { useSelection } from "@/context/SelectionContext";
 import { useGenerateInvestigationAiReport } from "@/hooks/useInvestigate";
 import { useInvestigationWorkspace } from "@/hooks/useInvestigationWorkspace";
 import { sectionFamilyFor, INDICATOR_TYPE_LABEL } from "@/investigation/moduleConfig";
 import { virusTotalLookupUrl } from "@/lib/vtLookup";
-import type { IndicatorType, InvestigationResult, IocLookupResult, MalwareIntelligenceEntity, CveRecord, CveProfile, DetectionRuleRef } from "@/types/threat-intel";
+import type { IndicatorType, InvestigationResult, MalwareIntelligenceEntity, CveRecord, CveProfile, DetectionRuleRef, IocLookupResult, VerdictState } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
 interface WorkspaceProps {
@@ -38,53 +39,67 @@ interface WorkspaceProps {
   initialQuery?: string | null;
 }
 
-const VERDICT_BADGE = { critical: "critical", high: "high", medium: "medium", low: "low", unknown: "muted" } as const;
+// The 8-state VerdictState -> visual treatment. "Conflicting Intelligence"
+// gets its own distinct color (cyan, not a severity color) since it isn't
+// "how bad" -- it's "sources disagree, an analyst needs to look" -- and must
+// never be visually folded into the critical/high/medium/low severity scale.
+const VERDICT_STATE_COLOR: Record<VerdictState, "critical" | "high" | "medium" | "low" | "muted" | "cyan"> = {
+  "Confirmed Malicious": "critical",
+  Malicious: "high",
+  Suspicious: "medium",
+  "Conflicting Intelligence": "cyan",
+  Unconfirmed: "muted",
+  "Clean-Benign": "low",
+  Informational: "muted",
+  "Insufficient Evidence": "muted",
+};
+const COLOR_CLASSES: Record<"critical" | "high" | "medium" | "low" | "muted" | "cyan", { border: string; bg: string; text: string }> = {
+  critical: { border: "border-critical/30", bg: "bg-critical/10", text: "text-critical" },
+  high: { border: "border-high/30", bg: "bg-high/10", text: "text-high" },
+  medium: { border: "border-medium/30", bg: "bg-medium/10", text: "text-medium" },
+  low: { border: "border-low/30", bg: "bg-low/10", text: "text-low" },
+  cyan: { border: "border-accent-cyan/30", bg: "bg-accent-cyan/10", text: "text-accent-cyan" },
+  muted: { border: "border-white/10", bg: "bg-white/[0.03]", text: "text-muted" },
+};
 
 function VerdictBanner({ overview }: { overview: InvestigationResult["overview"] }) {
-  const level = overview.overallVerdict;
-  const Icon = level === "critical" || level === "high" ? AlertTriangle : ShieldCheck;
+  const { verdict } = overview;
+  const color = VERDICT_STATE_COLOR[verdict.state];
+  const classes = COLOR_CLASSES[color];
+  const Icon = color === "critical" || color === "high" ? AlertTriangle : ShieldCheck;
   return (
-    <div
-      className={cn(
-        "flex items-start gap-3 rounded-xl border p-4",
-        level === "critical" && "border-critical/30 bg-critical/10",
-        level === "high" && "border-high/30 bg-high/10",
-        level === "medium" && "border-medium/30 bg-medium/10",
-        level === "low" && "border-low/30 bg-low/10",
-        level === "unknown" && "border-white/10 bg-white/[0.03]",
-      )}
-    >
-      <Icon
-        className={cn(
-          "mt-0.5 h-5 w-5 shrink-0",
-          level === "critical" && "text-critical",
-          level === "high" && "text-high",
-          level === "medium" && "text-medium",
-          level === "low" && "text-low",
-          level === "unknown" && "text-muted",
-        )}
-      />
+    <div className={cn("flex items-start gap-3 rounded-xl border p-4", classes.border, classes.bg)}>
+      <Icon className={cn("mt-0.5 h-5 w-5 shrink-0", classes.text)} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={VERDICT_BADGE[level]}>{level.toUpperCase()}</Badge>
-          <span className="text-sm font-semibold text-foreground">{overview.verdictLabel}</span>
+          <Badge variant={color}>{verdict.state.toUpperCase()}</Badge>
+          <span className="text-sm font-semibold text-foreground">{verdict.label}</span>
         </div>
+        {verdict.conflicts.length > 0 && (
+          <div className="mt-2 space-y-1 rounded-lg border border-accent-cyan/20 bg-accent-cyan/[0.05] p-2">
+            {verdict.conflicts.map((c, i) => (
+              <p key={i} className="text-xs text-accent-cyan">
+                {c}
+              </p>
+            ))}
+          </div>
+        )}
         <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
           <div>
             <span className="text-muted">Severity: </span>
-            <span className="font-semibold text-foreground">{overview.severity}</span>
+            <span className="font-semibold text-foreground">{verdict.severity}</span>
           </div>
           <div>
             <span className="text-muted">Risk Level: </span>
-            <span className="font-semibold text-foreground">{overview.riskLevel}</span>
+            <span className="font-semibold text-foreground">{verdict.riskLevel}</span>
           </div>
           <div>
             <span className="text-muted">Recommended Priority: </span>
-            <span className="font-semibold text-foreground">{overview.recommendedPriority}</span>
+            <span className="font-semibold text-foreground">{verdict.recommendedPriority}</span>
           </div>
           <div>
             <span className="text-muted">Confidence: </span>
-            <span className="font-semibold text-foreground">{overview.confidence}</span>
+            <span className="font-semibold text-foreground">{verdict.confidence}</span>
           </div>
           <div>
             <span className="text-muted">First Seen: </span>
@@ -103,6 +118,12 @@ function VerdictBanner({ overview }: { overview: InvestigationResult["overview"]
             <span className="font-semibold text-foreground">{overview.associatedThreatActors.length > 0 ? overview.associatedThreatActors.join(", ") : "None Reported"}</span>
           </div>
         </div>
+        {overview.cveExploitationState && (
+          <p className="mt-2 text-xs">
+            <span className="text-muted">Exploitation Status: </span>
+            <span className="font-semibold text-foreground">{overview.cveExploitationState.label}</span>
+          </p>
+        )}
         {overview.mitreAttackMapping.length > 0 && (
           <p className="mt-2 text-xs text-muted">
             MITRE ATT&CK: <span className="font-mono text-foreground">{overview.mitreAttackMapping.map((t) => t.id).join(", ")}</span>
@@ -113,48 +134,23 @@ function VerdictBanner({ overview }: { overview: InvestigationResult["overview"]
   );
 }
 
-/** Concrete, cited evidence strings for ip/domain/url/hash types -- same source data buildKeyFacts() already reads, just phrased as evidence sentences instead of a label/value grid. Empty for a source that didn't fire or has nothing notable to report -- never a filler phrase. */
-function concreteEvidence(result: InvestigationResult): string[] {
-  const md = result.moduleData;
-  const lookups = md.lookupResults as IocLookupResult[] | undefined;
-  const find = (source: string) => lookups?.find((r) => r.source === source);
-  const evidence: string[] = [];
-
-  const abuseIpdb = find("AbuseIPDB");
-  if (abuseIpdb && Number(abuseIpdb.totalReports) > 0) evidence.push(`${abuseIpdb.totalReports} AbuseIPDB report(s) at ${abuseIpdb.abuseConfidenceScore}% confidence`);
-
-  const vt = find("VirusTotal");
-  if (vt && Number(vt.malicious) > 0) evidence.push(`${vt.malicious} VirusTotal engine(s) flag it malicious${vt.threatLabel ? ` (${vt.threatLabel})` : ""}`);
-
-  const pulsedive = find("Pulsedive");
-  if (pulsedive && Array.isArray(pulsedive.threats) && pulsedive.threats.length > 0) evidence.push(`Pulsedive flags: ${(pulsedive.threats as string[]).join(", ")}`);
-
-  const otx = find("OTX");
-  if (otx && Number(otx.pulseCount) > 0) evidence.push(`present in ${otx.pulseCount} OTX threat pulse(s)`);
-
-  const leakix = find("LeakIX");
-  if (leakix && Number(leakix.leakCount) > 0) evidence.push(`${leakix.leakCount} exposed leak(s) via LeakIX`);
-
-  const related = md.relatedIndicators as { sameCampaignOrActor?: unknown[]; sameAsn?: unknown[] } | undefined;
-  if (related?.sameCampaignOrActor && related.sameCampaignOrActor.length > 0) evidence.push(`linked to ${related.sameCampaignOrActor.length} other indicator(s) in this platform's own tracked data`);
-
-  return evidence;
-}
-
 /**
- * Evidence only -- severity/risk/priority/confidence are already on the
- * Analyst Verdict tiles directly above this, so nothing here repeats them.
- * Each fact on this page lives in exactly one place; later sections
- * reference it by name instead of restating the value.
+ * The verdict engine's own reasoning sentence (server/investigation/verdictEngine.js)
+ * -- already names the real evidence-bearing sources/counts that produced
+ * this verdict, so this section doesn't hand-pick its own subset of
+ * evidence anymore (that used to cover only 5 hardcoded sources and could
+ * drift from the actual verdict logic). Severity/risk/priority/confidence
+ * are already on the Analyst Verdict tiles above; actor/campaign names are
+ * already there too. Full per-source, per-category evidence lives in the
+ * Evidence panel below. Each fact on this page lives in exactly one place;
+ * this section only ever references other sections by name.
  */
 function whyShouldICare(result: InvestigationResult): string[] {
   const overview = result.overview;
-  const evidence = concreteEvidence(result);
-  const lines: string[] = [];
-  if (evidence.length > 0) lines.push(`Evidence: ${evidence.join("; ")}.`);
-  if (overview.associatedThreatActors.length > 0) lines.push(`Linked to tracked threat actor(s): ${overview.associatedThreatActors.join(", ")}.`);
-  if (overview.activeCampaigns.length > 0) lines.push(`Associated with active campaign(s): ${overview.activeCampaigns.join(", ")}.`);
-  if (lines.length === 0) lines.push("No further evidence beyond the verdict above -- no configured source or internal data adds anything on this indicator yet.");
+  const lines: string[] = [overview.verdict.reasoning];
+  if (overview.associatedThreatActors.length > 0 || overview.activeCampaigns.length > 0) {
+    lines.push("See the Analyst Verdict tiles above for linked actor(s)/campaign(s), and Relationships below for the full picture.");
+  }
   return lines;
 }
 
@@ -475,11 +471,13 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
 
             <KeyFactsPanel facts={buildKeyFacts(result)} />
 
+            <EvidencePanel evidence={result.overview.verdict.evidence} />
+
             <RelatedAiReportsSection result={result} />
 
             <RealDetectionsHuntingPanel graphNode={graphNode} />
 
-            {recommendedActions && <RecommendedActionsPanel actions={recommendedActions} />}
+            {recommendedActions && <RecommendedActionsPanel guidance={recommendedActions} />}
 
             <Section title="Indicator-Specific Intelligence">
               {family === "network" && result.type === "ip" && (

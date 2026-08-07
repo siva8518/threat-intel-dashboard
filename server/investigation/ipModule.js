@@ -19,7 +19,6 @@ import { checkIndicator as checkIsc } from "../lookups/isc.js";
 import { throttleAndCache } from "../lib/lookupLimiter.js";
 import { checkMispWarninglists } from "./mispCheck.js";
 import { reverseDns } from "../lib/dnsRecords.js";
-import { computeIocVerdict } from "./verdict.js";
 import { crossReferenceIndicator } from "./crossReference.js";
 
 // Hoisted (not inlined in LOOKUPS below) so "Related Indicators" -- Same ASN
@@ -94,7 +93,6 @@ export async function gather(value) {
     network,
     internalInvestigation,
     relatedIndicators,
-    verdict: computeIocVerdict(results),
   };
 }
 

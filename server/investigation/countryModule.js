@@ -11,7 +11,6 @@ export const type = "country";
 
 export async function gather(value) {
   const crossReference = crossReferenceIndicator(value);
-  const verdict = { verdict: "unknown", label: "Country Profile", confidence: "Medium", severity: "UNKNOWN", riskLevel: "Low", priority: "Low" };
   const note = "Which actors originate from or target this country, and which campaigns/victims are tied to it, is shown in the Investigation Graph above -- no separate reputation source exists for a country as a standalone indicator.";
-  return { country: value, crossReference, note, verdict };
+  return { country: value, crossReference, note };
 }

@@ -6,7 +6,6 @@
 // no, say plainly that no external lookup exists for this type rather than
 // rendering an empty "results" panel with no explanation.
 import { crossReferenceIndicator } from "./crossReference.js";
-import { computeCrossReferenceOnlyVerdict } from "./verdict.js";
 
 export const type = "artifact";
 
@@ -24,6 +23,5 @@ export async function gather(value, artifactType) {
     noExternalSource: true,
     note: NO_SOURCE_NOTE[artifactType] ?? NO_SOURCE_NOTE.fileName,
     crossReference: crossRef,
-    verdict: computeCrossReferenceOnlyVerdict(crossRef),
   };
 }

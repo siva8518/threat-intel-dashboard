@@ -11,7 +11,6 @@ import { correlateCves } from "../correlate.js";
 import { lookupCve as lookupCveCircl } from "../lookups/circl.js";
 import { buildCveProfile } from "../cveProfile.js";
 import { getAllGithubRepos } from "../githubIntel/index.js";
-import { computeCveVerdict } from "./verdict.js";
 
 export const type = "cve";
 
@@ -35,7 +34,7 @@ async function fetchCveRecord(cveId) {
 export async function gather(value) {
   const cve = await fetchCveRecord(value);
   if (!cve) {
-    return { found: false, cve: null, profile: null, verdict: null };
+    return { found: false, cve: null, profile: null };
   }
 
   const profile = buildCveProfile(value, {
@@ -45,5 +44,5 @@ export async function gather(value) {
     exploitIndex: cache.getEntry("exploitdb").data?.cveIndex,
   });
 
-  return { found: true, cve, profile, verdict: computeCveVerdict(cve) };
+  return { found: true, cve, profile };
 }

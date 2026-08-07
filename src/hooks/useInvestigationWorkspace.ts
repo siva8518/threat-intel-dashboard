@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useInvestigate, useGraphInsights, useCorrelationSummary } from "./useInvestigate";
 import { useInvestigationGraph } from "./useInvestigationGraph";
-import { buildRecommendedActions } from "@/lib/recommendedActions";
-import type { CveRecord, GraphNodeType } from "@/types/threat-intel";
+import type { GraphNodeType } from "@/types/threat-intel";
 
 /**
  * Composes the existing useInvestigate() (verdict/severity/relatedIntelligence,
@@ -10,9 +9,11 @@ import type { CveRecord, GraphNodeType } from "@/types/threat-intel";
  * in the same pass -- see server/investigation/index.js#computeGraphResult)
  * with useInvestigationGraph()'s accumulating multi-hop canvas state into one
  * merged view for the Investigation Workspace -- one search, no second
- * network round trip for the graph, no second search box. See
- * src/lib/recommendedActions.ts for the deterministic per-team next-steps
- * layered on top, computed instantly from whatever both systems returned.
+ * network round trip for the graph, no second search box. Per-team
+ * "Recommended Actions" now comes straight from the backend's
+ * `result.actionability` (server/investigation/actionability.js), computed
+ * from the same evidence/verdict as everything else on this page -- no
+ * separate frontend recommendation engine to keep in sync.
  */
 export function useInvestigationWorkspace() {
   const investigateM = useInvestigate();
@@ -79,16 +80,7 @@ export function useInvestigationWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
 
-  const recommendedActions = useMemo(() => {
-    if (!result) return null;
-    return buildRecommendedActions({
-      overview: result.overview,
-      relatedIntelligence: result.relatedIntelligence,
-      graphNode,
-      graphEdges,
-      knownExploited: (result.moduleData?.cve as CveRecord | undefined)?.knownExploited,
-    });
-  }, [result, graphNode, graphEdges]);
+  const recommendedActions = result?.actionability ?? null;
 
   return {
     investigateM,

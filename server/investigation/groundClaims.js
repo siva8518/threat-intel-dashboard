@@ -1,0 +1,108 @@
+// Programmatic AI-claim validation -- generalizes server/industryBriefing.js's
+// groundedArticles() (validates every model-cited article INDEX against a
+// real pool, silently discarding invented ones) into a NAME-based validator
+// for the Investigation Workspace's AI layers (graphInsights.js,
+// correlationSummary.js, investigationAi.js), which ask the model to name
+// entities in free-text/JSON fields rather than cite pool indices.
+//
+// Until this file, every one of those three layers' "never invent a
+// relationship/actor/exploitation claim" rules was prompt-only -- trust the
+// model, no code that actually checks a named entity appears in the real
+// data it was handed. This is the first code-enforced layer: structured
+// name fields (strongestActorMatch, priorityInvestigationTargets) are
+// stripped/dropped outright when ungrounded; free-text prose fields get a
+// best-effort cross-check against this platform's own entity stores (can't
+// fully parse prose for entity mentions, but CAN detect when the model
+// names a REAL platform-tracked actor/malware/campaign that has nothing to
+// do with THIS search -- the concrete, checkable version of "don't invent
+// attribution") and get a visible caveat appended rather than being
+// silently trusted or silently discarded.
+import { getAllEntities as getActorEntities } from "../threatActorIntelligence.js";
+import { getAllEntities as getMalwareEntities } from "../malwareIntelligence.js";
+import { getAllEntities as getCampaignEntities } from "../campaignIntelligence.js";
+
+export const NOT_ESTABLISHED = "Not established by available evidence.";
+
+function norm(v) {
+  return (v ?? "").toString().trim().toLowerCase();
+}
+
+function isGrounded(name, allowedNames) {
+  const n = norm(name);
+  if (!n) return false;
+  return allowedNames.some((a) => {
+    const an = norm(a);
+    return an && (an === n || an.includes(n) || n.includes(an));
+  });
+}
+
+/** Validates a single free-text name field (e.g. strongestActorMatch.name) -- returns it unchanged if grounded, `null` otherwise so the caller can drop the whole nullable object rather than keep a fabricated name. */
+export function groundName(name, allowedNames) {
+  return isGrounded(name, allowedNames) ? name : null;
+}
+
+/** Validates a list of {entity, ...} objects (e.g. priorityInvestigationTargets) -- DROPS any entry whose entity name isn't grounded, rather than replacing it: a missing recommendation is safer than a fabricated one still occupying a "you should investigate this" slot. */
+export function groundEntityList(list, allowedNames, entityKey = "entity") {
+  if (!Array.isArray(list)) return [];
+  return list.filter((item) => item && typeof item === "object" && isGrounded(item[entityKey], allowedNames));
+}
+
+// Confirmed live: this app's news-extraction pipeline leaves genuinely
+// junk/placeholder records in these stores -- e.g. a malware entity
+// literally named "malware" (verified:true but zero real signal: 0
+// iocSightings, 0 articles) and an unverified single-mention actor entity
+// literally named "CISA" (a government agency, not a threat actor,
+// mis-extracted from an article headline). Cross-checking prose against
+// those would flag completely ordinary words as "unverified attribution."
+// `verified` alone isn't enough (the junk "malware" record is verified),
+// so real signal (mentionCount/iocSightings/articles) is required too.
+function hasRealSignal(entity) {
+  return Boolean(entity.verified) && ((entity.mentionCount ?? 0) > 0 || (entity.iocSightings ?? 0) > 0 || (entity.articles ?? []).length > 0);
+}
+
+/** Every actor/malware/campaign name this platform genuinely tracks with real signal -- used only to detect the specific, checkable hallucination pattern of the model naming a REAL platform entity that has nothing to do with THIS search (not a fully-fabricated name, which no code can verify against ground truth). Recomputed each call -- these are cheap in-memory array reads, not I/O, and the stores are updated periodically by background extraction jobs while the server runs. */
+function allKnownEntityNames() {
+  return [...getActorEntities().filter(hasRealSignal).map((e) => e.name), ...getMalwareEntities().filter(hasRealSignal).map((e) => e.name), ...getCampaignEntities().filter(hasRealSignal).map((e) => e.name)].filter(Boolean);
+}
+
+/**
+ * Best-effort prose grounding check -- flags (never silently discards) a
+ * narrative field that mentions a real, platform-tracked actor/malware/
+ * campaign name NOT in this search's own `allowedNames`. Appends a visible
+ * caveat rather than trusting the prose or dropping the whole paragraph
+ * over one unverifiable name.
+ */
+export function checkProseGrounding(text, allowedNames) {
+  if (!text || typeof text !== "string") return { text, flagged: false };
+  const allowedSet = new Set(allowedNames.map(norm));
+  const lower = text.toLowerCase();
+  const suspects = allKnownEntityNames().filter((name) => {
+    const n = norm(name);
+    if (n.length < 4 || allowedSet.has(n)) return false;
+    return lower.includes(n);
+  });
+  if (suspects.length === 0) return { text, flagged: false };
+  return {
+    text: `${text} [Caveat: this platform could not verify the mention of ${suspects.slice(0, 3).join(", ")} against this search's own evidence -- treat as unconfirmed.]`,
+    flagged: true,
+  };
+}
+
+const CONFIRMED_EXPLOITATION_LANGUAGE = /actively exploited|confirmed exploit|being exploited in the wild|observed exploitation|exploitation has been confirmed/i;
+
+/**
+ * Blocks a narrative field from asserting confirmed active exploitation
+ * language for a CVE unless this platform's own cveExploitationState
+ * (server/investigation/cveExploitState.js) actually supports it --
+ * directly enforces "never equate CVSS/EPSS/PoC-availability with confirmed
+ * exploitation" at the AI-narrative layer, not just at verdict computation.
+ */
+export function checkCveExploitationClaim(text, cveExploitationState) {
+  if (!text || typeof text !== "string" || !cveExploitationState) return { text, flagged: false };
+  if (cveExploitationState.state === "confirmed_actively_exploited" || cveExploitationState.state === "exploitation_reported_unconfirmed") return { text, flagged: false };
+  if (!CONFIRMED_EXPLOITATION_LANGUAGE.test(text)) return { text, flagged: false };
+  return {
+    text: `${text} [Caveat: this platform's own evidence does not confirm active exploitation for this CVE -- current exploitation state is "${cveExploitationState.label}".]`,
+    flagged: true,
+  };
+}

@@ -9,6 +9,7 @@
 // path, containment recommendation, the 6 role-specific operational
 // guidance blocks, and detection-opportunity ideas.
 import { aiRouter } from "./ai/aiRouter.js";
+import { checkProseGrounding, checkCveExploitationClaim } from "./investigation/groundClaims.js";
 
 const SYSTEM_PROMPT =
   "You are a Tier 3 SOC analyst investigating a single indicator (IP/domain/URL/hash/CVE/threat actor/malware family/campaign/other artifact) for a fellow analyst who just pasted it into an investigation console. " +
@@ -17,6 +18,11 @@ const SYSTEM_PROMPT =
   "- Every claim must trace to a specific field in the provided data. When you assert something is true, name the source and figure that supports it (e.g. \"2,797 AbuseIPDB reports at 100% confidence\", \"Pulsedive flags SSH Brute Force\", \"hosted on BYTEPLUS-AS-AP (AS150436)\", \"16/64 VirusTotal engines flag this malicious\", \"linked to 3 other indicators via the <family> malware family\"), not a vague restatement of the verdict label.\n" +
   "- Do NOT use unsupported generic phrases like \"operational disruption\", \"sensitive data loss\", \"significant business impact\", or similar boilerplate UNLESS the provided data specifically supports that exact outcome (e.g. a confirmed malware family with known capabilities, a CVE with a documented impact, an actor with a known objective). If no such evidence exists, describe the concrete, evidenced risk instead (e.g. \"this IP has generated high-volume SSH brute-force activity per Pulsedive and a substantial abuse-report history\" rather than \"poses a risk of data loss\").\n" +
   "- If key context is genuinely missing (no malware family match, no actor/campaign link, an OTX/GreyNoise lookup that timed out or wasn't configured), say so plainly instead of writing around the gap with generic language.\n" +
+  "\n\nHARD PROHIBITIONS (a programmatic check runs after your response, so follow these exactly):\n" +
+  "- Never name an actor, campaign, or malware family that isn't already present in activeCampaigns/associatedThreatActors/relatedIntelligence in the provided context.\n" +
+  "- Shared ASN / hosting-provider / infrastructure co-location is NEVER by itself evidence of attribution or malicious association.\n" +
+  '- Never state a CVE is "actively exploited" or "confirmed exploited" from CVSS, EPSS, or exploit-code-availability alone -- only from the provided cveExploitationState being confirmed_actively_exploited or exploitation_reported_unconfirmed.\n' +
+  "- Never use your own general security knowledge to fill a gap the provided data doesn't support -- say \"Not Reported\" instead.\n" +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
   '"whatThisIs": string -- 1-2 sentences plainly stating what this indicator represents, grounded only in the provided data.\n' +
   '"whyItMatters": string -- 1-3 sentences explaining, by naming the specific evidence (counts, confidence scores, threat labels, related families/actors), why this indicator earned its verdict/severity -- not a restatement of the severity label itself.\n' +
@@ -46,17 +52,23 @@ function parseModelReport(raw) {
   }
 }
 
-/** Trims an investigation result down to what's worth handing the model as context -- raw per-source blobs are large and mostly redundant with the overview, so only the parts that add real signal are included. */
+/** Trims an investigation result down to what's worth handing the model as context -- raw per-source blobs are large and mostly redundant with the overview, so only the parts that add real signal are included. `evidence`/`conflicts`/`cveExploitationState` come straight from the shared verdict engine (server/investigation/verdictEngine.js) -- the model reasons over this platform's own evidence reconciliation, not a bare label. */
 function buildContext(investigation) {
   const { indicator, type, overview, moduleData, relatedIntelligence } = investigation;
+  const { verdict } = overview;
   return {
     indicator,
     type,
-    verdict: overview.overallVerdict,
-    verdictLabel: overview.verdictLabel,
-    severity: overview.severity,
-    riskLevel: overview.riskLevel,
-    confidence: overview.confidence,
+    verdictState: verdict.state,
+    verdictLabel: verdict.label,
+    severity: verdict.severity,
+    riskLevel: verdict.riskLevel,
+    confidence: verdict.confidence,
+    confidenceReasoning: verdict.confidenceFactors.reasoning,
+    severityReasoning: verdict.severityFactors.reasoning,
+    conflicts: verdict.conflicts,
+    evidence: verdict.evidence.items.map((i) => ({ category: i.category, source: i.source, claim: i.claim, polarity: i.polarity })),
+    cveExploitationState: overview.cveExploitationState ? { state: overview.cveExploitationState.state, label: overview.cveExploitationState.label, reasoning: overview.cveExploitationState.reasoning } : null,
     firstSeen: overview.firstSeen,
     lastSeen: overview.lastSeen,
     activeCampaigns: overview.activeCampaigns,
@@ -124,11 +136,16 @@ export async function generateInvestigationAiReport(investigation) {
   const og = parsed.operationalGuidance ?? {};
   const det = parsed.detectionOpportunities ?? {};
 
+  // Every real entity this indicator's own context actually named -- the
+  // only names the model is allowed to reference in its narrative prose.
+  const allowedNames = [context.indicator, ...(context.activeCampaigns ?? []), ...(context.associatedThreatActors ?? []), ...(context.relatedIntelligence?.matchedMalwareFamilies ?? [])];
+  const ground = (text) => checkCveExploitationClaim(checkProseGrounding(text, allowedNames).text, context.cveExploitationState).text;
+
   return {
-    whatThisIs: safeString(parsed.whatThisIs),
-    whyItMatters: safeString(parsed.whyItMatters),
-    likelyAttackerObjective: safeString(parsed.likelyAttackerObjective),
-    businessImpact: safeString(parsed.businessImpact),
+    whatThisIs: ground(safeString(parsed.whatThisIs)),
+    whyItMatters: ground(safeString(parsed.whyItMatters)),
+    likelyAttackerObjective: ground(safeString(parsed.likelyAttackerObjective)),
+    businessImpact: ground(safeString(parsed.businessImpact)),
     confidenceReasoning: safeString(parsed.confidenceReasoning),
     recommendedInvestigationPath: safeArray(parsed.recommendedInvestigationPath),
     immediateContainmentRecommendations: safeArray(parsed.immediateContainmentRecommendations),

@@ -10,7 +10,6 @@ import { checkIndicator as checkHybridAnalysis } from "../lookups/hybridAnalysis
 import { checkIndicator as checkTeamCymru } from "../lookups/teamCymru.js";
 import { throttleAndCache } from "../lib/lookupLimiter.js";
 import { checkMispWarninglists } from "./mispCheck.js";
-import { computeIocVerdict } from "./verdict.js";
 
 const LOOKUPS = [
   checkOtx,
@@ -76,6 +75,5 @@ export async function gather(value, hashKind) {
     malwareFamily,
     behavior,
     registryHistory: cymru ? { detectionPercent: cymru.detectionPercent ?? null, lastSeen: cymru.lastSeen ?? null } : null,
-    verdict: computeIocVerdict(results),
   };
 }

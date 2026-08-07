@@ -18,6 +18,7 @@
 // it's handed, exactly the same division of labor already proven
 // throughout this app.
 import { aiRouter } from "../ai/aiRouter.js";
+import { checkProseGrounding, checkCveExploitationClaim } from "./groundClaims.js";
 
 function norm(v) {
   return (v ?? "").toString().trim().toLowerCase();
@@ -70,6 +71,11 @@ const SYSTEM_PROMPT =
   '"relationshipNarrative": string -- 2-4 sentences synthesizing what the discovered relationships mean TOGETHER (not a list of them) -- e.g. an actor-malware-campaign-infrastructure chain, or a plain statement that the relationships found so far don\'t form a coherent chain.\n' +
   '"infrastructureReuseAssessment": string -- 1-3 sentences on whether the reused-infrastructure list you were given indicates a real reuse pattern (shared across which entities) or is too thin to conclude anything; null is not allowed, say "No infrastructure reuse detected in this platform\'s current data" if the list is empty.\n' +
   '"nextSteps": string[] -- 2-6 direct, second-person recommended pivots/actions per the phrasing rule above, each grounded in a specific real entity or gap from the data.\n' +
+  "\n\nHARD PROHIBITIONS (a programmatic check runs after your response, so follow these exactly):\n" +
+  "- Never name an actor, campaign, or malware family anywhere in your prose that isn't already present in relatedActors/relatedCampaigns/relatedMalware/victimsTargeted.\n" +
+  "- Shared ASN / hosting-provider / infrastructure co-location is NEVER by itself evidence of attribution or malicious association -- do not upgrade it into an attribution claim.\n" +
+  "- Never state a CVE is \"actively exploited\" or \"confirmed exploited\" from CVSS, EPSS, or exploit-code-availability alone -- only from an explicit KEV/confirmed-exploitation signal in the provided entity data.\n" +
+  "- Never use your own general security knowledge to fill a gap -- if the provided data doesn't support a claim, say so plainly instead.\n" +
   "No other text, no markdown formatting, no code fences.";
 
 function safeString(value, fallback) {
@@ -103,7 +109,17 @@ export async function generateCorrelationSummary(result) {
   const relatedMalware = (graph?.edges ?? []).filter((e) => e.targetType === "malware").map((e) => e.targetLabel);
 
   const context = {
-    entity: { type: overview.indicatorType, label: overview.indicator, verdict: overview.verdictLabel, severity: overview.severity, confidence: overview.confidence, found: graph?.node?.found ?? null, summary: graph?.node?.summary ?? null },
+    entity: {
+      type: overview.indicatorType,
+      label: overview.indicator,
+      verdictState: overview.verdict.state,
+      verdict: overview.verdict.label,
+      severity: overview.verdict.severity,
+      confidence: overview.verdict.confidence,
+      conflicts: overview.verdict.conflicts,
+      found: graph?.node?.found ?? null,
+      summary: graph?.node?.summary ?? null,
+    },
     topRankedRelationships: (rankedFindings ?? []).slice(0, 15).map((f) => ({ entity: f.label, type: f.entityType, relationship: f.relationship, confidenceScore: f.confidenceScore, reasoning: f.reasoning })),
     relationshipTypesWithNoDataSource: (graph?.unavailableRelationships ?? []).map((u) => ({ type: u.relationshipType, reason: u.reason })),
     searchCoverage: (coverage?.layers ?? []).map((l) => ({ layer: l.name, hitCount: l.hitCount })),
@@ -121,11 +137,17 @@ export async function generateCorrelationSummary(result) {
   const parsed = parseModelReport(response.summary);
   if (!parsed) throw new Error("AI Correlation Summary: model response was not valid JSON");
 
+  // Every real entity this search actually surfaced -- the only names the
+  // model is allowed to reference in its narrative prose.
+  const allowedNames = [overview.indicator, ...relatedActors, ...relatedCampaigns, ...relatedMalware, ...victimsTargeted];
+  const cveExploitationState = overview.cveExploitationState;
+  const ground = (text) => checkCveExploitationClaim(checkProseGrounding(text, allowedNames).text, cveExploitationState).text;
+
   return {
-    whatIsThis: safeString(parsed.whatIsThis, "Not enough data to characterize this entity."),
-    whyItMatters: safeString(parsed.whyItMatters, "Not enough data to assess significance."),
-    relationshipNarrative: safeString(parsed.relationshipNarrative, "No coherent relationship pattern found in the discovered data."),
-    infrastructureReuseAssessment: safeString(parsed.infrastructureReuseAssessment, "No infrastructure reuse detected in this platform's current data."),
+    whatIsThis: ground(safeString(parsed.whatIsThis, "Not enough data to characterize this entity.")),
+    whyItMatters: ground(safeString(parsed.whyItMatters, "Not enough data to assess significance.")),
+    relationshipNarrative: ground(safeString(parsed.relationshipNarrative, "No coherent relationship pattern found in the discovered data.")),
+    infrastructureReuseAssessment: ground(safeString(parsed.infrastructureReuseAssessment, "No infrastructure reuse detected in this platform's current data.")),
     nextSteps: safeStringArray(parsed.nextSteps),
     // Deterministic, real lists -- pass-through, never model-authored.
     industriesAffected,

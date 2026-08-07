@@ -13,7 +13,6 @@ import { throttleAndCache } from "../lib/lookupLimiter.js";
 import { checkMispWarninglists } from "./mispCheck.js";
 import { resolveDnsRecords, resolveEmailSecurity } from "../lib/dnsRecords.js";
 import { checkTyposquatting, checkDgaLikelihood, checkParkedOrDisposable } from "./domainHeuristics.js";
-import { computeIocVerdict } from "./verdict.js";
 
 const LOOKUPS = [
   checkOtx,
@@ -68,6 +67,5 @@ export async function gather(value) {
       dga: checkDgaLikelihood(value),
       parkedOrDisposable: checkParkedOrDisposable(value),
     },
-    verdict: computeIocVerdict(results.filter((r) => r.source !== "RDAP")),
   };
 }

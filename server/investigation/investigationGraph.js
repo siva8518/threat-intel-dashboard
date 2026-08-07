@@ -49,16 +49,94 @@ export const GRAPH_NODE_TYPES = [
 
 const CROSS_REF_ONLY_TYPES = new Set(["url", "hash", "email", "fileName", "processName", "registryKey", "userAgent"]);
 
+// Same-target edges with a DIFFERENT relationship string are conflicting
+// claims about the same entity (e.g. one path says "attributed actor", a
+// separate path says a different actor "breached by" the same victim) --
+// these used to be silently dropped, keeping only whichever happened to be
+// found first. Now the first one found is kept and every later conflicting
+// claim is preserved on its `conflictsWith[]` instead of discarded. True
+// duplicates (identical relationship string to the same target) still
+// collapse silently, since those aren't a disagreement.
 function dedupeEdges(edges) {
-  const seen = new Set();
+  const kept = new Map(); // `${targetType}:${targetKey}` -> kept edge
   const out = [];
   for (const e of edges) {
     const k = `${e.targetType}:${norm(e.targetKey)}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(e);
+    const existing = kept.get(k);
+    if (!existing) {
+      kept.set(k, e);
+      out.push(e);
+      continue;
+    }
+    if (existing.relationship === e.relationship) continue;
+    existing.conflictsWith.push({ relationship: e.relationship, why: e.why, source: e.sources[0] ?? "Unknown" });
   }
   return out;
+}
+
+// Claim-strength classification for a relationship TYPE, independent of
+// which code path produced it -- distinct from classifyConfidence()/
+// scoreConfidence() above, which classify HOW a fact was obtained
+// (explicit field vs. live lookup vs. cross-reference join). This instead
+// classifies WHAT KIND of claim it semantically is, so e.g. "shares ASN
+// with" (infrastructure co-location) can never be read the same way as
+// "attributed actor" (an attribution claim) just because both happen to be
+// backed by a live lookup or a cross-reference join. `impliesColocationOnly`
+// is the guardrail that stops shared hosting/ASN evidence -- including
+// major cloud/CDN providers -- from ever being treated as attribution or
+// malicious association on its own.
+function semantics(claimStrength, opts = {}) {
+  return { claimStrength, impliesAttribution: opts.impliesAttribution ?? false, impliesColocationOnly: opts.impliesColocationOnly ?? false, guardrailNote: opts.guardrailNote ?? null };
+}
+const DEFAULT_SEMANTICS = semantics("cross-reference");
+const RELATIONSHIP_SEMANTICS = {
+  "uses malware": semantics("explicit-record", { impliesAttribution: true }),
+  "used by": semantics("explicit-record", { impliesAttribution: true }),
+  exploits: semantics("explicit-record", { impliesAttribution: true }),
+  "exploits this CVE": semantics("explicit-record", { impliesAttribution: true }),
+  "originates from": semantics("explicit-record", { impliesAttribution: true }),
+  "originates from this country": semantics("explicit-record", { impliesAttribution: true }),
+  "uses technique": semantics("explicit-record", { impliesAttribution: true }),
+  "implements technique": semantics("explicit-record"),
+  "runs campaign": semantics("explicit-record", { impliesAttribution: true }),
+  "run by": semantics("explicit-record", { impliesAttribution: true }),
+  "deploys malware": semantics("explicit-record", { impliesAttribution: true }),
+  "deployed in": semantics("explicit-record", { impliesAttribution: true }),
+  "hosts infrastructure": semantics("explicit-record", { guardrailNote: "Recorded as hosting infrastructure for this malware family -- does not by itself establish that the malware's operators control or own this IP (hosts ≠ controls)." }),
+  "resolves to": semantics("reverse-lookup"),
+  "distributes via": semantics("explicit-record", { guardrailNote: "Recorded as a distribution URL for this malware family -- does not by itself establish attacker control of the underlying hosting infrastructure." }),
+  sample: semantics("explicit-record"),
+  "breached victim": semantics("explicit-record", { impliesAttribution: true }),
+  "breached by": semantics("explicit-record", { impliesAttribution: true }),
+  "linked actor": semantics("explicit-record", { impliesAttribution: true }),
+  "linked to victim": semantics("cross-reference", { impliesAttribution: true }),
+  "malware used": semantics("explicit-record"),
+  "exploited via": semantics("explicit-record"),
+  "covers CVE": semantics("explicit-record"),
+  "mentions indicator": semantics("explicit-record"),
+  "covered in report": semantics("explicit-record"),
+  "covers actor": semantics("cross-reference", { impliesAttribution: true, guardrailNote: "May be a direct citation or an unresolved name mention not yet matched to a canonical entity -- see this edge's own reasoning/confidence for which." }),
+  "covers malware": semantics("cross-reference", { guardrailNote: "May be a direct citation or an unresolved name mention not yet matched to a canonical entity -- see this edge's own reasoning/confidence for which." }),
+  "covers campaign": semantics("cross-reference", { guardrailNote: "May be a direct citation or an unresolved name mention not yet matched to a canonical entity -- see this edge's own reasoning/confidence for which." }),
+  "linked malware family": semantics("cross-reference", { guardrailNote: "Inferred by matching a shared indicator against this platform's own malware-family records -- not a first-party citation." }),
+  "attributed actor": semantics("attribution", { impliesAttribution: true, guardrailNote: "Inferred transitively (indicator → malware family → actor known to use that family) -- does not by itself confirm this specific actor controls this specific indicator." }),
+  "seen in campaign": semantics("cross-reference", { impliesAttribution: true, guardrailNote: "Inferred transitively via a shared malware family -- not a first-party citation of this specific indicator." }),
+  "seen exploiting this CVE": semantics("cross-reference", { guardrailNote: "Inferred transitively via a shared malware family, not a first-party CVE-to-indicator citation." }),
+  "related URL": semantics("cross-reference"),
+  "related sample": semantics("cross-reference"),
+  "reverse DNS resolves to": semantics("reverse-lookup"),
+  "passive DNS resolution": semantics("reverse-lookup"),
+  "shares ASN with": semantics("infrastructure-colocation", {
+    impliesAttribution: false,
+    impliesColocationOnly: true,
+    guardrailNote: "Shared ASN/hosting provider does not establish attribution or malicious association on its own -- shared hosting, including major cloud/CDN providers (Cloudflare, AWS, Azure, GCP, Akamai, Fastly, DigitalOcean, Oracle Cloud), is common among entirely unrelated tenants.",
+  }),
+  "shares SSL/TLS certificate with": semantics("reverse-lookup", { guardrailNote: "A shared certificate indicates shared infrastructure configuration, not confirmed common ownership or attacker control." }),
+  "targets victims in": semantics("algorithmic-guess"),
+  "targets victims here": semantics("algorithmic-guess"),
+};
+function semanticsFor(relationship) {
+  return RELATIONSHIP_SEMANTICS[relationship] ?? DEFAULT_SEMANTICS;
 }
 
 // Confidence is derived entirely from provenance this app already records in
@@ -196,6 +274,8 @@ function edge(targetType, targetKey, targetLabel, relationship, linkBasis, extra
     lastSeen: extra.lastSeen ?? null,
     supportingReportCount,
     sources,
+    semantics: semanticsFor(relationship),
+    conflictsWith: [],
   };
 }
 

@@ -30,6 +30,10 @@ import { getGraphNode } from "./investigationGraph.js";
 import { resolveCanonicalAlias } from "./knownAliasGroups.js";
 import { buildSearchCoverage } from "./coverage.js";
 import { rankFindings } from "./rankResults.js";
+import { buildEvidence } from "./evidence.js";
+import { assessCveExploitationState } from "./cveExploitState.js";
+import { computeVerdict } from "./verdictEngine.js";
+import { buildActionabilityGuidance } from "./actionability.js";
 
 const ARTIFACT_TYPES = new Set(["email", "fileName", "processName", "registryKey", "userAgent"]);
 
@@ -127,19 +131,43 @@ function mitreMappingFor(type, moduleData, crossRef) {
   return [];
 }
 
-function assemble(indicator, type, moduleData, crossRef, graph, resolvedCanonicalName = null) {
-  const verdict = moduleData.verdict;
+// Merges back the one or two per-source raw results a type module filters
+// OUT of its own returned `lookupResults` for DISPLAY reasons (RDAP is
+// shown in its own Registration section, not Source Breakdown noise; the
+// same for urlscan.io's own Scan section) -- Evidence Reconciliation still
+// needs the full raw set, since RDAP/urlscan.io are real evidence sources
+// (contextual and direct respectively, see evidence.js), just not ones the
+// Source Breakdown list repeats.
+function allLookupResults(type, moduleData) {
+  const base = Array.isArray(moduleData?.lookupResults) ? moduleData.lookupResults : [];
+  if (type === "domain" && moduleData?.registration) return [...base, moduleData.registration];
+  if (type === "url" && moduleData?.scan) return [...base, moduleData.scan];
+  return base;
+}
+
+/**
+ * The shared pipeline every entity type routes through: Source Evidence
+ * (moduleData/lookupResults, already gathered by the type module) ->
+ * Evidence Reconciliation (evidence.js) -> Correlation (already folded in
+ * via crossRef/graph, computed by the caller) -> Contextual Assessment ->
+ * Confidence -> Severity/Priority (verdictEngine.js, combined into one
+ * VerdictResult) -> Actionable Guidance (actionability.js). AI Analysis
+ * (GraphInsights/CorrelationSummary/AiInvestigationReport) stays a separate,
+ * later stage -- auto-triggered or on-demand client-side, reading this
+ * result's `overview.verdict`/`overview.cveExploitationState` once built.
+ */
+function assemble(indicator, type, moduleData, crossRef, graph, resolvedCanonicalName = null, cveExploitationState = null) {
   const { firstSeen, lastSeen } = firstLastSeenFor(type, moduleData);
+
+  const evidence = buildEvidence({ type, lookupResults: allLookupResults(type, moduleData), crossRef, moduleData, cveExploitationState });
+  const verdict = computeVerdict({ entityType: type, evidence, cveExploitationState, context: { moduleData, crossRef, graph } });
+  const actionability = buildActionabilityGuidance({ type, indicator, verdict, moduleData, cveExploitationState, graph });
 
   const overview = {
     indicator,
     indicatorType: type,
-    overallVerdict: verdict?.verdict ?? "unknown",
-    verdictLabel: verdict?.label ?? "No Data",
-    confidence: verdict?.confidence ?? "Low",
-    severity: verdict?.severity ?? "UNKNOWN",
-    riskLevel: verdict?.riskLevel ?? "Low",
-    recommendedPriority: verdict?.priority ?? "Low",
+    verdict,
+    cveExploitationState,
     firstSeen,
     lastSeen,
     activeCampaigns: crossRef?.activeCampaigns ?? (type === "name" ? (moduleData.campaigns ?? []).map((c) => c.name) : []),
@@ -172,10 +200,9 @@ function assemble(indicator, type, moduleData, crossRef, graph, resolvedCanonica
     coverage: buildSearchCoverage(type, moduleData, crossRef, graph),
     rankedFindings: rankFindings(graph, crossRef),
     resolvedCanonicalName,
+    actionability,
   };
 }
-
-const ASN_VERDICT = { verdict: "unknown", label: "ASN Profile", confidence: "Low", severity: "UNKNOWN", riskLevel: "Low", priority: "Low" };
 
 /** @returns {Promise<import("../../src/types/threat-intel.js").InvestigationResult>} */
 export async function investigate(rawValue) {
@@ -187,7 +214,8 @@ export async function investigate(rawValue) {
   // module and the graph computation run in parallel, not sequentially.
   if (type === "cve") {
     const [data, graph] = await Promise.all([cveModule.gather(normalized), computeGraphResult("cve", normalized, {})]);
-    return assemble(normalized, "cve", data, null, graph);
+    const cveExploitationState = data.found ? assessCveExploitationState({ cve: data.cve, profile: data.profile }) : null;
+    return assemble(normalized, "cve", data, null, graph, null, cveExploitationState);
   }
   if (isIpType(type)) {
     const [data, graph] = await Promise.all([ipModule.gather(normalized), computeGraphResult("ip", normalized, {})]);
@@ -215,7 +243,7 @@ export async function investigate(rawValue) {
   }
   if (type === "asn") {
     const graph = await computeGraphResult("asn", normalized, {});
-    return assemble(normalized, "asn", { verdict: ASN_VERDICT }, null, graph);
+    return assemble(normalized, "asn", {}, null, graph);
   }
   if (type === "name") {
     // Resolve a known alias (e.g. "Cozy Bear" -> "APT29", "Qbot" -> "QakBot")

@@ -15,6 +15,7 @@
 import { aiRouter } from "../ai/aiRouter.js";
 import { getReportById } from "../aiThreatSummaryStore.js";
 import { crossReferenceIndicator } from "./crossReference.js";
+import { groundName, groundEntityList, checkProseGrounding } from "./groundClaims.js";
 
 const INFRA_TYPES = new Set(["ip", "domain", "url", "hash"]);
 const MAX_INFRA_CHECKED = 20;
@@ -73,6 +74,11 @@ const SYSTEM_PROMPT =
   '"priorityInvestigationTargets": [{"entity": string, "entityType": string, "reasoning": string}] -- 0-5 specific related entities (by exact name/value and graph node type) that deserve immediate follow-up, most important first.\n' +
   '"crossReportPatterns": string[] -- 0-6 lines describing real overlap found in the provided tallies (shared malware/actors/campaigns across reports, reused infrastructure) -- [] if the tallies show no real overlap.\n' +
   '"recommendations": string[] -- 2-6 direct, second-person analyst-advisory lines per the phrasing rule above.\n' +
+  "\n\nHARD PROHIBITIONS (a programmatic check runs after your response and strips any violation, so follow these exactly rather than relying on your own judgment of what counts as \"close enough\"):\n" +
+  "- Never name an actor, malware family, or campaign in strongestActorMatch or priorityInvestigationTargets that isn't the literal targetLabel of one of the provided relationship edges.\n" +
+  "- A shared ASN / hosting provider / infrastructure co-location edge is NEVER by itself evidence of attribution -- do not upgrade it into an actor match or attack-chain claim.\n" +
+  "- Never state a CVE is \"actively exploited\" or \"confirmed exploited\" from CVSS, EPSS, or exploit-code-availability data alone -- only from an explicit KEV/exploitation-confirmed signal in the provided data.\n" +
+  "- Never use your own general security knowledge to fill a gap in the provided data -- if the graph doesn't support a claim, the correct answer is to say so, not to supply it from training knowledge.\n" +
   "No other text, no markdown formatting, no code fences.";
 
 function safeArray(value) {
@@ -113,16 +119,30 @@ export async function generateGraphInsights({ node, edges, unavailableRelationsh
   const parsed = parseModelReport(result.summary);
   if (!parsed) throw new Error("AI Investigation Summary: model response was not valid JSON");
 
-  const actorMatch = parsed.strongestActorMatch && typeof parsed.strongestActorMatch === "object" ? { name: safeString(parsed.strongestActorMatch.name) ?? "", reasoning: safeString(parsed.strongestActorMatch.reasoning) ?? "" } : null;
+  // Every real entity this graph actually surfaced -- the only names the
+  // model is allowed to name in strongestActorMatch/priorityInvestigationTargets.
+  const allowedNames = [node.label, ...edges.map((e) => e.targetLabel)];
 
-  return {
-    summary: safeString(parsed.summary) ?? "No synthesis available.",
-    standoutRelationships: safeStringArray(parsed.standoutRelationships),
-    likelyAttackChain: safeString(parsed.likelyAttackChain),
-    strongestActorMatch: actorMatch && actorMatch.name ? actorMatch : null,
-    priorityInvestigationTargets: safeArray(parsed.priorityInvestigationTargets)
+  const actorMatch = parsed.strongestActorMatch && typeof parsed.strongestActorMatch === "object" ? { name: safeString(parsed.strongestActorMatch.name) ?? "", reasoning: safeString(parsed.strongestActorMatch.reasoning) ?? "" } : null;
+  const groundedActorName = actorMatch?.name ? groundName(actorMatch.name, allowedNames) : null;
+
+  const groundedTargets = groundEntityList(
+    safeArray(parsed.priorityInvestigationTargets)
       .filter((t) => t && typeof t === "object" && safeString(t.entity))
       .map((t) => ({ entity: safeString(t.entity), entityType: safeString(t.entityType) ?? "name", reasoning: safeString(t.reasoning) ?? "" })),
+    allowedNames,
+    "entity",
+  );
+
+  const summary = checkProseGrounding(safeString(parsed.summary) ?? "No synthesis available.", allowedNames);
+  const likelyAttackChain = checkProseGrounding(safeString(parsed.likelyAttackChain) ?? "", allowedNames);
+
+  return {
+    summary: summary.text,
+    standoutRelationships: safeStringArray(parsed.standoutRelationships),
+    likelyAttackChain: likelyAttackChain.text || null,
+    strongestActorMatch: groundedActorName ? { name: groundedActorName, reasoning: actorMatch.reasoning } : null,
+    priorityInvestigationTargets: groundedTargets,
     crossReportPatterns: safeStringArray(parsed.crossReportPatterns),
     recommendations: safeStringArray(parsed.recommendations),
     model: result.model,

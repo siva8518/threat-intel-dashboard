@@ -356,6 +356,154 @@ export interface IocLookupResult {
   [key: string]: unknown;
 }
 
+// --- Platform-wide intelligence assessment framework -- see
+// server/investigation/{evidence,cveExploitState,verdictEngine,actionability}.js.
+// One shared evidence -> verdict -> confidence/severity -> actionability
+// pipeline used by every entity type (IOC, CVE, actor, malware, campaign,
+// ransomware group, ASN, country, artifact), instead of each type computing
+// its own ad hoc, inconsistent judgment. The platform's own collected
+// evidence is the source of truth; the AI layer only narrates over it (see
+// GraphInsights/CorrelationSummary/AiInvestigationReport below), never
+// invents it.
+
+/** Direct/Corroborating/Attribution carry real weight toward a verdict; Indirect/Contextual never do alone (e.g. ASN/hosting-provider ownership is always Contextual); Negative is an explicit clean/benign signal; Conflicting marks evidence that disagrees with other evidence for the same indicator. */
+export type EvidenceCategory = "direct" | "corroborating" | "indirect" | "contextual" | "negative" | "conflicting" | "attribution";
+export type EvidencePolarity = "malicious" | "suspicious" | "benign" | "neutral";
+
+/** One cited, source-attributed fact -- never a bare number. `rawField` records exactly which raw field this was derived from, for audit (e.g. "abuseConfidenceScore"). */
+export interface EvidenceItem {
+  category: EvidenceCategory;
+  source: string;
+  claim: string;
+  polarity: EvidencePolarity;
+  weight: number; // 0-1, source-derived; never itself "the verdict"
+  rawField: string | null;
+  firstSeen: string | null;
+  lastSeen: string | null;
+}
+
+/** Output of the Evidence Reconciliation stage -- see server/investigation/evidence.js#buildEvidence. `independentSourceCount` counts distinct source FAMILIES (this platform's own cross-referenced data counts as one, regardless of how many entities it matched), not raw item count. */
+export interface EvidenceReconciliation {
+  items: EvidenceItem[];
+  hasConflict: boolean;
+  conflictDescription: string | null;
+  sourceCount: number;
+  independentSourceCount: number;
+}
+
+/** The one verdict-state enum every entity type resolves to -- see server/investigation/verdictEngine.js. "Conflicting Intelligence" always wins over any individual item's strength; "Insufficient Evidence" is distinct from "Clean-Benign" (the former means nothing was checked/found, the latter means checks came back explicitly clean). */
+export type VerdictState =
+  | "Confirmed Malicious"
+  | "Malicious"
+  | "Suspicious"
+  | "Conflicting Intelligence"
+  | "Unconfirmed"
+  | "Clean-Benign"
+  | "Informational"
+  | "Insufficient Evidence";
+
+/** Confidence = how sure we are, derived only from evidence quantity/independence/agreement/recency -- never from how bad the finding is. */
+export interface VerdictConfidenceFactors {
+  sourceCount: number;
+  independentSourceCount: number;
+  corroborationCount: number;
+  recencyDays: number | null;
+  reasoning: string;
+}
+
+/** Severity = how bad it would be if true, derived from entity-type-specific impact factors -- never from how sure we are. `businessContext` is honestly "Not Applicable" until this platform has real asset/business-context integration. */
+export interface VerdictSeverityFactors {
+  potentialImpact: string;
+  scope: string;
+  technicalSeverity: string;
+  businessContext: string;
+  reasoning: string;
+}
+
+/** The full output of the Confidence + Severity/Priority stages -- see server/investigation/verdictEngine.js#computeVerdict. Confidence and severity are computed independently (separate factor lists above) then combined with the evidence pattern into one `state`. */
+export interface VerdictResult {
+  state: VerdictState;
+  label: string;
+  confidence: "High" | "Medium" | "Low";
+  confidenceFactors: VerdictConfidenceFactors;
+  severity: Severity;
+  severityFactors: VerdictSeverityFactors;
+  riskLevel: "Critical" | "High" | "Medium" | "Low";
+  recommendedPriority: "Immediate" | "High" | "Normal" | "Low";
+  reasoning: string;
+  evidence: EvidenceReconciliation;
+  /** Human-readable descriptions of every detected disagreement between sources -- empty unless evidence.hasConflict. */
+  conflicts: string[];
+}
+
+/**
+ * Six distinct CVE exploitation states -- see server/investigation/cveExploitState.js.
+ * Deliberately keeps "confirmed exploited" (CISA KEV, an observed fact),
+ * "exploitation reported" (news language, unconfirmed), "exploit code
+ * available" (Exploit-DB/GitHub, capability without confirmed use), and
+ * "predicted high risk" (EPSS, a probability, not an observation) as four
+ * separate concepts that must never collapse into one another.
+ */
+export type CveExploitationState =
+  | "confirmed_actively_exploited"
+  | "exploitation_reported_unconfirmed"
+  | "public_exploit_available"
+  | "poc_only"
+  | "predicted_high_risk_epss"
+  | "no_known_exploitation";
+
+export interface CveExploitationAssessment {
+  state: CveExploitationState;
+  label: string;
+  reasoning: string;
+  kev: boolean;
+  epssScore: number | null;
+  epssPercentile: number | null;
+  exploitsAvailable: number;
+  verifiedExploitsAvailable: number;
+  githubPocsAvailable: number;
+  newsReportsExploitationLanguage: Array<{ title: string; link: string; source: string }>;
+}
+
+/** How strong a relationship-graph edge's claim actually is, independent of which code path produced it -- see RELATIONSHIP_SEMANTICS in server/investigation/investigationGraph.js. `impliesColocationOnly` guards against e.g. "shares ASN with" ever being read as attribution. */
+export type RelationshipClaimStrength =
+  | "explicit-record"
+  | "attribution"
+  | "infrastructure-colocation"
+  | "cross-reference"
+  | "reverse-lookup"
+  | "algorithmic-guess"
+  | "unresolved-mention";
+
+export interface RelationshipSemantics {
+  claimStrength: RelationshipClaimStrength;
+  impliesAttribution: boolean;
+  impliesColocationOnly: boolean;
+  guardrailNote: string | null;
+}
+
+export interface GraphEdgeConflict {
+  relationship: string;
+  why: string;
+  source: string;
+}
+
+/** One concrete, entity-type-specific recommended action -- never generic "investigate the IOC" text. See server/investigation/actionability.js#buildActionabilityGuidance. */
+export interface ActionabilityAction {
+  action: string;
+  rationale: string;
+  role: "socAnalyst" | "threatHunter" | "detectionEngineer" | "incidentResponse" | "threatIntel" | "vulnerabilityManagement";
+  priority: "Immediate" | "High" | "Normal" | "Low";
+}
+
+export interface ActionabilityGuidance {
+  entityType: IndicatorType;
+  actions: ActionabilityAction[];
+  huntingQueries: Array<{ platform: string; query: string; source: string; sourceUrl: string }>;
+  /** Roles this entity type genuinely has nothing actionable for -- an honest omission, not a silent gap. */
+  notApplicable: string[];
+}
+
 // --- Intelligence Investigation Console -- see server/investigation/index.js ---
 // The full 16-type detection surface (replaces the old 4-type ip/domain/
 // url/hash-only IOC Search), auto-classified server-side, never picked by
@@ -379,18 +527,13 @@ export type IndicatorType =
   | "name" // malware family / threat actor / campaign / organization / victim -- resolved against this app's own entity stores (see server/investigation/index.js#resolveGraphTarget's victim fallback)
   | "unknown";
 
-export type InvestigationVerdict = "critical" | "high" | "medium" | "low" | "unknown";
-
-/** The one shared set of fields every indicator type renders, regardless of what kind it is -- see server/investigation/verdict.js for why severity/riskLevel/recommendedPriority are always derived from the single `overallVerdict`, never invented independently. */
+/** The one shared set of fields every indicator type renders, regardless of what kind it is -- `verdict` is the single output of the shared Evidence -> Confidence -> Severity pipeline (see server/investigation/verdictEngine.js), never invented independently per type. */
 export interface UniversalOverview {
   indicator: string;
   indicatorType: IndicatorType;
-  overallVerdict: InvestigationVerdict;
-  verdictLabel: string;
-  confidence: "High" | "Medium" | "Low";
-  severity: Severity;
-  riskLevel: "Critical" | "High" | "Medium" | "Low";
-  recommendedPriority: "Immediate" | "High" | "Normal" | "Low";
+  verdict: VerdictResult;
+  /** Non-null only for `type === "cve"` -- the CVE-specific exploitation-state assessment feeding `verdict`, see server/investigation/cveExploitState.js. */
+  cveExploitationState: CveExploitationAssessment | null;
   firstSeen: string | null;
   lastSeen: string | null;
   activeCampaigns: string[];
@@ -435,6 +578,8 @@ export interface InvestigationResult {
   coverage: SearchCoverage;
   /** The graph's own edges (plus any cross-referenced AI report not already an edge), flattened and ranked by confidence/recency -- see server/investigation/rankResults.js. */
   rankedFindings: RankedFinding[];
+  /** Concrete, entity-type-specific next steps derived from this search's verdict/evidence -- see server/investigation/actionability.js. */
+  actionability: ActionabilityGuidance;
 }
 
 export interface RankedFinding {
@@ -492,6 +637,10 @@ export interface GraphEdge {
   /** Null when not meaningfully computable for this relationship type -- render as "not tracked", never as 0 (which would imply zero evidence). */
   supportingReportCount: number | null;
   sources: string[];
+  /** Claim-strength classification for this edge's relationship type -- see RELATIONSHIP_SEMANTICS in server/investigation/investigationGraph.js. Guards against e.g. an infrastructure-colocation edge ("shares ASN with") ever being read as attribution. */
+  semantics: RelationshipSemantics;
+  /** Other relationship claims this platform found about the same target that disagree with this edge -- see dedupeEdges(). Empty when no conflict was detected; conflicting duplicates are preserved here instead of being silently dropped. */
+  conflictsWith: GraphEdgeConflict[];
 }
 
 export interface GraphNode {

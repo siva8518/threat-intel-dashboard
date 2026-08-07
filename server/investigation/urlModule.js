@@ -9,7 +9,6 @@ import { checkIndicator as checkVirusTotal } from "../lookups/virustotal.js";
 import { checkIndicator as checkUrlscan } from "../lookups/urlscan.js";
 import { throttleAndCache } from "../lib/lookupLimiter.js";
 import { checkMispWarninglists } from "./mispCheck.js";
-import { computeIocVerdict } from "./verdict.js";
 
 const LOOKUPS = [checkOtx, throttleAndCache("Pulsedive", 3_000, checkPulsedive), throttleAndCache("VirusTotal", 15_000, checkVirusTotal), checkMispWarninglists];
 
@@ -54,6 +53,5 @@ export async function gather(value) {
     skipped,
     components: parseComponents(value),
     scan: urlscan,
-    verdict: computeIocVerdict(results),
   };
 }

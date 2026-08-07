@@ -20,15 +20,10 @@ export async function gather(value) {
   const victims = getRansomwareCampaigns().filter((c) => norm(c.group) === target);
   const crossReference = crossReferenceIndicator(value);
 
-  const verdict =
-    victims.length > 0
-      ? { verdict: "critical", label: `Active Ransomware Group — ${victims.length} Disclosed Victim(s)`, confidence: "High", severity: "CRITICAL", riskLevel: "Critical", priority: "Immediate" }
-      : { verdict: "unknown", label: "No Disclosed Victims Found in This Platform's Data", confidence: "Low", severity: "UNKNOWN", riskLevel: "Low", priority: "Low" };
-
   const note =
     victims.length > 0
       ? `Matched a real ransomware.live/RansomWatch/RansomLook group name with ${victims.length} disclosed victim(s) in this platform's data. See the Investigation Graph above for its full victim/malware/campaign relationships.`
       : "Matched a known ransomware group name, but this platform currently has no disclosed victim record for it.";
 
-  return { group: value, victimCount: victims.length, victims: victims.slice(0, 20), crossReference, note, verdict };
+  return { group: value, victimCount: victims.length, victims: victims.slice(0, 20), crossReference, note };
 }
