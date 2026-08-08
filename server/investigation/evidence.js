@@ -363,6 +363,124 @@ function ransomwareGroupEvidence(moduleData) {
   ];
 }
 
+// --- Per-source Evidence Card roster -- Stage 1b. Distinct from the
+// category-grouped `items` above: one card per QUERIED source, always,
+// including an explicit "No finding" card for a source that returned a
+// successful lookup but produced no classifiable item. This is what lets the
+// UI show "here is what EVERY source found" instead of compressing multiple
+// sources into one sentence -- a source with no signal must never be
+// silently omitted (that reads as "clean") or silently merged into another
+// source's finding (that reads as "confirms/conflicts"). ---
+
+const EVIDENCE_TYPE_LABEL = {
+  AbuseIPDB: "Reputation / Community Reporting",
+  VirusTotal: "Reputation / Multi-Engine Detection",
+  GreyNoise: "Reputation / Scanning Classification",
+  Shodan: "Infrastructure Context",
+  LeakIX: "Exposure / Leak Association",
+  OTX: "Threat Intelligence / Community Reporting",
+  Pulsedive: "Reputation / Risk Score",
+  "Hybrid Analysis": "Behavioral / Sandbox Analysis",
+  "Team Cymru MHR": "Malware Association",
+  "Team Cymru": "Infrastructure Context",
+  RIPEstat: "Infrastructure Context",
+  "SANS ISC": "Reputation / Attack Telemetry",
+  "urlscan.io": "Behavioral / Scan Analysis",
+  "crt.sh": "Infrastructure Context",
+  RDAP: "Infrastructure Context",
+  "Hudson Rock": "Exposure / Credential Association",
+  "MISP Warning Lists": "Community Reporting / Known-Benign List",
+  "This platform's own tracked intelligence": "Internal Correlation",
+  "CISA KEV": "Exploitation / Confirmed Observed Exploitation",
+  "Security News Coverage": "Exploitation / Unconfirmed Reporting",
+  "Exploit-DB": "Exploitation / Public Exploit Availability",
+  "Exploit-DB / GitHub": "Exploitation / Proof-of-Concept Availability",
+  EPSS: "Exploitation Prediction (not evidence of exploitation)",
+  "NVD/CVSS": "Technical Severity (not evidence of exploitation)",
+  "Ransomware Victim Tracking (ransomware.live / RansomWatch / RansomLook)": "Victim / Impact Tracking",
+};
+
+function evidenceTypeFor(source) {
+  return EVIDENCE_TYPE_LABEL[source] ?? "Reputation";
+}
+
+// `level` is a strength-of-signal scale, deliberately separate from
+// `polarity` (malicious/suspicious/benign/neutral, already on every item) --
+// the UI derives its RED/AMBER/GREEN/BLUE/GRAY color from the two together
+// (e.g. malicious+HIGH -> RED, benign -> GREEN regardless of level,
+// contextual -> BLUE, "no finding" -> GRAY) rather than from level alone.
+function levelFor(i) {
+  if (i.category === "contextual") return "CONTEXT";
+  if (i.category === "negative") return "LOW";
+  if (i.category === "conflicting") return "MEDIUM";
+  if (i.weight >= 0.7) return "HIGH";
+  if (i.weight >= 0.35) return "MEDIUM";
+  return "LOW";
+}
+
+function reasonFor(i) {
+  switch (i.category) {
+    case "direct":
+      return "Direct first-party detection from this source.";
+    case "corroborating":
+      return "Supports other evidence but is not independently conclusive on its own.";
+    case "indirect":
+      return "A weaker or unverified signal -- context, not confirmation.";
+    case "attribution":
+      return "Attribution claim -- links this indicator to a named actor, campaign, or malware family.";
+    case "contextual":
+      return "Ownership/infrastructure context only -- never treated as malicious or clean evidence.";
+    case "negative":
+      return "An explicit clean/benign signal from this source.";
+    default:
+      return "";
+  }
+}
+
+function cardFromItem(i) {
+  return {
+    source: i.source,
+    evidenceType: evidenceTypeFor(i.source),
+    level: levelFor(i),
+    polarity: i.polarity,
+    finding: i.claim,
+    reason: reasonFor(i),
+    lastSeen: i.lastSeen ?? null,
+  };
+}
+
+function noFindingCard(source, lastSeen = null) {
+  return {
+    source,
+    evidenceType: evidenceTypeFor(source),
+    level: "UNKNOWN",
+    polarity: "neutral",
+    finding: "No finding",
+    reason: "This source was queried and returned a result, but reported no notable signal for this indicator.",
+    lastSeen,
+  };
+}
+
+// One card per queried source. `items` already carries every classified
+// finding (lookup-rule-based, cross-reference, and entity-specific); any
+// lookupResult source that produced zero items still gets a card so the UI
+// never has to infer "silent = clean" or "silent = not queried".
+function buildEvidenceCards(items, lookupResults) {
+  const cards = [];
+  const sourcesWithItems = new Set();
+  for (const i of items) {
+    if (i.category === "conflicting") continue; // a synthetic reconciliation note, not a per-source finding
+    cards.push(cardFromItem(i));
+    sourcesWithItems.add(i.source);
+  }
+  for (const r of lookupResults ?? []) {
+    if (!r?.source || sourcesWithItems.has(r.source) || !SOURCE_RULES[r.source]) continue;
+    cards.push(noFindingCard(r.source, r.lastSeen ?? null));
+    sourcesWithItems.add(r.source);
+  }
+  return cards;
+}
+
 // Conflict detection -- true only when a negative (explicit clean/benign)
 // item and a direct/corroborating malicious/suspicious item exist from
 // DIFFERENT sources. Absence of data from one source is never itself a
@@ -410,6 +528,8 @@ export function buildEvidence({ type, lookupResults, crossRef, moduleData, cveEx
   if (type === "name") items.push(...nameEntityEvidence(moduleData));
   if (type === "ransomwareGroup") items.push(...ransomwareGroupEvidence(moduleData));
 
+  const cards = buildEvidenceCards(items, lookupResults);
+
   const { hasConflict, conflictDescription, conflictItem } = detectConflict(items);
   if (conflictItem) items.push(conflictItem);
 
@@ -419,5 +539,5 @@ export function buildEvidence({ type, lookupResults, crossRef, moduleData, cveEx
   const sourceCount = evidenceBearing.length;
   const independentSourceCount = new Set(evidenceBearing.map((i) => i.source)).size;
 
-  return { items, hasConflict, conflictDescription, sourceCount, independentSourceCount };
+  return { items, cards, hasConflict, conflictDescription, sourceCount, independentSourceCount };
 }

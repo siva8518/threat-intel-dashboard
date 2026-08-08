@@ -77,13 +77,9 @@ function VerdictBanner({ overview }: { overview: InvestigationResult["overview"]
           <span className="text-sm font-semibold text-foreground">{verdict.label}</span>
         </div>
         {verdict.conflicts.length > 0 && (
-          <div className="mt-2 space-y-1 rounded-lg border border-accent-cyan/20 bg-accent-cyan/[0.05] p-2">
-            {verdict.conflicts.map((c, i) => (
-              <p key={i} className="text-xs text-accent-cyan">
-                {c}
-              </p>
-            ))}
-          </div>
+          <p className="mt-2 text-xs text-accent-cyan">
+            Sources disagree on this indicator — see Intelligence Evidence below for each source's individual finding and Should I Care? for how the conflict is weighed.
+          </p>
         )}
         <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
           <div>
@@ -315,14 +311,18 @@ function QuickActions({ result }: { result: InvestigationResult }) {
  * rule: it lives in exactly one place, and later sections reference it by
  * name rather than restating it.
  *
- * Page order front-loads synthesis before raw evidence: Verdict -> Search
+ * Page order puts every source's own finding and the synthesis over it
+ * immediately after the verdict, before anything else: Verdict -> Search
  * Coverage -> Should I Care? (server/investigation/shouldICare.js's
- * human-centric External Intelligence / Organizational Risk / Analyst
- * Action assessment) -> Investigation Graph -> AI Investigation Summary ->
- * AI Correlation Summary -> Key Facts -> Evidence -> AI/vendor reports ->
- * real Detections & Hunting -> Recommended Actions (SOC/Detection
- * Engineering/Threat Intelligence/Incident Response) -> Indicator-Specific
- * raw lookup evidence -> deeper opt-in AI narrative -> Quick Actions.
+ * Overall Assessment / Combined Intelligence Assessment / Likely Malicious
+ * Intent / Environmental Relevance / Next Action) -> Intelligence Evidence
+ * (EvidencePanel.tsx's per-source card grid -- one card per queried source,
+ * see server/investigation/evidence.js#buildEvidenceCards) -> Investigation
+ * Graph -> AI Investigation Summary -> AI Correlation Summary -> Key Facts
+ * -> AI/vendor reports -> real Detections & Hunting -> Recommended Actions
+ * (SOC/Detection Engineering/Threat Intelligence/Incident Response) ->
+ * Indicator-Specific raw lookup evidence -> deeper opt-in AI narrative ->
+ * Quick Actions.
  */
 export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampaignSearch, goToMalwareSearch, goToAiSummarySearch, initialQuery }: WorkspaceProps) {
   const [input, setInput] = useState("");
@@ -428,6 +428,8 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
 
             <ShouldICarePanel assessment={shouldICare} pending={shouldICarePending} error={shouldICareError} overview={result.overview} />
 
+            <EvidencePanel evidence={result.overview.verdict.evidence} />
+
             {/*
               The Investigation Graph is the primary relationship view on this
               page -- it already auto-selects the searched entity on load, so
@@ -455,8 +457,6 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
             <CorrelationSummaryPanel summary={correlationSummary} pending={correlationSummaryPending} error={correlationSummaryError} onFocusEntity={runInvestigation} />
 
             <KeyFactsPanel facts={buildKeyFacts(result)} />
-
-            <EvidencePanel evidence={result.overview.verdict.evidence} />
 
             <RelatedAiReportsSection result={result} />
 

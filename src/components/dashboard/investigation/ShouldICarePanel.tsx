@@ -1,17 +1,19 @@
-// Renders server/investigation/shouldICare.js's human-centric assessment --
-// replaces the old source-first "VirusTotal reports malicious..." sentence
-// with three explicitly-labeled layers an analyst actually asks about:
-// EXTERNAL INTELLIGENCE (what's been reported out in the world, synthesized
-// -- never source-name-first), ORGANIZATIONAL RISK (whether it's known to
-// have touched THIS environment -- always an honest "cannot be determined"
-// until this platform has real telemetry), and ANALYST ACTION (a concrete
-// next step). `evidenceBullets`/`analystDecision`/`infrastructureNote` are
-// deterministic, never model-authored -- only the narrative prose is.
-import { Sparkles, ShieldAlert, Building2, Compass } from "lucide-react";
+// Renders server/investigation/shouldICare.js's synthesis layer -- the
+// section that sits ABOVE EvidencePanel.tsx's per-source card grid and never
+// restates it. Four explicit blocks: a deterministic OVERALL ASSESSMENT
+// (Risk/Confidence/Analyst Decision/Reason -- straight from the verdict
+// engine, never model-authored), COMBINED INTELLIGENCE ASSESSMENT (what the
+// evidence indicates once compared -- conflicts, independence, shared
+// infrastructure), LIKELY MALICIOUS INTENT (only ever populated when real
+// evidence supports a specific intent -- fail-closed enforced server-side),
+// and NEXT ACTION (a concrete step). `analystDecision` is deterministic
+// pass-through; the three prose fields are the model's narrative synthesis,
+// grounded and validated server-side before this component ever sees them.
+import { Sparkles, ShieldAlert, Layers, Target, Building2, Compass } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Section } from "../reportPrimitives";
-import type { ShouldICareAssessment, InvestigationResult, AnalystDecision } from "@/types/threat-intel";
+import type { ShouldICareAssessment, InvestigationResult, AnalystDecision, Severity } from "@/types/threat-intel";
 
 const DECISION_BADGE: Record<AnalystDecision, "critical" | "high" | "medium" | "low" | "muted" | "cyan"> = {
   Block: "critical",
@@ -23,11 +25,43 @@ const DECISION_BADGE: Record<AnalystDecision, "critical" | "high" | "medium" | "
   "No Action Required": "muted",
 };
 
+const SEVERITY_BADGE: Record<Severity, "critical" | "high" | "medium" | "low" | "muted"> = {
+  CRITICAL: "critical",
+  HIGH: "high",
+  MEDIUM: "medium",
+  LOW: "low",
+  UNKNOWN: "muted",
+};
+
 interface ShouldICarePanelProps {
   assessment: ShouldICareAssessment | null;
   pending: boolean;
   error: string | null;
   overview: InvestigationResult["overview"];
+}
+
+function OverallAssessment({ overview }: { overview: InvestigationResult["overview"] }) {
+  const verdict = overview.verdict;
+  return (
+    <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 sm:grid-cols-4">
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Risk</p>
+        <Badge variant={SEVERITY_BADGE[verdict.severity]}>{verdict.severity}</Badge>
+      </div>
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Confidence</p>
+        <p className="text-sm font-semibold text-foreground">{verdict.confidence}</p>
+      </div>
+      <div className="col-span-2 sm:col-span-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Analyst Decision</p>
+        <Badge variant={DECISION_BADGE[verdict.analystDecision]}>{verdict.analystDecision.toUpperCase()}</Badge>
+      </div>
+      <div className="col-span-2 sm:col-span-4">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Reason</p>
+        <p className="text-xs text-foreground">{verdict.analystDecisionReasoning}</p>
+      </div>
+    </div>
+  );
 }
 
 export function ShouldICarePanel({ assessment, pending, error, overview }: ShouldICarePanelProps) {
@@ -39,7 +73,7 @@ export function ShouldICarePanel({ assessment, pending, error, overview }: Shoul
           Weighing the evidence and building an analyst assessment…
         </p>
         <div className="space-y-2">
-          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="h-16 w-full" />
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-5/6" />
         </div>
@@ -49,18 +83,13 @@ export function ShouldICarePanel({ assessment, pending, error, overview }: Shoul
 
   // No AI assessment available (error, or skipped because there was
   // genuinely no evidence to reason over -- see coverage.nothingFound in
-  // useInvestigationWorkspace.ts) -- fall back to the deterministic verdict
-  // fields directly rather than showing a bare error box or nothing at all.
+  // useInvestigationWorkspace.ts) -- fall back to the deterministic Overall
+  // Assessment block directly rather than showing a bare error box.
   if (!assessment) {
-    const verdict = overview.verdict;
     return (
       <Section title="Should I Care?">
         <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={DECISION_BADGE[verdict.analystDecision]}>{verdict.analystDecision.toUpperCase()}</Badge>
-            <span className="text-sm font-semibold text-foreground">{verdict.label}</span>
-          </div>
-          <p className="text-sm text-foreground">{verdict.reasoning}</p>
+          <OverallAssessment overview={overview} />
           {error && <p className="text-xs text-muted">(AI narrative unavailable: {error} -- showing the underlying verdict directly.)</p>}
         </div>
       </Section>
@@ -70,43 +99,39 @@ export function ShouldICarePanel({ assessment, pending, error, overview }: Shoul
   return (
     <Section title="Should I Care?">
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={DECISION_BADGE[assessment.analystDecision]}>{assessment.analystDecision.toUpperCase()}</Badge>
-          <span className="text-sm font-semibold text-foreground">{assessment.headline}</span>
+        <OverallAssessment overview={overview} />
+
+        <div>
+          <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+            <Layers className="h-3.5 w-3.5" /> Combined Intelligence Assessment
+          </p>
+          <p className="text-sm text-foreground">{assessment.combinedAssessment}</p>
         </div>
 
         <div>
           <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
-            <ShieldAlert className="h-3.5 w-3.5" /> External Intelligence
+            <Target className="h-3.5 w-3.5" /> Likely Malicious Intent
           </p>
-          <p className="text-sm text-foreground">{assessment.externalIntelligence}</p>
-          {assessment.evidenceBullets.length > 0 && (
-            <ul className="mt-2 space-y-1 pl-4 text-xs text-muted">
-              {assessment.evidenceBullets.map((line, i) => (
-                <li key={i} className="list-disc">
-                  {line}
-                </li>
-              ))}
-            </ul>
-          )}
-          {assessment.infrastructureNote && <p className="mt-2 rounded-lg border border-white/[0.06] bg-white/[0.02] p-2 text-xs text-muted">{assessment.infrastructureNote}</p>}
+          <p className="text-sm text-foreground">{assessment.likelyMaliciousIntent}</p>
         </div>
 
         <div>
           <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
-            <Building2 className="h-3.5 w-3.5" /> Organizational Risk
+            <Building2 className="h-3.5 w-3.5" /> Environmental Relevance
           </p>
-          <p className="text-sm text-foreground">{assessment.organizationalRisk}</p>
+          <p className="text-sm text-foreground">{assessment.environmentalRelevance}</p>
         </div>
 
         <div className="rounded-xl border border-primary/20 bg-primary/[0.04] p-3">
           <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
-            <Compass className="h-3.5 w-3.5" /> Analyst Action
+            <Compass className="h-3.5 w-3.5" /> Next Action
           </p>
-          <p className="text-sm text-foreground">{assessment.analystAction}</p>
+          <p className="text-sm text-foreground">{assessment.nextAction}</p>
         </div>
 
-        <Badge variant="muted">AI-generated — {assessment.model}</Badge>
+        <Badge variant="muted">
+          <ShieldAlert className="h-3 w-3" /> AI-generated — {assessment.model}
+        </Badge>
       </div>
     </Section>
   );

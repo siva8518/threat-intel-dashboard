@@ -382,9 +382,24 @@ export interface EvidenceItem {
   lastSeen: string | null;
 }
 
-/** Output of the Evidence Reconciliation stage -- see server/investigation/evidence.js#buildEvidence. `independentSourceCount` counts distinct source FAMILIES (this platform's own cross-referenced data counts as one, regardless of how many entities it matched), not raw item count. */
+/** Strength-of-signal scale for an EvidenceCard, deliberately separate from `polarity` -- the UI derives its RED/AMBER/GREEN/BLUE/GRAY color from the two together (e.g. malicious+HIGH -> RED, benign -> GREEN regardless of level, contextual -> BLUE, "no finding" -> GRAY), not from level alone. */
+export type EvidenceLevel = "HIGH" | "MEDIUM" | "LOW" | "CONTEXT" | "UNKNOWN";
+
+/** One card per QUERIED source, always -- including an explicit "No finding" card (`level: "UNKNOWN"`, `finding: "No finding"`) for a source that returned a successful lookup but produced no classifiable item. This is what lets the UI show every source individually instead of compressing multiple sources into one sentence: a silent source must never be read as "clean" or merged into another source's finding. See server/investigation/evidence.js#buildEvidenceCards. */
+export interface EvidenceCard {
+  source: string;
+  evidenceType: string;
+  level: EvidenceLevel;
+  polarity: EvidencePolarity;
+  finding: string;
+  reason: string;
+  lastSeen: string | null;
+}
+
+/** Output of the Evidence Reconciliation stage -- see server/investigation/evidence.js#buildEvidence. `independentSourceCount` counts distinct source FAMILIES (this platform's own cross-referenced data counts as one, regardless of how many entities it matched), not raw item count. `cards` is the per-source roster the UI renders directly; `items` stays the category-grouped view verdictEngine.js reads. */
 export interface EvidenceReconciliation {
   items: EvidenceItem[];
+  cards: EvidenceCard[];
   hasConflict: boolean;
   conflictDescription: string | null;
   sourceCount: number;
@@ -729,24 +744,30 @@ export interface CorrelationSummary {
 
 /**
  * "Should I Care?" -- see server/investigation/shouldICare.js. The
- * human-centric SO WHAT assessment, structured around three explicit
- * layers: External Intelligence (externalIntelligence + evidenceBullets),
- * Organizational Risk (organizationalRisk -- honest "cannot be determined"
- * until this platform has real telemetry), and Analyst Action
- * (analystAction). `analystDecision` and `evidenceBullets` are deterministic
- * pass-through from the verdict engine/evidence reconciliation, never
- * model-authored; `headline`/`externalIntelligence`/`analystAction` are the
- * model's narrative synthesis over that real data.
+ * human-centric synthesis layer that sits ABOVE the per-source Evidence
+ * Cards (EvidenceReconciliation.cards) -- it never restates what each source
+ * found (the cards already show that individually); it answers what the
+ * combined picture means. Four explicit sections: Combined Intelligence
+ * Assessment (combinedAssessment -- what the evidence indicates once
+ * compared, including how conflicts/shared-infrastructure/independence were
+ * weighed), Likely Malicious Intent (likelyMaliciousIntent -- only populated
+ * when evidence genuinely supports a specific intent; otherwise an honest
+ * "not established" statement, never inferred from reputation/ASN/naming
+ * alone), Environmental Relevance (environmentalRelevance -- whether this
+ * indicator is known to have touched this environment, honest
+ * "cannot be determined" until this platform has real telemetry), and Next
+ * Action (nextAction -- a concrete analyst step). `analystDecision` is
+ * deterministic pass-through from the verdict engine, never model-authored;
+ * the four prose fields are the model's narrative synthesis over the real
+ * evidence/verdict data it was given, fail-closed validated against it (see
+ * groundClaims.js) before being returned.
  */
 export interface ShouldICareAssessment {
-  headline: string;
   analystDecision: AnalystDecision;
-  externalIntelligence: string;
-  evidenceBullets: string[];
-  /** Present only when the evidence includes a known shared/cloud/CDN/VPN/datacenter infrastructure signal -- see verdictEngine.js#hasSharedInfrastructureSignal. Null otherwise. */
-  infrastructureNote: string | null;
-  organizationalRisk: string;
-  analystAction: string;
+  combinedAssessment: string;
+  likelyMaliciousIntent: string;
+  environmentalRelevance: string;
+  nextAction: string;
   model: string;
   provider: string;
   generatedAt: string;

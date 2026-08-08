@@ -1,33 +1,39 @@
-// "Should I Care?" -- the analyst-facing SO WHAT layer, replacing the old
-// source-first sentence ("VirusTotal reports malicious...", "OTX reports
-// suspicious...") this section used to show directly from
-// verdictEngine.js#buildReasoning. An analyst doesn't care that a named
-// tool said something; they care what the indicator represents, how strong
-// and how CONSISTENT the evidence is, whether there's a real malware/actor/
-// campaign/victim association, whether it's shared/cloud/VPN infrastructure
-// that could be a false positive, whether it's relevant to THEIR
-// environment, and what to do next. This module produces exactly that,
-// structured around three explicit, clearly-separated layers requested for
-// this feature:
-//   EXTERNAL INTELLIGENCE -- what has been reported about this indicator
-//     out in the world (reputation + behavioral + threat-context evidence,
-//     synthesized -- never source-name-first).
-//   ORGANIZATIONAL RISK -- whether it's known to have touched THIS
+// "Should I Care?" -- the analyst-facing synthesis layer that sits ABOVE the
+// per-source Evidence Cards (evidence.cards, rendered directly by
+// EvidencePanel.tsx). It never restates what each source found -- the cards
+// already show that individually, one per source, including explicit "No
+// finding" entries. This module answers the question the cards alone can't:
+// what does the COMBINED picture mean, is there a specific malicious intent
+// the evidence actually supports, is this indicator known to be relevant to
+// THIS environment, and what should the analyst do next. Four explicit,
+// non-overlapping sections:
+//   COMBINED INTELLIGENCE ASSESSMENT -- what the evidence indicates once
+//     compared: how strong/consistent it is, how conflicts were resolved (if
+//     any), whether shared/cloud/CDN/VPN infrastructure tempers the read,
+//     and whether multiple "sources" are actually independent or the same
+//     underlying report redistributed.
+//   LIKELY MALICIOUS INTENT -- only populated when evidence genuinely
+//     supports a specific intent (real attribution, or direct behavioral/
+//     malware-association evidence) -- never inferred from bare reputation
+//     scores, ASN/cloud ownership, domain-naming patterns, or multi-domain
+//     resolution alone. Fail-closed enforced in code (see
+//     groundClaims.js#checkMaliciousIntentClaim), not just prompted.
+//   ENVIRONMENTAL RELEVANCE -- whether it's known to have touched THIS
 //     environment. Always the honest "cannot be determined" statement today
 //     (this platform has no SIEM/EDR/network-telemetry integration) --
 //     computed in code, never left to the model to invent or imply.
-//   ANALYST ACTION -- a concrete next step, grounded in the two layers
+//   NEXT ACTION -- a concrete next step, grounded in the three sections
 //     above, not a generic "investigate the IOC."
 // Same hybrid-grounding discipline as graphInsights.js/correlationSummary.js:
-// every countable/classified fact (evidence items, their categories,
-// attribution, shared-infrastructure detection, the deterministic
-// analystDecision/blockRecommendation) is computed in JS BEFORE the model
-// sees it -- the model's only job is turning already-correct facts into one
-// coherent, human-centric narrative, never deciding the verdict or
-// inventing a relationship/attribution/environmental-impact claim itself.
+// every countable/classified fact (evidence items and cards, their
+// categories, attribution, shared-infrastructure detection, source
+// independence, the deterministic analystDecision) is computed in JS BEFORE
+// the model sees it -- the model's only job is turning already-correct facts
+// into coherent prose, never deciding the verdict or inventing a
+// relationship/attribution/intent/environmental-impact claim itself.
 import { aiRouter } from "../ai/aiRouter.js";
 import { hasSharedInfrastructureSignal, hasKnownAttribution } from "./verdictEngine.js";
-import { checkProseGrounding, checkCveExploitationClaim, checkUnsupportedClaims } from "./groundClaims.js";
+import { checkProseGrounding, checkCveExploitationClaim, checkUnsupportedClaims, checkMaliciousIntentClaim } from "./groundClaims.js";
 
 // No SIEM/EDR/network-telemetry integration exists anywhere in this
 // platform (confirmed -- see server/investigation/ipModule.js's own
@@ -37,8 +43,18 @@ import { checkProseGrounding, checkCveExploitationClaim, checkUnsupportedClaims 
 const ENVIRONMENTAL_RELEVANCE_UNKNOWN =
   "Cannot currently be determined -- this platform has no connected SIEM/EDR/network-telemetry integration, so it cannot tell you whether this indicator has actually been observed in your environment. The next step is to check your own logs for it.";
 
-function evidenceBullets(evidence) {
-  return evidence.items.filter((i) => i.category !== "conflicting").map((i) => `${i.source}: ${i.claim}`);
+// Sources whose findings describe a SPECIFIC observed behavior or a real
+// malware/campaign/victim association -- as opposed to a bare reputation
+// score or detection count. Only these (plus real attribution) can ever
+// justify populating "Likely Malicious Intent" -- deliberately excludes
+// AbuseIPDB/VirusTotal/GreyNoise/OTX/Pulsedive/MISP, all of which are
+// reputation-flavored and, per this platform's explicit rule, must never
+// alone be read as evidence of a specific intent.
+const INTENT_SUPPORTING_SOURCES = new Set(["Hybrid Analysis", "urlscan.io", "SANS ISC", "LeakIX", "Team Cymru MHR", "CISA KEV", "Ransomware Victim Tracking (ransomware.live / RansomWatch / RansomLook)"]);
+
+function hasIntentSupportingEvidence(evidence) {
+  if (hasKnownAttribution(evidence)) return true;
+  return evidence.items.some((i) => (i.category === "direct" || i.category === "corroborating") && INTENT_SUPPORTING_SOURCES.has(i.source));
 }
 
 function infrastructureNote(evidence) {
@@ -47,22 +63,23 @@ function infrastructureNote(evidence) {
 }
 
 const SYSTEM_PROMPT =
-  "You are a senior Threat Intelligence Analyst writing the \"Should I Care?\" assessment for another analyst who just searched an indicator or entity in this platform. " +
-  "You are given the already-computed, authoritative verdict (state/severity/confidence/analystDecision -- these are FINAL, you do not recompute or second-guess them), every real evidence item already classified into categories (direct/corroborating/indirect/contextual/negative/conflicting/attribution), real relationship/attribution data (actors/campaigns/malware/victims/techniques), whether this indicator sits on shared/cloud/VPN infrastructure, and this platform's real environmental-telemetry status. " +
-  "\n\nYOUR JOB: produce a human-centric analyst narrative in exactly the schema below. Never lead with a source name (\"VirusTotal reports...\", \"OTX says...\") -- lead with the conclusion; sources support it, they are not the subject of the sentence. Never treat reputation alone as proof of anything -- distinguish a bare reputation SCORE from actual BEHAVIORAL evidence (e.g. \"SSH brute-force activity\") from real THREAT CONTEXT (a named malware/actor/campaign) -- these are not equivalent and must not be blended into one undifferentiated claim of severity. " +
+  "You are a senior Threat Intelligence Analyst writing the synthesis layer that sits ABOVE a per-source evidence card grid another analyst can already see individually (one card per source, including explicit \"No finding\" cards) -- your job is NOT to restate what each source found, it is to explain what the COMBINED picture means. " +
+  "You are given the already-computed, authoritative verdict (state/severity/confidence/analystDecision -- these are FINAL, you do not recompute or second-guess them), every real evidence item already classified into categories (direct/corroborating/indirect/contextual/negative/conflicting/attribution), whether sources are independent or redistributing the same underlying report, whether this indicator sits on shared/cloud/VPN infrastructure, whether real attribution/behavioral evidence exists (hasIntentEvidence), real relationship data (actors/campaigns/malware/victims/techniques), and this platform's real environmental-telemetry status. " +
+  "\n\nYOUR JOB: produce a human-centric analyst synthesis in exactly the schema below. Never lead with a source name (\"VirusTotal reports...\", \"OTX says...\") -- lead with the conclusion. Never treat reputation alone as proof of anything -- distinguish a bare reputation SCORE from actual BEHAVIORAL evidence from real THREAT CONTEXT (a named malware/actor/campaign); these are not equivalent. " +
   "\n\nGROUNDING RULES:\n" +
   "- Every claim must trace to a specific evidence item, relationship, or field you were given. Never invent a count, a relationship, or a claim not present in the data.\n" +
-  "- Reputation signals alone (abuse-report scores, community pulse mentions, bare detection counts) must never be narrated as if they were confirmed malicious behavior or attribution -- describe what was actually reported (e.g. \"reputation sources report suspicious network scanning activity\"), not a conclusion those sources didn't establish.\n" +
+  "- If hasConflict is true, your combinedAssessment MUST explain what conflicts and why (e.g. one source flags malicious while another reports clean/benign) -- never just say \"conflicting intelligence\" and stop.\n" +
+  "- If independentSourceCount is meaningfully lower than sourceCount, note that some of the apparent agreement may be the same underlying report counted more than once -- do not describe repeated/redistributed feeds as independent confirmation.\n" +
   "- Shared/cloud/CDN/VPN/datacenter infrastructure ownership is NEVER evidence of malicious activity -- if infrastructureContext is present, acknowledge it explicitly as a reason for caution, not as something to ignore.\n" +
+  "- likelyMaliciousIntent: if hasIntentEvidence is false, you MUST write exactly this sentence and nothing else: \"Not established from available intelligence -- insufficient evidence to determine intent.\" Do NOT infer intent from VirusTotal/AbuseIPDB detection counts, cloud/ASN/hosting-provider membership, domain-naming patterns, multi-domain resolution, or \"this ASN has malicious activity elsewhere\" -- none of those establish intent. If hasIntentEvidence is true, describe the SPECIFIC type of malicious activity the real evidence supports (e.g. \"credential-harvesting infrastructure\", \"SSH brute-force scanning\", \"malware C2 for the X family\") -- never a generic \"this is malicious.\"\n" +
   "- Never claim this indicator is confirmed C2, belongs to a named threat actor, or is part of a named ransomware campaign unless hasAttribution is true in the data you were given.\n" +
-  "- Never claim this indicator is attacking, has compromised, or is otherwise confirmed active against the analyst's own environment -- environmentalRelevance is always \"cannot be determined\" unless real telemetry data says otherwise, and you were told which applies here.\n" +
+  "- Never claim this indicator is attacking, has compromised, or is otherwise confirmed active against the analyst's own environment -- environmentalRelevance is computed separately and always \"cannot be determined\" unless real telemetry says otherwise.\n" +
   "- Never state a CVE is actively/confirmed exploited from CVSS, EPSS, or exploit-availability alone -- only from the provided cveExploitationState.\n" +
-  "- Your narrative must be CONSISTENT with the provided analystDecision -- do not imply more or less urgency than that decision reflects.\n" +
-  "- Do not restate the evidenceBullets list verbatim -- the analyst can already see it below your narrative. Synthesize what it means, don't enumerate it again.\n" +
+  "- Your synthesis must be CONSISTENT with the provided analystDecision -- do not imply more or less urgency than that decision reflects.\n" +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
-  '"headline": string -- ONE sentence, the analyst-facing bottom line (e.g. "Investigate if observed internally -- strong external reputation evidence, but no confirmed attribution and possible shared infrastructure."). Must agree with the provided analystDecision.\n' +
-  '"externalIntelligence": string -- 2-4 sentences synthesizing what has actually been reported about this indicator out in the world: reputation signal strength/consistency, any real behavioral evidence, and any real threat-context (malware/actor/campaign) -- clearly distinguishing which of those apply here, never source-name-first, never overstating a bare reputation score into a certainty.\n' +
-  '"analystAction": string -- 2-4 sentences: a CONCRETE next step grounded in the external intelligence and the fact that organizational relevance is unknown (e.g. what to search for in the analyst\'s own logs, which service/host type to prioritize) -- never a generic "investigate the IOC" line.\n' +
+  '"combinedAssessment": string -- 2-4 sentences synthesizing what the evidence indicates ONCE COMPARED: overall strength/consistency, how any conflict was resolved or why it remains unresolved, whether apparent multi-source agreement is genuinely independent, and how shared-infrastructure context (if any) tempers the read. Never source-name-first, never restate the raw evidence list.\n' +
+  '"likelyMaliciousIntent": string -- 1-3 sentences. Follow the grounding rule above exactly.\n' +
+  '"nextAction": string -- 2-4 sentences: a CONCRETE next step grounded in the assessment above and the fact that environmental relevance is unknown (e.g. what to search for in the analyst\'s own logs, which service/host type to prioritize) -- never a generic "investigate the IOC" line.\n' +
   "No other text, no markdown formatting, no code fences.";
 
 function safeString(value, fallback) {
@@ -95,7 +112,7 @@ export async function generateShouldICare(result) {
   const attributed = hasKnownAttribution(evidence);
   const sharedInfra = hasSharedInfrastructureSignal(evidence);
   const infraNote = infrastructureNote(evidence);
-  const bullets = evidenceBullets(evidence);
+  const intentEvidence = hasIntentSupportingEvidence(evidence);
 
   // Real telemetry never exists today (see ENVIRONMENTAL_RELEVANCE_UNKNOWN's
   // own comment) -- this stays a boolean input rather than a hardcoded
@@ -121,7 +138,12 @@ export async function generateShouldICare(result) {
       negative: evidence.items.filter((i) => i.category === "negative").map((i) => i.claim),
       attribution: evidence.items.filter((i) => i.category === "attribution").map((i) => i.claim),
     },
+    hasConflict: evidence.hasConflict,
+    conflictDescription: evidence.conflictDescription,
+    sourceCount: evidence.sourceCount,
+    independentSourceCount: evidence.independentSourceCount,
     hasAttribution: attributed,
+    hasIntentEvidence: intentEvidence,
     sharedInfrastructureDetected: sharedInfra,
     relatedActors,
     relatedCampaigns,
@@ -131,7 +153,7 @@ export async function generateShouldICare(result) {
     matchingAiReportCount: relatedIntelligence?.matchingAiReports?.length ?? 0,
     environmentalRelevance: hasEnvironmentalTelemetry ? "known" : "cannot be determined -- no SIEM/EDR/network-telemetry integration",
   };
-  const userPrompt = `INDICATOR ASSESSMENT INPUT (verified by this platform, not model-generated):\n${JSON.stringify(context, null, 2)}\n\nProduce the JSON "Should I Care?" assessment described in your instructions.`;
+  const userPrompt = `INDICATOR ASSESSMENT INPUT (verified by this platform, not model-generated):\n${JSON.stringify(context, null, 2)}\n\nProduce the JSON "Should I Care?" synthesis described in your instructions.`;
 
   const response = await aiRouter.summarizeJson(userPrompt, { systemPrompt: SYSTEM_PROMPT, temperature: 0.3 });
   const parsed = parseModelReport(response.summary);
@@ -141,14 +163,17 @@ export async function generateShouldICare(result) {
   const groundingContext = { hasAttribution: attributed, hasEnvironmentalTelemetry };
   const ground = (text) => checkUnsupportedClaims(checkCveExploitationClaim(checkProseGrounding(text, allowedNames).text, overview.cveExploitationState).text, groundingContext).text;
 
+  const combinedAssessment = ground(safeString(parsed.combinedAssessment, "Not enough data to characterize the combined intelligence picture for this indicator."));
+  const rawIntent = safeString(parsed.likelyMaliciousIntent, null);
+  const likelyMaliciousIntent = checkMaliciousIntentClaim(rawIntent ? ground(rawIntent) : rawIntent, intentEvidence).text;
+  const nextAction = ground(safeString(parsed.nextAction, "Insufficient evidence to recommend a specific next step -- re-check if new context emerges."));
+
   return {
-    headline: ground(safeString(parsed.headline, `${verdict.analystDecision} -- see evidence below.`)),
     analystDecision: verdict.analystDecision,
-    externalIntelligence: ground(safeString(parsed.externalIntelligence, "Not enough data to characterize external intelligence for this indicator.")),
-    evidenceBullets: bullets,
-    infrastructureNote: infraNote,
-    organizationalRisk: hasEnvironmentalTelemetry ? safeString(parsed.organizationalRisk, ENVIRONMENTAL_RELEVANCE_UNKNOWN) : ENVIRONMENTAL_RELEVANCE_UNKNOWN,
-    analystAction: ground(safeString(parsed.analystAction, "Insufficient evidence to recommend a specific next step -- re-check if new context emerges.")),
+    combinedAssessment: infraNote ? `${combinedAssessment} ${infraNote}` : combinedAssessment,
+    likelyMaliciousIntent,
+    environmentalRelevance: hasEnvironmentalTelemetry ? safeString(parsed.environmentalRelevance, ENVIRONMENTAL_RELEVANCE_UNKNOWN) : ENVIRONMENTAL_RELEVANCE_UNKNOWN,
+    nextAction,
     model: response.model,
     provider: response.provider,
     generatedAt: new Date().toISOString(),

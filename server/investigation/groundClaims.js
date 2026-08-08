@@ -141,3 +141,25 @@ export function checkUnsupportedClaims(text, groundingContext) {
   }
   return { text, flagged: false };
 }
+
+const SAFE_DEFAULT_INTENT_PHRASE = /not established|insufficient evidence|cannot (currently )?be determined/i;
+
+/**
+ * Fail-closed guard for the "Likely Malicious Intent" field -- the one
+ * field this platform's redesigned evidence UI most needs to get right,
+ * since a wrong or invented intent claim is the single most consequential
+ * hallucination this platform can produce. `hasIntentEvidence` is a real,
+ * code-computed boolean (see shouldICare.js -- true only when there's
+ * genuine attribution or specific behavioral/malware-association evidence,
+ * explicitly NEVER true from bare reputation scores/detection counts, ASN/
+ * cloud/CDN ownership, domain-naming patterns, or multi-domain resolution
+ * alone). If false, the whole field is replaced outright -- not caveated --
+ * unless the model already wrote an honest "not established" statement
+ * itself, in which case that's left as-is.
+ */
+export function checkMaliciousIntentClaim(text, hasIntentEvidence) {
+  const fallback = "Not established from available intelligence -- insufficient evidence to determine intent.";
+  if (!text || typeof text !== "string") return { text: fallback, flagged: true };
+  if (hasIntentEvidence || SAFE_DEFAULT_INTENT_PHRASE.test(text)) return { text, flagged: false };
+  return { text: fallback, flagged: true };
+}
