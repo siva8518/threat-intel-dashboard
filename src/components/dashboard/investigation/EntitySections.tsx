@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Section } from "../reportPrimitives";
+import { groupByTactic } from "@/investigation/attackTactics";
 import type {
   MalwareIntelligenceEntity,
   ThreatActorIntelligenceEntity,
@@ -244,19 +245,32 @@ function IocInventorySection({ buckets, onPivotToIndicator }: { buckets: IocInve
   );
 }
 
+// "HOW does this threat operate" -- deliberately kept OUT of the Investigation
+// Graph (which answers "WHAT is this threat connected to"; see
+// server/investigation/investigationGraph.js's attackTechniqueSummaries
+// comment). Techniques are grouped under their real MITRE kill-chain tactic
+// (Initial Access, Execution, Persistence, ...) instead of a flat list, so
+// an analyst can scan by "how was this achieved" rather than hunting through
+// 30-50 ungrouped T-codes.
 function AttackTechniquesSection({ techniques }: { techniques: EntityDossier["attackTechniques"] }) {
+  const groups = groupByTactic(techniques);
   return (
-    <Section title="ATT&amp;CK Techniques">
-      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-        {techniques.slice(0, 30).map((t) => (
-          <div key={t.id} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2 text-xs">
-            <span className="font-mono font-semibold text-foreground">{t.id}</span> <span className="text-foreground">{t.name}</span>
-            {t.tactic && <span className="text-muted"> ({t.tactic})</span>}
-            <p className="mt-0.5 text-muted">{t.observedVia}</p>
+    <Section title="MITRE ATT&amp;CK Activity">
+      <div className="space-y-3">
+        {groups.map((g) => (
+          <div key={g.tactic}>
+            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{g.label}</p>
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+              {g.items.map((t) => (
+                <div key={t.id} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2 text-xs">
+                  <span className="font-mono font-semibold text-foreground">{t.id}</span> <span className="text-foreground">{t.name}</span>
+                  <p className="mt-0.5 text-muted">{t.observedVia}</p>
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </div>
-      {techniques.length > 30 && <p className="mt-1 text-xs text-muted">+{techniques.length - 30} more.</p>}
     </Section>
   );
 }

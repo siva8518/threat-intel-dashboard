@@ -36,7 +36,7 @@ import { getPassiveDns } from "../connectors/otx.js";
 import { checkRipestatThrottled } from "./ipModule.js";
 import { checkIndicator as checkCrtsh } from "../lookups/crtsh.js";
 import { checkIndicator as checkRdap } from "../lookups/rdap.js";
-import { detectionRulesFor, detectionRulesForCve, techniqueIdsForFamily } from "../correlate.js";
+import { detectionRulesFor, detectionRulesForCve, techniqueIdsForFamily, ATTACK_TACTICS_ORDER } from "../correlate.js";
 import { buildEntityHuntingQueries } from "../huntingLibrary.js";
 import { norm, findByNameOrAlias } from "./entityLookup.js";
 import { resolveCanonicalAlias } from "./knownAliasGroups.js";
@@ -333,12 +333,38 @@ function detectionAndHuntingForFamilies(familyNames) {
   return { detectionRules, huntingQueries };
 }
 
+// --- ATT&CK technique summaries (metadata, not graph edges) ---------------
+//
+// MITRE ATT&CK techniques are real, sourced intelligence -- but they answer
+// "HOW does this threat operate" (behavioral/analytical context), not "WHAT
+// is this threat connected to" (the primary graph's own job). A single actor
+// or malware family can carry 30-50+ technique IDs, which used to be pushed
+// into the SAME edge list as campaigns/malware/victims/infrastructure --
+// completely dominating the canvas by node count and pushing the actual
+// operational relationships (campaigns, victims, infrastructure) out of
+// view. Techniques are now attached as structured node metadata instead
+// (tactic-grouped, same data, just not graph nodes/edges), rendered in a
+// dedicated "MITRE ATT&CK Activity" panel by the frontend detail view
+// instead of cluttering the canvas. See entityCorrelation.js#buildAttackTechniques
+// for the equivalent, independently-computed dossier-level rollup used by
+// EntitySections.tsx's own ATT&CK section for entity searches.
+function attackTechniqueSummaries(techniqueIds, attackIndex) {
+  const tacticRank = new Map(ATTACK_TACTICS_ORDER.map((t, i) => [t, i]));
+  return (techniqueIds ?? [])
+    .map((id) => {
+      const t = attackIndex.find((x) => x.id === id);
+      return { id, name: t?.name ?? id, tactic: t?.tactic ?? null };
+    })
+    .sort((a, b) => (tacticRank.get(a.tactic ?? "") ?? 99) - (tacticRank.get(b.tactic ?? "") ?? 99));
+}
+
 // --- Actor ---------------------------------------------------------------
 
 function gatherActor(key) {
   const canonical = resolveCanonicalAlias(key);
   const entity = findByNameOrAlias(getActorEntities(), canonical ?? key);
   const edges = [];
+  let attackTechniques = [];
   if (entity) {
     const names = new Set([norm(entity.name), ...entity.aliases.map(norm)]);
 
@@ -350,7 +376,7 @@ function gatherActor(key) {
     if (entity.country) edges.push(edge("country", entity.country, entity.country, "originates from", "Direct: actor.country (ATT&CK)"));
     for (const c of entity.targetedCountries) edges.push(edge("country", c, c, "targets victims in", "Indirect: actor.targetedCountries (news text match)"));
     for (const i of entity.targetedIndustries ?? []) edges.push(edge("industry", i, i, "targets industry", "Indirect: actor.targetedIndustries (news text match)"));
-    for (const id of entity.techniqueIds ?? []) edges.push(edge("attackTechnique", id, id, "uses technique", "Direct: actor.techniqueIds (ATT&CK)"));
+    attackTechniques = attackTechniqueSummaries(entity.techniqueIds, cache.getEntry("attack").data?.techniques ?? []);
 
     for (const c of getCampaignEntities()) {
       if ((c.associatedActors ?? []).some((a) => names.has(norm(a)))) {
@@ -375,7 +401,7 @@ function gatherActor(key) {
       summary: entity?.description ?? null,
       found: Boolean(entity),
       metadata: entity
-        ? { aliases: entity.aliases, actorType: entity.type, country: entity.country, activeSince: entity.activeSince, verified: entity.verified, mentionCount: entity.mentionCount, ...enrichmentFor(entity, "actor") }
+        ? { aliases: entity.aliases, actorType: entity.type, country: entity.country, activeSince: entity.activeSince, verified: entity.verified, mentionCount: entity.mentionCount, attackTechniques, ...enrichmentFor(entity, "actor") }
         : null,
     },
     edges: dedupeEdges(edges),
@@ -447,6 +473,7 @@ function gatherMalware(key) {
   const canonical = resolveCanonicalAlias(key);
   const entity = findByNameOrAlias(getMalwareEntities(), canonical ?? key);
   const edges = [];
+  let attackTechniques = [];
   if (entity) {
     edges.push(...malwareIndicatorEdges(entity));
     const names = new Set([norm(entity.name), ...entity.aliases.map(norm)]);
@@ -456,8 +483,8 @@ function gatherMalware(key) {
     for (const c of getCampaignEntities()) {
       if ((c.associatedMalware ?? []).some((m) => names.has(norm(m)))) edges.push(edge("campaign", c.name, c.name, "deployed in", "Reverse: campaign.associatedMalware", overlapExtra(articleOverlapDetail(entity, c))));
     }
-    const softwareIndex = cache.getEntry("attack").data?.software ?? [];
-    for (const id of techniqueIdsForFamily(entity.name, softwareIndex)) edges.push(edge("attackTechnique", id, id, "implements technique", "Reverse: ATT&CK software techniqueIds / curated map"));
+    const attackData = cache.getEntry("attack").data;
+    attackTechniques = attackTechniqueSummaries(techniqueIdsForFamily(entity.name, attackData?.software ?? []), attackData?.techniques ?? []);
 
     // Victims -- dark-web findings can name a malware family directly;
     // ransomware disclosure records only ever carry the actor group, never a
@@ -479,7 +506,7 @@ function gatherMalware(key) {
       label: entity?.name ?? key,
       summary: entity?.description ?? null,
       found: Boolean(entity),
-      metadata: entity ? { aliases: entity.aliases, verified: entity.verified, iocSightings: entity.iocSightings, mentionCount: entity.mentionCount, ...enrichmentFor(entity, "malware") } : null,
+      metadata: entity ? { aliases: entity.aliases, verified: entity.verified, iocSightings: entity.iocSightings, mentionCount: entity.mentionCount, attackTechniques, ...enrichmentFor(entity, "malware") } : null,
     },
     edges: dedupeEdges(edges),
     unavailableRelationships: [{ relationshipType: "cve", reason: "Malware entities in this app carry no CVE field -- no source links a malware family directly to a CVE." }],

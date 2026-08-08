@@ -231,7 +231,7 @@ export function computeAttackTechniquesObserved(iocs, attackIndex, newsTechnique
 // T1055 Process Injection and T1027 Obfuscated Files or Information both
 // carry "stealth", not "defense-evasion", as of this bundle), making this a
 // 15-tactic list now.
-const ATTACK_TACTICS_ORDER = [
+export const ATTACK_TACTICS_ORDER = [
   "reconnaissance", "resource development", "initial access", "execution", "persistence",
   "privilege escalation", "defense impairment", "stealth", "credential access", "discovery",
   "lateral movement", "collection", "command and control", "exfiltration", "impact",
