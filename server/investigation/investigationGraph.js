@@ -358,6 +358,27 @@ function attackTechniqueSummaries(techniqueIds, attackIndex) {
     .sort((a, b) => (tacticRank.get(a.tactic ?? "") ?? 99) - (tacticRank.get(b.tactic ?? "") ?? 99));
 }
 
+// Per-value "when was this most recently confirmed" for an entity's own
+// targetedIndustries/targetedCountries -- scans the SAME per-article
+// industries/countries annotations entityCorrelation.js#buildRecentActivity
+// reads (see threatActorIntelligence.js/campaignIntelligence.js's
+// upsertMention), so a "targets industry"/"targets victims in" edge carries
+// a real lastSeen instead of none at all. Without this, these two edge
+// types were the only ones in this whole file with no recency signal --
+// scoreConfidence()'s existing lastSeen<=30/90-day bonus (and the UI's own
+// first/last-seen display) silently never applied to them, so a value
+// confirmed yesterday and one confirmed three years ago looked identical.
+function valueRecencyMap(articles, field) {
+  const map = new Map();
+  for (const a of articles ?? []) {
+    for (const v of a[field] ?? []) {
+      const existing = map.get(v);
+      if (!existing || new Date(a.publishedDate) > new Date(existing)) map.set(v, a.publishedDate);
+    }
+  }
+  return map;
+}
+
 // --- Actor ---------------------------------------------------------------
 
 function gatherActor(key) {
@@ -374,8 +395,10 @@ function gatherActor(key) {
     }
     for (const id of entity.cveExploited) edges.push(edge("cve", id, id, "exploits", "Direct: actor.cveExploited"));
     if (entity.country) edges.push(edge("country", entity.country, entity.country, "originates from", "Direct: actor.country (ATT&CK)"));
-    for (const c of entity.targetedCountries) edges.push(edge("country", c, c, "targets victims in", "Indirect: actor.targetedCountries (news text match)"));
-    for (const i of entity.targetedIndustries ?? []) edges.push(edge("industry", i, i, "targets industry", "Indirect: actor.targetedIndustries (news text match)"));
+    const industryRecency = valueRecencyMap(entity.articles, "industries");
+    const countryRecency = valueRecencyMap(entity.articles, "countries");
+    for (const c of entity.targetedCountries) edges.push(edge("country", c, c, "targets victims in", "Indirect: actor.targetedCountries (news text match)", { lastSeen: countryRecency.get(c) ?? null }));
+    for (const i of entity.targetedIndustries ?? []) edges.push(edge("industry", i, i, "targets industry", "Indirect: actor.targetedIndustries (news text match)", { lastSeen: industryRecency.get(i) ?? null }));
     attackTechniques = attackTechniqueSummaries(entity.techniqueIds, cache.getEntry("attack").data?.techniques ?? []);
 
     for (const c of getCampaignEntities()) {
@@ -429,8 +452,10 @@ function gatherCampaign(key) {
       edges.push(edge("malware", name, name, "deploys malware", "Direct: campaign.associatedMalware", overlapExtra(articleOverlapDetail(entity, target))));
     }
     for (const id of entity.cveExploited) edges.push(edge("cve", id, id, "exploits", "Direct: campaign.cveExploited"));
-    for (const c of entity.targetedCountries) edges.push(edge("country", c, c, "targets victims in", "Indirect: campaign.targetedCountries (news text match)"));
-    for (const i of entity.targetedIndustries ?? []) edges.push(edge("industry", i, i, "targets industry", "Indirect: campaign.targetedIndustries (news text match)"));
+    const industryRecency = valueRecencyMap(entity.articles, "industries");
+    const countryRecency = valueRecencyMap(entity.articles, "countries");
+    for (const c of entity.targetedCountries) edges.push(edge("country", c, c, "targets victims in", "Indirect: campaign.targetedCountries (news text match)", { lastSeen: countryRecency.get(c) ?? null }));
+    for (const i of entity.targetedIndustries ?? []) edges.push(edge("industry", i, i, "targets industry", "Indirect: campaign.targetedIndustries (news text match)", { lastSeen: industryRecency.get(i) ?? null }));
 
     for (const r of getRansomwareCampaigns()) {
       if (actorNames.has(norm(r.group))) edges.push(edge("victim", r.victim, r.victim, "breached victim", "Indirect: via a shared actor in campaign.associatedActors", { firstSeen: r.discoveredDate, lastSeen: r.discoveredDate }));

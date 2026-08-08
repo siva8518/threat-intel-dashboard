@@ -23,6 +23,9 @@ import { mergeThreatActors, detectionRulesFor, techniqueIdsForFamily } from "../
 import { buildEntityHuntingQueries } from "../huntingLibrary.js";
 import { buildCveProfile } from "../cveProfile.js";
 import { norm } from "./entityLookup.js";
+import { recentSignal as actorRecentSignal, RECENT_WINDOW_DAYS } from "../threatActorIntelligence.js";
+import { recentSignal as campaignRecentSignal } from "../campaignIntelligence.js";
+import { withinDays } from "../lib/dateWindow.js";
 import * as cache from "../cache.js";
 
 // A campaign/entity is "current" if last observed within this window --
@@ -180,22 +183,118 @@ function buildVictimsTargeting(matchNames, malwareEntities) {
 
   const byIndustry = new Map();
   const byCountry = new Map();
-  const sample = [];
+  const allSamples = [];
   for (const r of ransomwareVictims) {
     if (r.sector && r.sector !== "Unknown") byIndustry.set(r.sector, (byIndustry.get(r.sector) ?? 0) + 1);
     if (r.country && r.country !== "Unknown") byCountry.set(r.country, (byCountry.get(r.country) ?? 0) + 1);
-    if (sample.length < 20) sample.push({ victim: r.victim, sector: r.sector && r.sector !== "Unknown" ? r.sector : null, country: r.country && r.country !== "Unknown" ? r.country : null, discoveredDate: r.discoveredDate, source: "Ransomware Victim Tracking (ransomware.live / RansomWatch / RansomLook)" });
+    allSamples.push({ victim: r.victim, sector: r.sector && r.sector !== "Unknown" ? r.sector : null, country: r.country && r.country !== "Unknown" ? r.country : null, discoveredDate: r.discoveredDate, source: "Ransomware Victim Tracking (ransomware.live / RansomWatch / RansomLook)" });
   }
   for (const d of darkWebVictims) {
     for (const c of d.targetedCountries ?? []) byCountry.set(c, (byCountry.get(c) ?? 0) + 1);
-    if (sample.length < 20) sample.push({ victim: d.victimOrg ?? d.name, sector: null, country: d.targetedCountries?.[0] ?? null, discoveredDate: d.firstSeen ?? null, source: "Dark Web Intelligence" });
+    allSamples.push({ victim: d.victimOrg ?? d.name, sector: null, country: d.targetedCountries?.[0] ?? null, discoveredDate: d.firstSeen ?? null, source: "Dark Web Intelligence" });
   }
+  // Most-recent-first -- the old insertion-order sample buried a victim
+  // disclosed yesterday behind 19 older ones purely because the tracker
+  // happened to return them first. Undated entries sort last, never first.
+  allSamples.sort((a, b) => {
+    if (!a.discoveredDate) return 1;
+    if (!b.discoveredDate) return -1;
+    return new Date(b.discoveredDate) - new Date(a.discoveredDate);
+  });
 
   return {
     totalVictims: ransomwareVictims.length + darkWebVictims.length,
     byIndustry: Array.from(byIndustry.entries()).map(([industry, count]) => ({ industry, count })).sort((a, b) => b.count - a.count),
     byCountry: Array.from(byCountry.entries()).map(([country, count]) => ({ country, count })).sort((a, b) => b.count - a.count),
-    sample,
+    sample: allSamples.slice(0, 20),
+  };
+}
+
+/**
+ * "What has this entity actually done RECENTLY (last RECENT_WINDOW_DAYS)" --
+ * the direct fix for the reported bug ("Targeting: All Industries" / a
+ * specific recent campaign missed): entity.targetedIndustries/
+ * targetedCountries/cveExploited on the actor/campaign stores are genuine
+ * all-time unions that never expire (see threatActorIntelligence.js's own
+ * comment) and dilute toward "basically everything" for a well-covered
+ * entity, while the underlying per-article data needed to answer "recently"
+ * was already being computed at ingest time and simply discarded. This
+ * recomputes it from each matched actor's/campaign's own recentSignal()
+ * (their already-timestamped article list, zero new I/O), plus which
+ * malware families were recently CO-MENTIONED with this entity (not just
+ * ever), plus which of the victim sample's own real disclosure dates fall
+ * inside the window, plus which matched campaigns bucket as "current".
+ * Never invents a value -- every entry here traces to a real, dated article
+ * or victim-disclosure record.
+ */
+function buildRecentActivity(actors, campaigns, malwareEntities, victimSample) {
+  const industries = new Set();
+  const countries = new Set();
+  const cves = new Set();
+  const recentArticleLinks = new Set();
+  const sourceArticles = [];
+  let mostRecentDate = null;
+  const noteMostRecent = (d) => {
+    if (d && (!mostRecentDate || new Date(d) > new Date(mostRecentDate))) mostRecentDate = d;
+  };
+
+  for (const actor of actors) {
+    const signal = actorRecentSignal(actor);
+    for (const i of signal.targetedIndustries) industries.add(i);
+    for (const c of signal.targetedCountries) countries.add(c);
+    for (const cve of signal.cveExploited) cves.add(cve);
+    for (const a of signal.sourceArticles) {
+      recentArticleLinks.add(a.link);
+      sourceArticles.push({ ...a, via: `Threat actor "${actor.name}"` });
+    }
+    noteMostRecent(signal.mostRecentDate);
+  }
+  for (const campaign of campaigns) {
+    const signal = campaignRecentSignal(campaign);
+    for (const i of signal.targetedIndustries) industries.add(i);
+    for (const c of signal.targetedCountries) countries.add(c);
+    for (const cve of signal.cveExploited) cves.add(cve);
+    for (const a of signal.sourceArticles) {
+      recentArticleLinks.add(a.link);
+      sourceArticles.push({ ...a, via: `Campaign "${campaign.name}"` });
+    }
+    noteMostRecent(signal.mostRecentDate);
+  }
+
+  // Recent malware co-mention: only families whose OWN article list overlaps
+  // one of THIS entity's recent (not all-time) articles -- "used by this
+  // actor at some point" (malwareUsed, all-time) vs. "used by this actor in
+  // its current activity" (this).
+  const malwareUsed = new Set();
+  for (const malware of malwareEntities) {
+    if ((malware.articles ?? []).some((a) => recentArticleLinks.has(a.link))) malwareUsed.add(malware.name);
+  }
+
+  const recentVictims = (victimSample ?? []).filter((v) => withinDays(v.discoveredDate, RECENT_WINDOW_DAYS));
+  const recentCampaigns = campaigns.filter((c) => bucketForCampaign(c) === "current").map((c) => c.name);
+
+  // Dedupe by link (the same article can legitimately surface twice -- once
+  // matched under the canonical name, once under an as-yet-unmerged alias
+  // variant of the same actor/campaign record) and sort most-recent-first.
+  const seenLinks = new Set();
+  const dedupedArticles = [];
+  for (const a of sourceArticles.sort((a, b) => new Date(b.publishedDate) - new Date(a.publishedDate))) {
+    if (seenLinks.has(a.link)) continue;
+    seenLinks.add(a.link);
+    dedupedArticles.push(a);
+  }
+
+  return {
+    windowDays: RECENT_WINDOW_DAYS,
+    hasRecentSignal: sourceArticles.length > 0 || recentVictims.length > 0,
+    mostRecentDate,
+    targetedIndustries: Array.from(industries),
+    targetedCountries: Array.from(countries),
+    cveExploited: Array.from(cves),
+    malwareUsed: Array.from(malwareUsed),
+    recentCampaigns,
+    recentVictims: recentVictims.slice(0, 10),
+    sourceArticles: dedupedArticles.slice(0, 10),
   };
 }
 
@@ -308,6 +407,8 @@ export async function buildEntityDossier(searchValue, { seedType }) {
 
   const { detectionRules, huntingQueries } = buildDetectionAndHunting(cappedMalware, cappedActors);
 
+  const recentActivity = buildRecentActivity(cappedActors, cappedCampaigns, cappedMalware, victimsTargeting.sample);
+
   return {
     sourceType,
     primaryEntity: pickPrimaryEntity(malware, actors, campaigns),
@@ -323,6 +424,7 @@ export async function buildEntityDossier(searchValue, { seedType }) {
     iocInventory,
     attackTechniques,
     victimsTargeting,
+    recentActivity,
     threatReports,
     detectionRules,
     huntingQueries,

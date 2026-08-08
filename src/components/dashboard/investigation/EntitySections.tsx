@@ -10,6 +10,7 @@
 // are associated, who has it targeted, what should I investigate next" --
 // not just "is this entity malicious."
 import { useState } from "react";
+import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Section } from "../reportPrimitives";
 import { groupByTactic } from "@/investigation/attackTactics";
@@ -25,6 +26,7 @@ import type {
   IocInventoryBucket,
   VictimTargetingSummary,
   RelationshipConfidenceLabel,
+  RecentActivity,
 } from "@/types/threat-intel";
 
 function typeLabel(type: ThreatActor["type"]): string {
@@ -104,6 +106,101 @@ function EntityOverview({ dossier }: { dossier: EntityDossier }) {
           </p>
         )}
       </div>
+    </Section>
+  );
+}
+
+/**
+ * "What has this entity ACTUALLY done recently" -- the direct answer to the
+ * reported problem (a stale, over-broad "Targeting: All Industries" summary
+ * burying a real, specific, recent development). Deliberately placed right
+ * after Entity Overview, before any historical/all-time section, so an
+ * analyst sees what's current FIRST. See
+ * server/investigation/entityCorrelation.js#buildRecentActivity -- every
+ * value here traces to a real, dated article or victim-disclosure record.
+ * `hasRecentSignal: false` renders an explicit "nothing recent" state, not a
+ * silently-omitted section, so its absence is never mistaken for "this
+ * entity is inactive" when it's really just outside this platform's own
+ * tracked recency window.
+ */
+function RecentActivitySection({ activity }: { activity: RecentActivity }) {
+  const windowLabel = `last ${activity.windowDays} days`;
+  return (
+    <Section title={`Recent Activity (${windowLabel})`}>
+      {!activity.hasRecentSignal ? (
+        <p className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5 text-xs text-muted">
+          No activity confirmed for this entity in the {windowLabel} -- see the historical sections below for its full tracked profile.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {activity.mostRecentDate && (
+            <p className="text-xs text-muted">
+              Most recent confirmed activity: <span className="font-semibold text-foreground">{new Date(activity.mostRecentDate).toLocaleDateString()}</span>
+            </p>
+          )}
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              ["Targeted Industries", activity.targetedIndustries],
+              ["Targeted Countries", activity.targetedCountries],
+              ["Exploited CVEs", activity.cveExploited],
+              ["Malware Co-Mentioned", activity.malwareUsed],
+            ].map(([label, items]) => (
+              <div key={label as string} className="rounded-lg border border-primary/20 bg-primary/[0.04] p-2.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-primary">{label as string}</p>
+                {(items as string[]).length === 0 ? (
+                  <p className="mt-1 text-xs italic text-muted">None confirmed recently</p>
+                ) : (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {(items as string[]).map((v) => (
+                      <Badge key={v} variant="muted">
+                        {v}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {activity.recentCampaigns.length > 0 && (
+            <p className="text-xs text-muted">
+              Active campaigns in this window: <span className="text-foreground">{activity.recentCampaigns.join(", ")}</span>
+            </p>
+          )}
+          {activity.recentVictims.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs font-semibold text-foreground">Recently Disclosed Victims</p>
+              <ul className="space-y-0.5 text-xs text-muted">
+                {activity.recentVictims.map((v, i) => (
+                  <li key={i}>
+                    {v.victim}
+                    {v.sector ? ` — ${v.sector}` : ""}
+                    {v.country ? ` (${v.country})` : ""}
+                    {v.discoveredDate ? `, ${new Date(v.discoveredDate).toLocaleDateString()}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {activity.sourceArticles.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs font-semibold text-foreground">Source Articles Behind This Window</p>
+              <ul className="space-y-1">
+                {activity.sourceArticles.slice(0, 5).map((a) => (
+                  <li key={a.link}>
+                    <a href={a.link} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-foreground">
+                      <span className="truncate">{a.title}</span>
+                      <span className="shrink-0">
+                        ({a.source} · {new Date(a.publishedDate).toLocaleDateString()})
+                      </span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
     </Section>
   );
 }
@@ -351,6 +448,7 @@ export function EntityIntelligenceSection({
   return (
     <div className="space-y-4">
       {d && <EntityOverview dossier={d} />}
+      {d && <RecentActivitySection activity={d.recentActivity} />}
       {d && d.campaigns.length > 0 && <CampaignHistorySection campaigns={d.campaigns} onOpenCampaign={onOpenCampaign} />}
       {(data.malware?.length ?? 0) > 0 && (
         <Section title="Associated Malware">

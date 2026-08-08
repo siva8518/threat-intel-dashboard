@@ -62,6 +62,7 @@ const SYSTEM_PROMPT =
   "You are given: the searched entity/indicator, its verdict, every REAL relationship this platform's Investigation Graph already discovered (ranked by confidence), which relationship types this platform genuinely cannot answer, real matched AI Summarization reports, real deterministically-tallied lists (industries affected, reused infrastructure, ATT&CK techniques, victims) -- these lists are already final and correct, you do NOT need to and must NOT re-derive or second-guess them. " +
   "Your job is narrative synthesis ONLY: explain what this entity is, why it matters, how the discovered relationships connect, and what to investigate next -- never restate the raw lists you were given, the analyst can already see them. " +
   "\n\nNO-REPETITION RULE: for an entity-type search (a threat actor/malware family/ransomware group/campaign) you may also be given `entityDossierCounts` -- an Entity Overview panel already on the same page shows these exact counts (malware families, campaigns, CVEs, IOCs, victims, threat reports) to the analyst. Do NOT restate those counts (\"this entity has 3 campaigns and 12 IOCs...\") or enumerate every campaign/CVE/IOC by name -- your prose adds NEW value: cross-cutting synthesis, patterns across the counts, gaps, and the single highest-value next pivot. " +
+  "\n\nRECENCY RULE (critical): for an entity-type search you may also be given `recentActivity` -- what this entity has ACTUALLY done in the last `recentActivity.windowDays` days (targeted industries/countries, exploited CVEs, co-mentioned malware, disclosed victims, active campaigns), separate from the all-time entityDossierCounts. This platform has a confirmed history of surfacing stale, over-broad summaries (e.g. \"targets all industries\") that bury a real, specific, recent development -- do not repeat that mistake. If `recentActivity.hasRecentSignal` is true, your whatIsThis/whyItMatters/relationshipNarrative MUST lead with what's recent and specific (name the actual recent industry/country/CVE/victim, not a vague \"various sectors\"), and only mention older/broader historical patterns as secondary context clearly labeled as such (e.g. \"historically\" / \"over its full tracked history\"). If `recentActivity.hasRecentSignal` is false, say plainly that no recent activity was found in the tracked window rather than falling back to the all-time picture unlabeled. Never claim something is \"recent\" or \"current\" unless it actually appears in `recentActivity` -- the all-time lists (industriesAffected, relatedActors/Campaigns/Malware) carry no recency guarantee on their own. " +
   "\n\nGROUNDING RULES:\n" +
   "- Every claim must trace to a specific item in the data you were given (an edge, a report, a tallied industry/reuse/technique entry). Never invent a name, a count, or a relationship not present in the data.\n" +
   '- If the data is too sparse to answer a question meaningfully, say so plainly (e.g. "Not enough discovered relationships to assess infrastructure reuse yet") rather than forcing an answer.\n' +
@@ -145,6 +146,12 @@ export async function generateCorrelationSummary(result) {
           threatReportCount: dossier.threatReportCount,
         }
       : null,
+    // What this entity has ACTUALLY done recently (see the RECENCY RULE
+    // above) -- server/investigation/entityCorrelation.js#buildRecentActivity,
+    // itself built from each matched actor's/campaign's own already-dated
+    // article list (server/threatActorIntelligence.js#recentSignal), never
+    // invented. null for indicator types with no dossier (IOC searches).
+    recentActivity: dossier?.recentActivity ?? null,
   };
   const userPrompt = `UNIFIED INVESTIGATION RESULT (verified by this platform, not model-generated):\n${JSON.stringify(context, null, 2)}\n\nProduce the JSON correlation summary described in your instructions.`;
 
@@ -153,8 +160,21 @@ export async function generateCorrelationSummary(result) {
   if (!parsed) throw new Error("AI Correlation Summary: model response was not valid JSON");
 
   // Every real entity this search actually surfaced -- the only names the
-  // model is allowed to reference in its narrative prose.
-  const allowedNames = [overview.indicator, ...relatedActors, ...relatedCampaigns, ...relatedMalware, ...victimsTargeted];
+  // model is allowed to reference in its narrative prose. Unions in
+  // recentActivity's own malware/campaign/victim names too, since those are
+  // recomputed independently from each matched entity's recent article
+  // subset and can occasionally include a value not yet reflected as a
+  // graph edge (e.g. a brand-new co-mention).
+  const allowedNames = [
+    overview.indicator,
+    ...relatedActors,
+    ...relatedCampaigns,
+    ...relatedMalware,
+    ...victimsTargeted,
+    ...(dossier?.recentActivity?.malwareUsed ?? []),
+    ...(dossier?.recentActivity?.recentCampaigns ?? []),
+    ...(dossier?.recentActivity?.recentVictims ?? []).map((v) => v.victim),
+  ];
   const cveExploitationState = overview.cveExploitationState;
   // No-op (always true) for indicator types with no dossier at all -- these
   // 3 checks exist specifically for the entity-dossier claims Phase 6 adds,

@@ -626,9 +626,37 @@ export interface EntityDossier {
   iocInventory: IocInventoryBucket[];
   attackTechniques: Array<{ id: string; name: string; tactic: string | null; observedVia: string; source: string }>;
   victimsTargeting: VictimTargetingSummary;
+  recentActivity: RecentActivity;
   threatReports: Array<{ id: string; articleTitle: string; articleLink: string; articleSource: string; publishedDate: string }>;
   detectionRules: Array<{ label: string; path: string; url: string }>;
   huntingQueries: Array<{ platform: string; query: string; description: string }>;
+}
+
+/**
+ * "What has this entity actually done in the last `windowDays`" -- the fix
+ * for entities whose all-time targetedIndustries/targetedCountries/
+ * cveExploited (accumulated forever, never expiring) dilute toward "targets
+ * everything" for a well-covered actor/campaign, silently burying a real,
+ * recent, specific signal (a new industry, a new country, a new CVE, a
+ * newly-observed victim) under years of history. See
+ * server/threatActorIntelligence.js#recentSignal and
+ * server/investigation/entityCorrelation.js#buildRecentActivity -- every
+ * value here traces to a real, dated article or victim-disclosure record,
+ * never inferred or invented. `hasRecentSignal: false` means genuinely no
+ * activity in the window, not a data gap -- shown as an explicit, honest
+ * "nothing recent" state rather than silently omitted.
+ */
+export interface RecentActivity {
+  windowDays: number;
+  hasRecentSignal: boolean;
+  mostRecentDate: string | null;
+  targetedIndustries: string[];
+  targetedCountries: string[];
+  cveExploited: string[];
+  malwareUsed: string[];
+  recentCampaigns: string[];
+  recentVictims: Array<{ victim: string; sector: string | null; country: string | null; discoveredDate: string | null; source: string }>;
+  sourceArticles: Array<{ title: string; link: string; source: string; publishedDate: string; via: string }>;
 }
 
 export interface CampaignHistoryEntry {

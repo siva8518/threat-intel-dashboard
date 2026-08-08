@@ -92,6 +92,7 @@ const SYSTEM_PROMPT =
   "- Never state a CVE is actively/confirmed exploited from CVSS, EPSS, or exploit-availability alone -- only from the provided cveExploitationState.\n" +
   "- Your synthesis must be CONSISTENT with the provided analystDecision -- do not imply more or less urgency than that decision reflects.\n" +
   "- For an entity-type search (a threat actor/malware family/ransomware group/campaign, indicated by hasVerifiedEntityProfile being non-null) your combinedAssessment should read differently than for a bare IOC: if hasVerifiedEntityProfile is true, ground the assessment in the entity's real correlated profile depth (not just a reputation verdict); if false but victim disclosures still exist, say so plainly (a tracked ransomware group with disclosed victims but no deeper platform-verified profile) rather than implying more is known than the data supports. If victimIndustryConcentration is present, you may note the concentration as a targeting pattern -- but only if it's genuinely present in the data.\n" +
+  "- RECENCY: you may also be given `recentActivity` -- what this entity has ACTUALLY done in the last `recentActivity.windowDays` days, separate from its all-time profile. This platform has a confirmed history of over-broad, stale summaries (e.g. \"targets all industries\") burying a specific recent development -- your combinedAssessment and nextAction must prioritize `recentActivity` when `hasRecentSignal` is true (name the actual recent industry/country/CVE/victim, don't generalize it away), and explicitly say so when it's false (no recent activity found in the tracked window) rather than silently falling back to the all-time picture. Never describe something as \"recent\"/\"current\"/\"ongoing\" unless it's actually in `recentActivity`.\n" +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
   '"combinedAssessment": string -- 2-4 sentences synthesizing what the evidence indicates ONCE COMPARED: overall strength/consistency, how any conflict was resolved or why it remains unresolved, whether apparent multi-source agreement is genuinely independent, and how shared-infrastructure context (if any) tempers the read. Never source-name-first, never restate the raw evidence list.\n' +
   '"likelyMaliciousIntent": string -- 1-3 sentences. Follow the grounding rule above exactly.\n' +
@@ -175,6 +176,10 @@ export async function generateShouldICare(result) {
     // not merely a bare ransomware-tracker group name.
     hasVerifiedEntityProfile: dossier ? dossier.sourceType === "verified-profile" : null,
     victimIndustryConcentration: victimIndustryConcentrationFor(dossier),
+    // What this entity has ACTUALLY done recently -- see the RECENCY rule
+    // above and server/investigation/entityCorrelation.js#buildRecentActivity.
+    // null for IOC-type searches (no dossier at all).
+    recentActivity: dossier?.recentActivity ?? null,
   };
   const userPrompt = `INDICATOR ASSESSMENT INPUT (verified by this platform, not model-generated):\n${JSON.stringify(context, null, 2)}\n\nProduce the JSON "Should I Care?" synthesis described in your instructions.`;
 
@@ -182,7 +187,16 @@ export async function generateShouldICare(result) {
   const parsed = parseModelReport(response.summary);
   if (!parsed) throw new Error('"Should I Care?": model response was not valid JSON');
 
-  const allowedNames = [overview.indicator, ...relatedActors, ...relatedCampaigns, ...relatedMalware, ...victimsTargeted];
+  const allowedNames = [
+    overview.indicator,
+    ...relatedActors,
+    ...relatedCampaigns,
+    ...relatedMalware,
+    ...victimsTargeted,
+    ...(dossier?.recentActivity?.malwareUsed ?? []),
+    ...(dossier?.recentActivity?.recentCampaigns ?? []),
+    ...(dossier?.recentActivity?.recentVictims ?? []).map((v) => v.victim),
+  ];
   const groundingContext = { hasAttribution: attributed, hasEnvironmentalTelemetry };
   // No-op (always true) for indicator types with no dossier at all -- see
   // the matching comment in correlationSummary.js.

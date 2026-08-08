@@ -21,6 +21,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STORE_DIR = path.join(__dirname, ".cache");
 const STORE_PATH = path.join(STORE_DIR, "threat-actor-intelligence.json");
 const MAX_ARTICLES_PER_ENTITY = 25;
+// "Current/recent" vs "historical" for this entity's own targeting signal --
+// tighter than entityCorrelation.js's 365-day campaign bucket window, since
+// which industries/countries an actor is actively hitting can shift faster
+// than a whole campaign's own lifecycle. See recentSignal() below.
+export const RECENT_WINDOW_DAYS = 180;
 
 let state = load();
 
@@ -114,14 +119,25 @@ export function upsertMention(rawName, type, article) {
 
   const alreadyLinked = entity.articles.some((a) => a.link === article.link);
   if (!alreadyLinked) {
-    entity.articles.unshift({ title: article.title, link: article.link, source: article.source, publishedDate: article.publishedDate });
+    const text = `${article.title} ${article.summary ?? ""}`;
+    const industries = matchIndustries(text);
+    const countries = matchCountries(text);
+    const cves = matchCveIds(text);
+    // Per-article match results are stored on the article record itself (not
+    // just merged into the all-time targetedIndustries/targetedCountries/
+    // cveExploited arrays below) -- this is what makes recentSignal() able to
+    // answer "what has this actor targeted RECENTLY" later without a second
+    // extraction pass. Without this, a value mentioned once years ago and a
+    // value mentioned yesterday are indistinguishable once merged into the
+    // same flat all-time array (the literal "Targeting: All Industries"
+    // dilution bug this fixes -- see entityCorrelation.js#buildRecentActivity).
+    entity.articles.unshift({ title: article.title, link: article.link, source: article.source, publishedDate: article.publishedDate, industries, countries, cves });
     entity.articles = entity.articles.slice(0, MAX_ARTICLES_PER_ENTITY);
     entity.mentionCount += 1;
 
-    const text = `${article.title} ${article.summary ?? ""}`;
-    entity.targetedIndustries = mergeUnique(entity.targetedIndustries, matchIndustries(text));
-    entity.targetedCountries = mergeUnique(entity.targetedCountries, matchCountries(text));
-    entity.cveExploited = mergeUnique(entity.cveExploited, matchCveIds(text));
+    entity.targetedIndustries = mergeUnique(entity.targetedIndustries, industries);
+    entity.targetedCountries = mergeUnique(entity.targetedCountries, countries);
+    entity.cveExploited = mergeUnique(entity.cveExploited, cves);
   }
 
   if (new Date(article.publishedDate) > new Date(entity.lastSeen)) entity.lastSeen = article.publishedDate;
@@ -317,6 +333,72 @@ export function getAllEntitiesWindowed(days) {
     windowed.push({ ...entity, mentionCount: articlesInWindow.length, lastSeen });
   }
   return windowed.sort((a, b) => new Date(b.lastSeen) - new Date(a.lastSeen));
+}
+
+/**
+ * "What has this actor targeted/exploited RECENTLY" -- recomputed on every
+ * call from this entity's own already-timestamped article list (never a
+ * second live fetch), filtered to `days`, flattening the per-article
+ * industries/countries/cves annotations upsertMention() now attaches to each
+ * article record. This is the fix for the "Targeting: All Industries"
+ * dilution bug: entity.targetedIndustries/targetedCountries/cveExploited are
+ * genuinely all-time unions (a value mentioned once in 2023 never expires),
+ * so a well-covered actor's profile eventually approaches the full taxonomy
+ * and stops being useful. recentSignal() answers the sharper, actually
+ * useful question instead. Articles stored before this field existed simply
+ * have no industries/countries/cves annotation (see the one-time backfill in
+ * scripts/backfillArticleRecency.js) and are silently skipped here, not
+ * treated as a contradiction.
+ */
+export function recentSignal(entity, days = RECENT_WINDOW_DAYS) {
+  const recentArticles = (entity.articles ?? []).filter((a) => withinDays(a.publishedDate, days));
+  const industries = new Set();
+  const countries = new Set();
+  const cves = new Set();
+  let mostRecentDate = null;
+  for (const a of recentArticles) {
+    for (const i of a.industries ?? []) industries.add(i);
+    for (const c of a.countries ?? []) countries.add(c);
+    for (const cve of a.cves ?? []) cves.add(cve);
+    if (!mostRecentDate || new Date(a.publishedDate) > new Date(mostRecentDate)) mostRecentDate = a.publishedDate;
+  }
+  return {
+    windowDays: days,
+    articleCount: recentArticles.length,
+    mostRecentDate,
+    targetedIndustries: Array.from(industries),
+    targetedCountries: Array.from(countries),
+    cveExploited: Array.from(cves),
+    sourceArticles: recentArticles.slice(0, 10).map((a) => ({ title: a.title, link: a.link, source: a.source, publishedDate: a.publishedDate })),
+  };
+}
+
+/**
+ * One-time migration for articles stored BEFORE upsertMention() started
+ * attaching per-article industries/countries/cves (see scripts/
+ * backfillArticleRecency.js, run once after this change shipped) -- without
+ * it, recentSignal() would silently return empty for every actor until each
+ * of its already-stored articles happens to get re-processed, which never
+ * happens (article links are never reprocessed once linked). Title-only
+ * best-effort: article.summary isn't persisted on the stored record, only
+ * title/link/source/publishedDate, so this can't fully replicate the
+ * title+summary match upsertMention() runs on brand-new articles -- still
+ * strictly better than the alternative (permanently empty), and every
+ * article ingested from this point on gets the full title+summary match.
+ */
+export function backfillArticleRecency() {
+  let updated = 0;
+  for (const entity of state.entities) {
+    for (const a of entity.articles) {
+      if (a.industries !== undefined) continue; // already annotated (even an empty array counts -- means genuinely no match)
+      a.industries = matchIndustries(a.title);
+      a.countries = matchCountries(a.title);
+      a.cves = matchCveIds(a.title);
+      updated++;
+    }
+  }
+  if (updated > 0) persist();
+  return updated;
 }
 
 export function saveAfterMentions() {

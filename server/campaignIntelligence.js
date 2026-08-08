@@ -19,11 +19,16 @@ import { fileURLToPath } from "node:url";
 import { matchCveIds, matchIndustries, matchCountries } from "./newsCorrelation.js";
 import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
 import { getAllEntities as getActorEntities } from "./threatActorIntelligence.js";
+import { withinDays } from "./lib/dateWindow.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STORE_DIR = path.join(__dirname, ".cache");
 const STORE_PATH = path.join(STORE_DIR, "campaign-intelligence.json");
 const MAX_ARTICLES_PER_ENTITY = 25;
+// See server/threatActorIntelligence.js's own RECENT_WINDOW_DAYS for the
+// full rationale -- kept identical here so an actor and its own campaigns
+// agree on what "recent" means.
+export const RECENT_WINDOW_DAYS = 180;
 
 let state = load();
 
@@ -103,14 +108,21 @@ export function upsertMention(rawName, article) {
 
   const alreadyLinked = entity.articles.some((a) => a.link === article.link);
   if (!alreadyLinked) {
-    entity.articles.unshift({ title: article.title, link: article.link, source: article.source, publishedDate: article.publishedDate });
+    const text = `${article.title} ${article.summary ?? ""}`;
+    const industries = matchIndustries(text);
+    const countries = matchCountries(text);
+    const cves = matchCveIds(text);
+    // Per-article match results stay on the article record itself -- see
+    // server/threatActorIntelligence.js#upsertMention's own comment for why
+    // (recentSignal() below needs this to answer "what has this campaign
+    // targeted RECENTLY" instead of an all-time flat union).
+    entity.articles.unshift({ title: article.title, link: article.link, source: article.source, publishedDate: article.publishedDate, industries, countries, cves });
     entity.articles = entity.articles.slice(0, MAX_ARTICLES_PER_ENTITY);
     entity.mentionCount += 1;
 
-    const text = `${article.title} ${article.summary ?? ""}`;
-    entity.targetedIndustries = mergeUnique(entity.targetedIndustries, matchIndustries(text));
-    entity.targetedCountries = mergeUnique(entity.targetedCountries, matchCountries(text));
-    entity.cveExploited = mergeUnique(entity.cveExploited, matchCveIds(text));
+    entity.targetedIndustries = mergeUnique(entity.targetedIndustries, industries);
+    entity.targetedCountries = mergeUnique(entity.targetedCountries, countries);
+    entity.cveExploited = mergeUnique(entity.cveExploited, cves);
   }
 
   if (new Date(article.publishedDate) > new Date(entity.lastSeen)) entity.lastSeen = article.publishedDate;
@@ -176,6 +188,46 @@ export function getAllEntities() {
     if (a.verified !== b.verified) return a.verified ? -1 : 1;
     return new Date(b.lastSeen) - new Date(a.lastSeen);
   });
+}
+
+/** Same as server/threatActorIntelligence.js#recentSignal, for a campaign entity. */
+export function recentSignal(entity, days = RECENT_WINDOW_DAYS) {
+  const recentArticles = (entity.articles ?? []).filter((a) => withinDays(a.publishedDate, days));
+  const industries = new Set();
+  const countries = new Set();
+  const cves = new Set();
+  let mostRecentDate = null;
+  for (const a of recentArticles) {
+    for (const i of a.industries ?? []) industries.add(i);
+    for (const c of a.countries ?? []) countries.add(c);
+    for (const cve of a.cves ?? []) cves.add(cve);
+    if (!mostRecentDate || new Date(a.publishedDate) > new Date(mostRecentDate)) mostRecentDate = a.publishedDate;
+  }
+  return {
+    windowDays: days,
+    articleCount: recentArticles.length,
+    mostRecentDate,
+    targetedIndustries: Array.from(industries),
+    targetedCountries: Array.from(countries),
+    cveExploited: Array.from(cves),
+    sourceArticles: recentArticles.slice(0, 10).map((a) => ({ title: a.title, link: a.link, source: a.source, publishedDate: a.publishedDate })),
+  };
+}
+
+/** Same one-time migration as server/threatActorIntelligence.js#backfillArticleRecency, for campaign entities. */
+export function backfillArticleRecency() {
+  let updated = 0;
+  for (const entity of state.entities) {
+    for (const a of entity.articles) {
+      if (a.industries !== undefined) continue;
+      a.industries = matchIndustries(a.title);
+      a.countries = matchCountries(a.title);
+      a.cves = matchCveIds(a.title);
+      updated++;
+    }
+  }
+  if (updated > 0) persist();
+  return updated;
 }
 
 export function saveAfterMentions() {
