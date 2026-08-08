@@ -34,6 +34,7 @@ import type {
   GraphNode,
   GraphInsights,
   CorrelationSummary,
+  ShouldICareAssessment,
   KevEntry,
   MalwareIntelligenceEntity,
   MalwareProfile,
@@ -336,6 +337,17 @@ export async function generateGraphInsights(payload: {
 export async function generateCorrelationSummary(result: InvestigationResult): Promise<CorrelationSummary> {
   return fetchJson("/api/dashboard/investigation/correlation-summary", {
     source: "AI Correlation Summary",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(result),
+    timeoutMs: 90_000,
+  });
+}
+
+/** Fired automatically alongside generateCorrelationSummary above (see useInvestigationWorkspace.ts) -- the human-centric "Should I Care?" assessment, see server/investigation/shouldICare.js. */
+export async function generateShouldICare(result: InvestigationResult): Promise<ShouldICareAssessment> {
+  return fetchJson("/api/dashboard/investigation/should-i-care", {
+    source: "Should I Care?",
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(result),

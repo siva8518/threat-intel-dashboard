@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useInvestigate, useGraphInsights, useCorrelationSummary } from "./useInvestigate";
+import { useInvestigate, useGraphInsights, useCorrelationSummary, useShouldICare } from "./useInvestigate";
 import { useInvestigationGraph } from "./useInvestigationGraph";
 import type { GraphNodeType } from "@/types/threat-intel";
 
@@ -20,8 +20,10 @@ export function useInvestigationWorkspace() {
   const graph = useInvestigationGraph();
   const insightsM = useGraphInsights();
   const correlationM = useCorrelationSummary();
+  const shouldICareM = useShouldICare();
   const insightsFiredRef = useRef<Set<string>>(new Set());
   const correlationFiredRef = useRef<Set<string>>(new Set());
+  const shouldICareFiredRef = useRef<Set<string>>(new Set());
   const lastGraphNodeIdRef = useRef<string | null>(null);
 
   const result = investigateM.data;
@@ -80,6 +82,24 @@ export function useInvestigationWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
 
+  /**
+   * Auto-fires "Should I Care?" the moment a search result comes back --
+   * same guard shape as the AI Correlation Summary above (fires once per
+   * resolved search, skipped when coverage.nothingFound is true since
+   * there's no real evidence for the model to reason over in that case;
+   * ShouldICarePanel renders a deterministic fallback from
+   * result.overview.verdict directly instead).
+   */
+  useEffect(() => {
+    if (!result) return;
+    const key = `${result.type}:${result.indicator.toLowerCase()}`;
+    if (shouldICareFiredRef.current.has(key)) return;
+    if (result.coverage.nothingFound) return;
+    shouldICareFiredRef.current.add(key);
+    shouldICareM.mutate(result);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result]);
+
   const recommendedActions = result?.actionability ?? null;
 
   return {
@@ -98,6 +118,9 @@ export function useInvestigationWorkspace() {
     correlationSummary: correlationM.data ?? null,
     correlationSummaryPending: correlationM.isPending,
     correlationSummaryError: correlationM.isError ? (correlationM.error as Error).message : null,
+    shouldICare: shouldICareM.data ?? null,
+    shouldICarePending: shouldICareM.isPending,
+    shouldICareError: shouldICareM.isError ? (shouldICareM.error as Error).message : null,
     runInvestigation: (query: string) => investigateM.mutate(query),
   };
 }

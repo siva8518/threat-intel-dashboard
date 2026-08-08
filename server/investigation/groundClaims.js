@@ -106,3 +106,38 @@ export function checkCveExploitationClaim(text, cveExploitationState) {
     flagged: true,
   };
 }
+
+// Each rule pairs a claim pattern with the specific boolean in
+// `groundingContext` that must be true before that claim is allowed to
+// stand -- a direct, one-to-one code enforcement of this platform's
+// explicit "the AI MUST NOT say X unless Y" rules (server/investigation/
+// shouldICare.js's SYSTEM_PROMPT states the same rules in the prompt too,
+// but this is the part that actually can't be talked around by the model).
+const UNSUPPORTED_CLAIM_RULES = [
+  { pattern: /\bC2\b|command[- ]and[- ]control/i, requires: "hasAttribution", label: "command-and-control attribution" },
+  { pattern: /belongs to (a |the )?(known |tracked )?threat actor|is (a |part of )?(a |the )?known threat actor/i, requires: "hasAttribution", label: "threat-actor ownership" },
+  { pattern: /ransomware campaign|part of a ransomware/i, requires: "hasAttribution", label: "ransomware-campaign membership" },
+  { pattern: /attacking your (organization|environment|network|company)|compromised your|has compromised your|is currently attacking|actively targeting your/i, requires: "hasEnvironmentalTelemetry", label: "a confirmed attack against your environment" },
+];
+
+/**
+ * Fail-closed version of the checks above -- for a small set of especially
+ * consequential absolute claims (confirmed C2, threat-actor ownership,
+ * ransomware-campaign membership, an active attack on YOUR environment),
+ * an appended caveat isn't enough: the whole field is replaced with an
+ * honest "not established" statement rather than left partially misleading.
+ * `groundingContext` is real, code-computed evidence (see
+ * server/investigation/verdictEngine.js#hasKnownAttribution and this
+ * platform's environmental-telemetry status, currently always false --
+ * see server/investigation/shouldICare.js), never taken from the model's
+ * own output.
+ */
+export function checkUnsupportedClaims(text, groundingContext) {
+  if (!text || typeof text !== "string") return { text, flagged: false };
+  for (const rule of UNSUPPORTED_CLAIM_RULES) {
+    if (rule.pattern.test(text) && !groundingContext[rule.requires]) {
+      return { text: `Not established by available evidence: this platform's data does not support a claim of ${rule.label}.`, flagged: true };
+    }
+  }
+  return { text, flagged: false };
+}

@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { investigate, generateInvestigationAiReport, generateGraphInsights, generateCorrelationSummary } from "@/api/dashboardApi";
+import { investigate, generateInvestigationAiReport, generateGraphInsights, generateCorrelationSummary, generateShouldICare } from "@/api/dashboardApi";
 
 /** On-demand, fired on search submit -- see useIocSearch.ts for the same pattern this replaces (broadened from 4 indicator types to all 16, auto-detected server-side). */
 export function useInvestigate() {
@@ -26,5 +26,12 @@ export function useGraphInsights() {
 export function useCorrelationSummary() {
   return useMutation({
     mutationFn: generateCorrelationSummary,
+  });
+}
+
+/** Also fired automatically, alongside useCorrelationSummary above -- see useInvestigationWorkspace.ts. The human-centric "Should I Care?" assessment, see server/investigation/shouldICare.js. */
+export function useShouldICare() {
+  return useMutation({
+    mutationFn: generateShouldICare,
   });
 }

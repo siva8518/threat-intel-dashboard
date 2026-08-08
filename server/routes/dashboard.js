@@ -50,6 +50,7 @@ import { buildInfrastructureReuse } from "../infrastructureReuse.js";
 import { getGraphNode, GRAPH_NODE_TYPES } from "../investigation/investigationGraph.js";
 import { generateGraphInsights } from "../investigation/graphInsights.js";
 import { generateCorrelationSummary } from "../investigation/correlationSummary.js";
+import { generateShouldICare } from "../investigation/shouldICare.js";
 
 export const router = Router();
 
@@ -999,6 +1000,25 @@ router.post("/dashboard/investigation/correlation-summary", async (req, res) => 
   try {
     const summary = await generateCorrelationSummary(result);
     res.json(summary);
+  } catch (error) {
+    if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
+    res.status(502).json({ error: error.message });
+  }
+});
+
+// --- "Should I Care?" -- see server/investigation/shouldICare.js ---
+// Same "client posts the already-computed result, no server re-fetch" shape
+// as the two routes above. Fired automatically alongside them, replacing
+// the old deterministic-only "Should I Care?" section (which just restated
+// verdictEngine.js#buildReasoning's source-first sentence) with a genuine
+// human-centric analyst assessment.
+router.post("/dashboard/investigation/should-i-care", async (req, res) => {
+  const result = req.body ?? {};
+  if (!result.overview) return res.status(400).json({ error: "a full InvestigationResult (with overview) is required" });
+
+  try {
+    const assessment = await generateShouldICare(result);
+    res.json(assessment);
   } catch (error) {
     if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
     res.status(502).json({ error: error.message });

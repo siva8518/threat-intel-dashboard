@@ -17,6 +17,7 @@ import { RecommendedActionsPanel } from "./investigation/RecommendedActionsPanel
 import { RealDetectionsHuntingPanel } from "./investigation/RealDetectionsHuntingPanel";
 import { AiGraphInsightsPanel } from "./investigation/AiGraphInsightsPanel";
 import { CorrelationSummaryPanel } from "./investigation/CorrelationSummaryPanel";
+import { ShouldICarePanel } from "./investigation/ShouldICarePanel";
 import { SearchCoveragePanel } from "./investigation/SearchCoveragePanel";
 import { EvidencePanel } from "./investigation/EvidencePanel";
 import { InvestigationGraph } from "./InvestigationGraph";
@@ -140,26 +141,6 @@ function VerdictBanner({ overview }: { overview: InvestigationResult["overview"]
       </div>
     </div>
   );
-}
-
-/**
- * The verdict engine's own reasoning sentence (server/investigation/verdictEngine.js)
- * -- already names the real evidence-bearing sources/counts that produced
- * this verdict, so this section doesn't hand-pick its own subset of
- * evidence anymore (that used to cover only 5 hardcoded sources and could
- * drift from the actual verdict logic). Severity/risk/priority/confidence
- * are already on the Analyst Verdict tiles above; actor/campaign names are
- * already there too. Full per-source, per-category evidence lives in the
- * Evidence panel below. Each fact on this page lives in exactly one place;
- * this section only ever references other sections by name.
- */
-function whyShouldICare(result: InvestigationResult): string[] {
-  const overview = result.overview;
-  const lines: string[] = [overview.verdict.reasoning];
-  if (overview.associatedThreatActors.length > 0 || overview.activeCampaigns.length > 0) {
-    lines.push("See the Analyst Verdict tiles above for linked actor(s)/campaign(s), and Relationships below for the full picture.");
-  }
-  return lines;
 }
 
 function safe(v: unknown): string {
@@ -332,15 +313,16 @@ function QuickActions({ result }: { result: InvestigationResult }) {
  * place this page shows that entity's edges (no separate "Relationships"
  * list duplicating it). Every other fact on this page follows the same
  * rule: it lives in exactly one place, and later sections reference it by
- * name rather than restating it (see whyShouldICare()'s comment for the
- * concrete example).
+ * name rather than restating it.
  *
- * Page order front-loads synthesis before raw evidence: AI Summary (opt-in)
- * -> Verdict -> Why Should I Care -> Investigation Graph -> AI Investigation
- * Summary -> Key Facts -> AI/vendor reports -> real Detections & Hunting ->
- * Recommended Actions (SOC/Detection Engineering/Threat Intelligence/
- * Incident Response) -> Indicator-Specific raw lookup evidence -> deeper
- * opt-in AI narrative -> Quick Actions.
+ * Page order front-loads synthesis before raw evidence: Verdict -> Search
+ * Coverage -> Should I Care? (server/investigation/shouldICare.js's
+ * human-centric External Intelligence / Organizational Risk / Analyst
+ * Action assessment) -> Investigation Graph -> AI Investigation Summary ->
+ * AI Correlation Summary -> Key Facts -> Evidence -> AI/vendor reports ->
+ * real Detections & Hunting -> Recommended Actions (SOC/Detection
+ * Engineering/Threat Intelligence/Incident Response) -> Indicator-Specific
+ * raw lookup evidence -> deeper opt-in AI narrative -> Quick Actions.
  */
 export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampaignSearch, goToMalwareSearch, goToAiSummarySearch, initialQuery }: WorkspaceProps) {
   const [input, setInput] = useState("");
@@ -361,6 +343,9 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
     correlationSummary,
     correlationSummaryPending,
     correlationSummaryError,
+    shouldICare,
+    shouldICarePending,
+    shouldICareError,
   } = workspace;
 
   useEffect(() => {
@@ -441,15 +426,7 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
 
             <SearchCoveragePanel coverage={result.coverage} />
 
-            <Section title="Should I Care?">
-              <div className="space-y-1.5">
-                {whyShouldICare(result).map((line, i) => (
-                  <p key={i} className="text-sm text-foreground">
-                    {line}
-                  </p>
-                ))}
-              </div>
-            </Section>
+            <ShouldICarePanel assessment={shouldICare} pending={shouldICarePending} error={shouldICareError} overview={result.overview} />
 
             {/*
               The Investigation Graph is the primary relationship view on this

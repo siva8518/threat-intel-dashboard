@@ -254,31 +254,80 @@ function buildReasoning(state, evidence, cveExploitationState) {
 // types this framework covers.
 const BLOCKABLE_TYPES = new Set(["ip", "domain", "url", "sha256", "sha1", "md5"]);
 
+// Real ASN-holder/warning-list phrasing this platform's own connectors
+// already produce for major cloud/CDN/VPN/datacenter providers (see
+// evidence.js's ripestatRule/teamCymruAsnRule/mispRule) -- reused here, not
+// re-invented, to detect "this sits on shared infrastructure" without
+// treating ownership itself as evidence (evidence.js already guarantees
+// these items are always "contextual" or "negative" polarity, never
+// malicious/suspicious).
+const SHARED_INFRASTRUCTURE_PATTERN = /cloudflare|amazon|aws|azure|microsoft corporation|google cloud|gcp|oracle|digitalocean|akamai|fastly|ovh|hetzner|linode|vultr|\bvpn\b|datacenter|data center/i;
+
+/** Exported for reuse by server/investigation/shouldICare.js, which surfaces this same signal to the analyst as an explicit "shared infrastructure" note. */
+export function hasSharedInfrastructureSignal(evidence) {
+  return evidence.items.some((i) => (i.category === "contextual" || i.category === "negative") && SHARED_INFRASTRUCTURE_PATTERN.test(i.claim));
+}
+
+// Real attribution -- a matched malware family or a named threat actor/
+// campaign, not bare reputation. Deliberately does NOT include "indirect"
+// items (algorithmic text-match inferences).
+/** Exported for reuse by server/investigation/shouldICare.js. */
+export function hasKnownAttribution(evidence) {
+  return evidence.items.some((i) => i.category === "attribution" || i.rawField === "matchedMalwareFamilies");
+}
+
+const ANALYST_DECISION_REASONING = {
+  Block: "Multiple independent, corroborated sources (or one very strong signal) confirm malicious activity, with a real attribution or no shared-infrastructure caveat to weigh against it.",
+  "Investigate Immediately": "Strong, corroborated evidence of malicious activity exists for an entity type blocking doesn't apply to (or as a network/file IOC with a real attribution overriding shared-infrastructure caution) -- treat as urgent.",
+  "Investigate If Observed Internally": "Evidence is suspicious, conflicting, or reputation-only on shared/cloud/VPN infrastructure with no confirmed malware/actor/campaign attribution -- not strong enough alone to act on directly.",
+  Monitor: "Evidence is inconclusive -- monitor for additional signal before acting.",
+  Watchlist: "A tracked entity with no currently-active malicious signal -- keep on a watchlist, not an immediate action.",
+  "Do Not Block": "No sufficient malicious evidence in this platform's current data to justify action.",
+  "No Action Required": "Insufficient evidence exists to support any action.",
+};
+
 /**
- * Deterministic, evidence-derived block/don't-block call -- a fifth output
- * alongside state/severity/confidence/priority, computed from the verdict
- * STATE alone (never from severity or raw evidence weight directly), so weak
- * or conflicting reputation data can never produce "Block" no matter how
- * elevated severity happens to be (e.g. Conflicting Intelligence always
- * routes to "Monitor -- Do Not Block", even when severity reads HIGH).
+ * The type-agnostic analyst action -- computed from verdict state plus two
+ * moderating signals read directly from the evidence: shared/cloud/VPN
+ * infrastructure context, and whether there's a real attribution (not bare
+ * reputation). A strong reputation-only verdict on shared infrastructure
+ * with no attribution caps at "Investigate If Observed Internally" instead
+ * of "Block" -- a real attribution overrides that caution even on shared
+ * hosting (e.g. a VirusTotal-confirmed C2 for a known malware family still
+ * reads "Block" regardless of which cloud it's hosted on).
  */
-function computeBlockRecommendation(entityType, state) {
+function computeAnalystDecision(entityType, state, evidence) {
+  const blockable = BLOCKABLE_TYPES.has(entityType);
+  if (state === "Confirmed Malicious" || state === "Malicious") {
+    if (!blockable) return "Investigate Immediately";
+    const sharedInfra = hasSharedInfrastructureSignal(evidence);
+    const attributed = hasKnownAttribution(evidence);
+    if (sharedInfra && !attributed) return "Investigate If Observed Internally";
+    return state === "Confirmed Malicious" ? "Block" : "Investigate Immediately";
+  }
+  if (state === "Suspicious" || state === "Conflicting Intelligence") return "Investigate If Observed Internally";
+  if (state === "Unconfirmed") return "Monitor";
+  if (state === "Informational") return "Watchlist";
+  if (state === "Clean-Benign") return "Do Not Block";
+  return "No Action Required"; // Insufficient Evidence
+}
+
+const ANALYST_DECISION_TO_BLOCK = {
+  Block: "Block",
+  "Investigate Immediately": "Monitor — Do Not Block",
+  "Investigate If Observed Internally": "Monitor — Do Not Block",
+  Monitor: "Monitor — Do Not Block",
+  Watchlist: "Do Not Block",
+  "Do Not Block": "Do Not Block",
+  "No Action Required": "Do Not Block",
+};
+
+/** Derived from analystDecision (never independently recomputed), so the two can't disagree -- "Not Applicable" for entity types blocking doesn't apply to. */
+function computeBlockRecommendation(entityType, analystDecision, analystDecisionReasoning) {
   if (!BLOCKABLE_TYPES.has(entityType)) {
     return { blockRecommendation: "Not Applicable", blockRecommendationReasoning: `Blocking is not a meaningful action for a "${entityType}" entity.` };
   }
-  if (state === "Confirmed Malicious") {
-    return { blockRecommendation: "Block", blockRecommendationReasoning: "Multiple independent, corroborating sources (or one very strong, high-confidence source) confirm malicious activity." };
-  }
-  if (state === "Malicious") {
-    return { blockRecommendation: "Block", blockRecommendationReasoning: "Direct evidence of malicious activity from at least one reliable source, with no conflicting negative evidence." };
-  }
-  if (state === "Suspicious") {
-    return { blockRecommendation: "Monitor — Do Not Block", blockRecommendationReasoning: "Evidence suggests risk but is not strong or corroborated enough alone to justify blocking." };
-  }
-  if (state === "Conflicting Intelligence") {
-    return { blockRecommendation: "Monitor — Do Not Block", blockRecommendationReasoning: "Sources disagree -- do not block based on current, conflicting threat-intelligence evidence." };
-  }
-  return { blockRecommendation: "Do Not Block", blockRecommendationReasoning: "No sufficient malicious evidence in this platform's current data to justify blocking." };
+  return { blockRecommendation: ANALYST_DECISION_TO_BLOCK[analystDecision] ?? "Do Not Block", blockRecommendationReasoning: analystDecisionReasoning };
 }
 
 /**
@@ -296,7 +345,9 @@ export function computeVerdict({ entityType, evidence, cveExploitationState = nu
   const severity = computeSeverityLevel(entityType, evidence, context);
   const label = buildLabel(entityType, state, cveExploitationState, context);
   const reasoning = buildReasoning(state, evidence, cveExploitationState);
-  const { blockRecommendation, blockRecommendationReasoning } = computeBlockRecommendation(entityType, state);
+  const analystDecision = computeAnalystDecision(entityType, state, evidence);
+  const analystDecisionReasoning = ANALYST_DECISION_REASONING[analystDecision];
+  const { blockRecommendation, blockRecommendationReasoning } = computeBlockRecommendation(entityType, analystDecision, analystDecisionReasoning);
 
   return {
     state,
@@ -307,6 +358,8 @@ export function computeVerdict({ entityType, evidence, cveExploitationState = nu
     severityFactors,
     riskLevel: SEVERITY_TO_RISK[severity] ?? "Low",
     recommendedPriority: SEVERITY_TO_PRIORITY[severity] ?? "Low",
+    analystDecision,
+    analystDecisionReasoning,
     blockRecommendation,
     blockRecommendationReasoning,
     reasoning,

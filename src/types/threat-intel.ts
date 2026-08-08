@@ -421,8 +421,22 @@ export interface VerdictSeverityFactors {
 }
 
 /** The full output of the Confidence + Severity/Priority stages -- see server/investigation/verdictEngine.js#computeVerdict. Confidence and severity are computed independently (separate factor lists above) then combined with the evidence pattern into one `state`. */
-/** Whether to block this indicator at the perimeter/EDR -- a fifth, independently-derived output alongside state/severity/confidence/priority, not folded into any of them. Only ever "Block" when the verdict state itself reflects corroborated malicious evidence (Confirmed Malicious/Malicious); weak or conflicting reputation data alone never produces "Block", even when severity happens to be elevated. "Not Applicable" for entity types blocking doesn't apply to (CVEs, actors, campaigns, artifacts, etc.). */
+/** Whether to block this indicator at the perimeter/EDR -- derived from `analystDecision` below, never independently computed, so the two can't disagree. Only ever "Block" when the verdict state itself reflects corroborated malicious evidence AND (for network/file IOCs on shared/cloud/VPN infrastructure) an actual malware/actor/campaign attribution, not reputation alone. "Not Applicable" for entity types blocking doesn't apply to (CVEs, actors, campaigns, artifacts, etc.). */
 export type BlockRecommendation = "Block" | "Monitor — Do Not Block" | "Do Not Block" | "Not Applicable";
+
+/**
+ * The richer, type-agnostic analyst action -- computed in code from verdict
+ * state plus two moderating signals also read from the evidence itself
+ * (never re-derived by an AI layer): whether the indicator sits on known
+ * shared/cloud/VPN/datacenter infrastructure (see
+ * server/investigation/verdictEngine.js#hasSharedInfrastructureSignal), and
+ * whether there's an actual malware/actor/campaign attribution (not bare
+ * reputation). Strong external reputation alone, on shared infrastructure,
+ * with no attribution, caps at "Investigate If Observed Internally" rather
+ * than "Block" -- a confirmed attribution (e.g. a matched malware family)
+ * overrides that caution even on shared hosting.
+ */
+export type AnalystDecision = "Block" | "Investigate Immediately" | "Investigate If Observed Internally" | "Monitor" | "Watchlist" | "Do Not Block" | "No Action Required";
 
 export interface VerdictResult {
   state: VerdictState;
@@ -433,6 +447,8 @@ export interface VerdictResult {
   severityFactors: VerdictSeverityFactors;
   riskLevel: "Critical" | "High" | "Medium" | "Low";
   recommendedPriority: "Immediate" | "High" | "Normal" | "Low";
+  analystDecision: AnalystDecision;
+  analystDecisionReasoning: string;
   blockRecommendation: BlockRecommendation;
   blockRecommendationReasoning: string;
   reasoning: string;
@@ -706,6 +722,31 @@ export interface CorrelationSummary {
   relatedActors: string[];
   relatedCampaigns: string[];
   relatedMalware: string[];
+  model: string;
+  provider: string;
+  generatedAt: string;
+}
+
+/**
+ * "Should I Care?" -- see server/investigation/shouldICare.js. The
+ * human-centric SO WHAT assessment, structured around three explicit
+ * layers: External Intelligence (externalIntelligence + evidenceBullets),
+ * Organizational Risk (organizationalRisk -- honest "cannot be determined"
+ * until this platform has real telemetry), and Analyst Action
+ * (analystAction). `analystDecision` and `evidenceBullets` are deterministic
+ * pass-through from the verdict engine/evidence reconciliation, never
+ * model-authored; `headline`/`externalIntelligence`/`analystAction` are the
+ * model's narrative synthesis over that real data.
+ */
+export interface ShouldICareAssessment {
+  headline: string;
+  analystDecision: AnalystDecision;
+  externalIntelligence: string;
+  evidenceBullets: string[];
+  /** Present only when the evidence includes a known shared/cloud/CDN/VPN/datacenter infrastructure signal -- see verdictEngine.js#hasSharedInfrastructureSignal. Null otherwise. */
+  infrastructureNote: string | null;
+  organizationalRisk: string;
+  analystAction: string;
   model: string;
   provider: string;
   generatedAt: string;
