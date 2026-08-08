@@ -26,6 +26,7 @@
 // drafting all of them would be both slow and mostly wasted work against
 // gaps nobody's actively triaging yet.
 import { aiRouter, AllProvidersFailedError } from "./ai/aiRouter.js";
+import { AI_TASK } from "./ai/aiTasks.js";
 
 const CONFIDENCE_LEVELS = new Set(["High", "Medium", "Low"]);
 const MAX_RELATED_RULES = 5;
@@ -252,7 +253,7 @@ export async function generateDraftArtifacts(item, ruleIndex = []) {
   let response;
   let artifacts;
   try {
-    response = await aiRouter.summarizeJson(userContent, { systemPrompt: SYSTEM_PROMPT, temperature: 0.2 });
+    response = await aiRouter.summarizeJson(userContent, { systemPrompt: SYSTEM_PROMPT, temperature: 0.2, task: AI_TASK.DETECTION_ENGINEERING });
     artifacts = parseArtifacts(response.summary ?? "");
   } catch (error) {
     if (error instanceof AllProvidersFailedError) throw error;

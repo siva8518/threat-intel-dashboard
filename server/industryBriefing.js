@@ -24,6 +24,7 @@
 // grounding pool's own {title, source, link, publishedDate}, so "citing
 // CISA" only happens when the underlying article really is from a CISA feed.
 import { aiRouter, AllProvidersFailedError } from "./ai/aiRouter.js";
+import { AI_TASK } from "./ai/aiTasks.js";
 import { INDUSTRY_CATALOG } from "./aiThreatSummary.js";
 import { matchIndustries } from "./emergingThreatsRanking.js";
 import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
@@ -601,7 +602,7 @@ export async function generateIndustryBriefing(industry, { taggedNewsItems, repo
 
   let parsed;
   try {
-    const response = await aiRouter.summarizeJson(userMessage, { systemPrompt: SYSTEM_PROMPT, temperature: 0.3 });
+    const response = await aiRouter.summarizeJson(userMessage, { systemPrompt: SYSTEM_PROMPT, temperature: 0.3, task: AI_TASK.INDUSTRY_INTELLIGENCE });
     parsed = JSON.parse(response.summary);
   } catch (error) {
     if (error instanceof AllProvidersFailedError) throw error;

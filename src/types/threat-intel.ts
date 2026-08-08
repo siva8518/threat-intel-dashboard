@@ -1052,6 +1052,53 @@ export interface SourceHealth {
   reliability: SourceReliability | null; // null for lookup-only sources, which have no real uptime signal
 }
 
+// -- AI Provider Health / Usage (server/ai/providerHealth.js, server/ai/aiRequestLog.js) --
+export interface AiProviderHealth {
+  label: string;
+  model: string;
+  configured: boolean;
+  status: "healthy" | "cooldown" | "misconfigured" | "unconfigured";
+  statusLabel: string;
+  cooldownRemainingMs: number;
+  successRate: number | null; // 0-100, null until at least 1 request recorded
+  avgLatencyMs: number | null;
+  totalSuccess: number;
+  totalFailure: number;
+  rateLimitCount: number;
+  timeoutCount: number;
+  authErrorCount: number;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastFailureReason: string | null;
+}
+
+export interface AiUsageByProvider {
+  provider: string;
+  requests: number;
+  success: number;
+  failure: number;
+  totalTokens: number;
+  avgLatencyMs: number | null;
+}
+
+export interface AiUsageByTask {
+  task: string;
+  requests: number;
+  success: number;
+  failure: number;
+  totalTokens: number;
+}
+
+export interface AiUsageRollup {
+  totalRequests: number;
+  totalSuccess: number;
+  totalFailure: number;
+  totalTokens: number;
+  cacheHits: number;
+  byProvider: AiUsageByProvider[];
+  byTask: AiUsageByTask[];
+}
+
 export interface MalwareProfile {
   family: string;
   attackReference: { name: string; type: "malware" | "tool"; url: string } | null;

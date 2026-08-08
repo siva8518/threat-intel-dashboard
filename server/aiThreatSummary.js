@@ -23,6 +23,7 @@
 // references) are unchanged -- this redesign only touches the model's own
 // synthesis, not the extraction pipeline.
 import { aiRouter } from "./ai/aiRouter.js";
+import { AI_TASK } from "./ai/aiTasks.js";
 import { extractEntities } from "./githubIntel/extractor.js";
 import { detectionRulesFor } from "./correlate.js";
 import { fetchArticleText } from "./lib/articleText.js";
@@ -1148,6 +1149,12 @@ export async function generateThreatSummary(article, grounded) {
   const response = await aiRouter.summarizeJson(userContent, {
     systemPrompt: SYSTEM_PROMPT,
     temperature: 0.2,
+    task: AI_TASK.INVESTIGATION,
+    // This report routinely runs an 11.5k+ token completion -- skip any
+    // provider whose configured context window can't fit that (see
+    // config.js's per-provider contextWindow) rather than discovering it
+    // via a truncated/rejected response.
+    minContextWindow: 16_000,
   });
 
   const modelReport = parseModelReport(response.summary ?? "", validTechniqueIds, techniqueNameToId, idToTechniqueName);

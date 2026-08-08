@@ -32,6 +32,8 @@
 // into coherent prose, never deciding the verdict or inventing a
 // relationship/attribution/intent/environmental-impact claim itself.
 import { aiRouter } from "../ai/aiRouter.js";
+import { AI_TASK } from "../ai/aiTasks.js";
+import { hashForCacheKey } from "../ai/aiResponseCache.js";
 import { hasSharedInfrastructureSignal, hasKnownAttribution } from "./verdictEngine.js";
 import { checkProseGrounding, checkCveExploitationClaim, checkUnsupportedClaims, checkMaliciousIntentClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim } from "./groundClaims.js";
 
@@ -183,7 +185,16 @@ export async function generateShouldICare(result) {
   };
   const userPrompt = `INDICATOR ASSESSMENT INPUT (verified by this platform, not model-generated):\n${JSON.stringify(context, null, 2)}\n\nProduce the JSON "Should I Care?" synthesis described in your instructions.`;
 
-  const response = await aiRouter.summarizeJson(userPrompt, { systemPrompt: SYSTEM_PROMPT, temperature: 0.3 });
+  // cacheKey: identical `context` (same evidence, same dossier state) for
+  // the same indicator produces the same synthesis -- caching avoids
+  // re-spending AI credits every time an analyst re-opens the same
+  // indicator within the TTL window (see ai/aiResponseCache.js).
+  const response = await aiRouter.summarizeJson(userPrompt, {
+    systemPrompt: SYSTEM_PROMPT,
+    temperature: 0.3,
+    task: AI_TASK.SOC_ASSISTANT,
+    cacheKey: `should-i-care:${hashForCacheKey(context)}`,
+  });
   const parsed = parseModelReport(response.summary);
   if (!parsed) throw new Error('"Should I Care?": model response was not valid JSON');
 

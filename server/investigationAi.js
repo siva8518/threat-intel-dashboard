@@ -9,6 +9,8 @@
 // path, containment recommendation, the 6 role-specific operational
 // guidance blocks, and detection-opportunity ideas.
 import { aiRouter } from "./ai/aiRouter.js";
+import { AI_TASK } from "./ai/aiTasks.js";
+import { hashForCacheKey } from "./ai/aiResponseCache.js";
 import { checkProseGrounding, checkCveExploitationClaim } from "./investigation/groundClaims.js";
 
 const SYSTEM_PROMPT =
@@ -129,7 +131,15 @@ export async function generateInvestigationAiReport(investigation) {
   const context = buildContext(investigation);
   const userPrompt = `INDICATOR CONTEXT (verified by this platform, not model-generated):\n${JSON.stringify(context, null, 2)}\n\nProduce the JSON report described in your instructions for this indicator.`;
 
-  const result = await aiRouter.summarizeJson(userPrompt, { systemPrompt: SYSTEM_PROMPT, temperature: 0.3 });
+  // User-triggered, one-off per indicator ("Generate AI Report") -- caching
+  // avoids a second full report generation if the analyst re-clicks the
+  // button on the same indicator without anything new having happened.
+  const result = await aiRouter.summarizeJson(userPrompt, {
+    systemPrompt: SYSTEM_PROMPT,
+    temperature: 0.3,
+    task: AI_TASK.INVESTIGATION,
+    cacheKey: `investigation-ai-report:${hashForCacheKey(context)}`,
+  });
   const parsed = parseModelReport(result.summary);
   if (!parsed) throw new Error("AI Investigation Report: model response was not valid JSON");
 

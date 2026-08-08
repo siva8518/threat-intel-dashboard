@@ -1,12 +1,26 @@
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 export class ApiError extends Error {
-  constructor(message, source, status) {
+  constructor(message, source, status, retryAfterMs) {
     super(message);
     this.name = "ApiError";
     this.source = source;
     this.status = status;
+    // Parsed from a 429/503's Retry-After header when present (seconds, or
+    // an HTTP-date -- RFC 7231) -- undefined for every other error and for
+    // any response that didn't send the header, so existing callers that
+    // never look at this field are entirely unaffected.
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+function parseRetryAfterMs(response) {
+  const header = response.headers.get("retry-after");
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const dateMs = Date.parse(header);
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : undefined;
 }
 
 async function request(url, { source, timeoutMs = DEFAULT_TIMEOUT_MS, ...init }) {
@@ -16,7 +30,7 @@ async function request(url, { source, timeoutMs = DEFAULT_TIMEOUT_MS, ...init })
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     if (!response.ok) {
-      throw new ApiError(`${source} responded with ${response.status} ${response.statusText}`, source, response.status);
+      throw new ApiError(`${source} responded with ${response.status} ${response.statusText}`, source, response.status, parseRetryAfterMs(response));
     }
     return response;
   } catch (error) {

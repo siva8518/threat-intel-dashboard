@@ -13,6 +13,7 @@
 // counting -- reduces hallucination risk on exactly the kind of claim
 // ("these 3 reports all mention this actor") that's cheap to get wrong.
 import { aiRouter } from "../ai/aiRouter.js";
+import { AI_TASK } from "../ai/aiTasks.js";
 import { getReportById } from "../aiThreatSummaryStore.js";
 import { crossReferenceIndicator } from "./crossReference.js";
 import { groundName, groundEntityList, checkProseGrounding } from "./groundClaims.js";
@@ -115,7 +116,7 @@ export async function generateGraphInsights({ node, edges, unavailableRelationsh
   };
   const userPrompt = `INVESTIGATION GRAPH (verified by this platform, not model-generated):\n${JSON.stringify(context, null, 2)}\n\nProduce the JSON analysis described in your instructions for this entity's relationships.`;
 
-  const result = await aiRouter.summarizeJson(userPrompt, { systemPrompt: SYSTEM_PROMPT, temperature: 0.3 });
+  const result = await aiRouter.summarizeJson(userPrompt, { systemPrompt: SYSTEM_PROMPT, temperature: 0.3, task: AI_TASK.INVESTIGATION });
   const parsed = parseModelReport(result.summary);
   if (!parsed) throw new Error("AI Investigation Summary: model response was not valid JSON");
 

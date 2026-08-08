@@ -20,6 +20,8 @@ export const queryKeys = {
   threatActors: (days: number | null = null) => ["threat-actors", days] as const,
   news: ["news"] as const,
   health: ["health"] as const,
+  aiProviderHealth: ["ai-provider-health"] as const,
+  aiUsage: ["ai-usage"] as const,
   iocSearch: (type: string, value: string) => ["ioc-search", type, value] as const,
   githubIntelList: (paramsKey: string) => ["github-intel", paramsKey] as const,
   githubIntelStats: (days: number | null = null) => ["github-intel", "stats", days] as const,

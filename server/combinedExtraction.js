@@ -25,6 +25,7 @@
 // Ollama -- none of these providers has an embedding endpoint, so none can
 // serve that half regardless.
 import { aiRouter } from "./ai/aiRouter.js";
+import { AI_TASK } from "./ai/aiTasks.js";
 
 const SYSTEM_PROMPT =
   "You are a threat intelligence analyst. You will be given one security news article's headline and, if available, its summary. " +
@@ -73,6 +74,6 @@ function parseJsonObject(text) {
  */
 export async function extractAllEntities({ title, summary }) {
   const userContent = summary ? `Headline: ${title}\nSummary: ${summary}` : `Headline: ${title}`;
-  const response = await aiRouter.summarizeJson(userContent, { systemPrompt: SYSTEM_PROMPT, temperature: 0, tier: "fast" });
+  const response = await aiRouter.summarizeJson(userContent, { systemPrompt: SYSTEM_PROMPT, temperature: 0, tier: "fast", task: AI_TASK.SUMMARY });
   return parseJsonObject(response.summary ?? "");
 }

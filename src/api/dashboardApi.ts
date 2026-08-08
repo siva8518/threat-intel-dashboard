@@ -37,6 +37,8 @@ import type {
   ShouldICareAssessment,
   KevEntry,
   MalwareIntelligenceEntity,
+  AiProviderHealth,
+  AiUsageRollup,
   MalwareProfile,
   NewsItem,
   RansomwareCampaign,
@@ -294,6 +296,14 @@ export async function draftDetectionBacklogArtifacts(
 
 export async function fetchSourcesHealth(): Promise<{ sources: SourceHealth[]; onlineCount: number; totalCount: number }> {
   return fetchJson("/api/dashboard/health", { source: "Dashboard API" });
+}
+
+export async function fetchAiProviderHealth(): Promise<{ providers: AiProviderHealth[] }> {
+  return fetchJson("/api/dashboard/ai-provider-health", { source: "Dashboard API" });
+}
+
+export async function fetchAiUsage(): Promise<AiUsageRollup> {
+  return fetchJson("/api/dashboard/ai-usage", { source: "Dashboard API" });
 }
 
 /** Auto-detects the indicator type server-side and returns the full Universal Overview + type-specific module data -- see server/investigation/index.js. */

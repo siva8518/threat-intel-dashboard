@@ -10,7 +10,8 @@ import { lookupCve as lookupCveCircl } from "../lookups/circl.js";
 import { fetchFallbackCves } from "../lookups/cveFallback.js";
 import { investigate } from "../investigation/index.js";
 import { generateInvestigationAiReport } from "../investigationAi.js";
-import { AllProvidersFailedError } from "../ai/aiRouter.js";
+import { AllProvidersFailedError, getProviderHealthSnapshot } from "../ai/aiRouter.js";
+import { getAiUsageRollup } from "../ai/aiRequestLog.js";
 import { listThreatActors, searchThreatActors, buildThreatActorProfile } from "../actorProfile.js";
 import { getAllGithubRepos, computeTopCves } from "../githubIntel/index.js";
 import { buildCveProfile } from "../cveProfile.js";
@@ -913,6 +914,23 @@ router.get("/dashboard/health", (_req, res) => {
   }));
 
   res.json({ sources: withReliability, onlineCount: health.filter((h) => h.online).length, totalCount: health.length });
+});
+
+// --- AI Provider Health -- see server/ai/providerHealth.js. Same
+// admin/developer surface as /dashboard/health above (rendered in the
+// Sources tab, not the analyst-facing Investigation Workspace) -- per-
+// provider configured/cooldown/success-rate/latency status across the
+// whole 10-provider AI fallback chain. ---
+router.get("/dashboard/ai-provider-health", (_req, res) => {
+  res.json({ providers: getProviderHealthSnapshot() });
+});
+
+// --- AI Usage -- rolled-up request/token telemetry from server/ai/aiRequestLog.js
+// (every aiRouter.summarize()/summarizeJson() call, success or failure,
+// since this process started -- see that file for exactly what is and
+// isn't recorded). ---
+router.get("/dashboard/ai-usage", (_req, res) => {
+  res.json(getAiUsageRollup());
 });
 
 // --- Intelligence Investigation Console -- see server/investigation/index.js ---

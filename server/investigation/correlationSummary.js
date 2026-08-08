@@ -18,6 +18,8 @@
 // it's handed, exactly the same division of labor already proven
 // throughout this app.
 import { aiRouter } from "../ai/aiRouter.js";
+import { AI_TASK } from "../ai/aiTasks.js";
+import { hashForCacheKey } from "../ai/aiResponseCache.js";
 import { checkProseGrounding, checkCveExploitationClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim } from "./groundClaims.js";
 
 function norm(v) {
@@ -155,7 +157,12 @@ export async function generateCorrelationSummary(result) {
   };
   const userPrompt = `UNIFIED INVESTIGATION RESULT (verified by this platform, not model-generated):\n${JSON.stringify(context, null, 2)}\n\nProduce the JSON correlation summary described in your instructions.`;
 
-  const response = await aiRouter.summarizeJson(userPrompt, { systemPrompt: SYSTEM_PROMPT, temperature: 0.3 });
+  const response = await aiRouter.summarizeJson(userPrompt, {
+    systemPrompt: SYSTEM_PROMPT,
+    temperature: 0.3,
+    task: AI_TASK.CORRELATION,
+    cacheKey: `correlation-summary:${hashForCacheKey(context)}`,
+  });
   const parsed = parseModelReport(response.summary);
   if (!parsed) throw new Error("AI Correlation Summary: model response was not valid JSON");
 

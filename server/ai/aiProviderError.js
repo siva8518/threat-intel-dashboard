@@ -7,7 +7,7 @@
 import { ApiError } from "../lib/http.js";
 
 /**
- * @typedef {"rate_limited"|"quota_exceeded"|"timeout"|"server_error"|"network_error"|"not_configured"|"other"} AIProviderFailureReason
+ * @typedef {"rate_limited"|"quota_exceeded"|"timeout"|"server_error"|"network_error"|"auth_error"|"not_configured"|"other"} AIProviderFailureReason
  */
 
 export class AIProviderUnavailableError extends Error {
@@ -15,16 +15,19 @@ export class AIProviderUnavailableError extends Error {
    * @param {string} providerLabel
    * @param {AIProviderFailureReason} reason
    * @param {string} detail
+   * @param {number} [retryAfterMs] - from the upstream response's Retry-After header, when present (see server/lib/http.js#parseRetryAfterMs)
    */
-  constructor(providerLabel, reason, detail) {
+  constructor(providerLabel, reason, detail, retryAfterMs) {
     super(`${providerLabel} unavailable (${reason}): ${detail}`);
     this.name = "AIProviderUnavailableError";
     this.providerLabel = providerLabel;
     this.reason = reason;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
 const RETRYABLE_SERVER_STATUSES = new Set([500, 502, 503]);
+const AUTH_STATUSES = new Set([401, 403]);
 const QUOTA_PATTERN = /quota|resource_exhausted|insufficient_quota/i;
 const RATE_LIMIT_PATTERN = /rate.?limit/i;
 const TIMEOUT_PATTERN = /timed out/i;
@@ -47,7 +50,14 @@ export function classifyProviderError(providerLabel, error) {
 
   if (error instanceof ApiError) {
     if (error.status === 429 || RATE_LIMIT_PATTERN.test(message)) {
-      return new AIProviderUnavailableError(providerLabel, "rate_limited", message);
+      return new AIProviderUnavailableError(providerLabel, "rate_limited", message, error.retryAfterMs);
+    }
+    // 401/403 -- a bad/expired key or missing permission. This never
+    // self-resolves by waiting, unlike every other reason here, so
+    // aiRouter.js's retry policy must never retry it and providerHealth.js
+    // must cool it down far longer than a transient failure.
+    if (AUTH_STATUSES.has(error.status)) {
+      return new AIProviderUnavailableError(providerLabel, "auth_error", message);
     }
     if (error.status === undefined && TIMEOUT_PATTERN.test(message)) {
       return new AIProviderUnavailableError(providerLabel, "timeout", message);

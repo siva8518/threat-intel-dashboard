@@ -469,51 +469,70 @@ intel, executive leadership).
 - Generation speed is Groq's hosted inference (typically seconds per report, not minutes) rather than
   whatever this machine's own CPU/GPU can do locally.
 
-## AI Router (multi-provider failover)
+## AI Router (multi-provider failover, circuit breaker, task-aware routing)
 
 `server/ai/` is a generic, provider-agnostic AI router with two entry points: `summarize(prompt, opts)` (plain
-text) and `summarizeJson(prompt, { systemPrompt, temperature, tier })` (each provider's native JSON-object
-response mode, plus an optional separate system message). Every LLM caller in this app is wired through one
-of these two — `server/aiThreatSummary.js`, `server/industryBriefing.js`, `server/detectionRuleDraft.js`, and
-`server/combinedExtraction.js` all used to call the old `server/groqClient.js` directly (Groq only, since
-deleted); now every one of them gets the same Gemini → Mistral → Groq → Cohere failover, instead of going
-fully dark whenever Groq's free tier is exhausted. `server/combinedExtraction.js` is the one caller that
-passes `{ tier: "fast" }` — see the next bullet.
+text) and `summarizeJson(prompt, { systemPrompt, temperature, tier, task, cacheKey, minContextWindow })` (each
+provider's native JSON-object response mode, plus an optional separate system message). Every LLM caller in
+this app is wired through one of these two — none of them ever call a provider's API directly.
 
 ```js
 import { aiRouter } from "./server/ai/aiRouter.js";
 
-const result = await aiRouter.summarize(prompt);
-// { provider: "Groq", model: "llama-3.3-70b-versatile", summary: "...", latency: 612, success: true }
+const result = await aiRouter.summarize(prompt, { task: "SUMMARY" });
+// { provider: "Groq", model: "llama-3.1-8b-instant", summary: "...", latency: 612, success: true }
 ```
 
-- Tries **Gemini 2.5 Flash → Mistral Small → Groq Llama 3.3 70B → Cohere Command R**, in that
-  order. Every provider is optional — one with no API key set is skipped (not treated as a failure).
-- A provider that errors (rate limit, quota, timeout, 5xx, network error, or anything else) is retried
-  once with exponential backoff (`server/lib/retry.js`), then the router fails over to the next provider.
-  Only throws `AllProvidersFailedError` once every configured provider has actually been attempted.
+**This is AI-ASSISTED, not AI-DEPENDENT**: every verdict, evidence item, source-conflict assessment, and
+relationship this platform shows is computed deterministically (`server/investigation/evidence.js`,
+`verdictEngine.js`, `investigationGraph.js`) *before* any of this is ever called — the AI layer only
+interprets/narrates over that real data, and never overrides it (enforced in code, not just prompts, by
+`server/investigation/groundClaims.js`). If every provider below is down, the Investigation Workspace still
+renders the full deterministic verdict, evidence roster, and relationship graph; only the AI narrative panels
+show a plain "AI narrative unavailable" note in their place.
+
+- **Provider chain** (all optional — an unset key is skipped, not treated as a failure): **Gemini → Cerebras →
+  Groq → OpenRouter → Mistral → Hugging Face → Cohere → Together AI → Cloudflare Workers AI → GitHub Models**.
+  OpenRouter is a model *router*, not one fixed model — `OPENROUTER_MODEL` picks which upstream model it
+  forwards to. Override the order with `AI_PROVIDER_ORDER` (comma-separated provider keys) — see
+  `.env.example`.
 - `server/ai/providers/*.js` each implement the same shape — `{ label, model, isConfigured(), summarize(prompt), summarizeJson(prompt, opts) }`
-  — via plain `fetch` against each vendor's REST API (`server/lib/http.js`, the same foundation every
-  other client in this app uses), no vendor SDKs. Adding a 5th provider is a two-file change: one new
-  `providers/*.js` file, one line in `server/ai/aiRouter.js`'s `PROVIDERS` array.
-- `server/ai/config.js` centralizes every provider's env var name and default model in one place.
-- Every provider also has a `fastModel` (Gemini Flash-Lite, Ministral 8B, Groq Llama 3.1 8B Instant, Cohere
-  Command R7B) alongside its normal `model`. Passing `{ tier: "fast" }` to either entry point requests that
-  smaller/cheaper tier instead — `server/combinedExtraction.js` is the one caller that opts in, since it runs
-  continuously against dozens of articles per cycle on a lightweight six-category extraction and needs
-  throughput more than the default model's extra quality. Every other caller omits `tier` and behaves exactly
-  as before this existed.
-- Run `npm run ai:example` for a live end-to-end demo of `summarize()`. All four providers are verified
-  live on both entry points, each one's actual response parsing confirmed against a real successful call
-  (plain text and JSON mode), and each confirmed to correctly win the router when it's next in priority
-  order (forcing the ones ahead of it to fail). `summarizeJson()` was additionally verified against a real
-  full AI Summarization report generation (16,956-token completion) — this surfaced a real timeout bug
-  (providers defaulted to a 30s request timeout, too short for this app's heaviest LLM call; fixed to 60s).
-- Two model defaults needed correcting from their originally-documented names because the vendor retired
-  them: Gemini's pinned `gemini-2.5-flash` 404s for newer API keys (now defaults to `gemini-flash-latest`,
-  Google's maintained alias), and Cohere's undated `command-r` was retired entirely (now defaults to
+  — via plain `fetch` against each vendor's REST API (`server/lib/http.js`, the same foundation every other
+  client in this app uses), no vendor SDKs. Cloudflare Workers AI is the one exception with its own
+  request/response envelope and a 2nd credential (account ID). Adding an 11th provider is a two-file change:
+  one new `providers/*.js` file, one entry in `server/ai/aiRouter.js`'s `PROVIDER_DEFS` array.
+- **Circuit breaker** (`server/ai/providerHealth.js`): a provider that fails is put into a cooldown before
+  the router will try it again — duration depends on the failure reason (short for a timeout/5xx, the
+  upstream's own `Retry-After` header when a 429 sends one, much longer for a quota exhaustion or an
+  auth failure, since neither self-resolves by waiting a few seconds), escalating on repeated back-to-back
+  failures. A provider currently cooling down is skipped instantly, with zero network call.
+- **Retry policy**: only genuinely transient reasons (timeout, 5xx, network error) get one same-provider
+  retry with jittered exponential backoff (`server/lib/retry.js`); rate limits go straight to the circuit
+  breaker instead of a fast retry, and auth/quota failures never retry at all — matches
+  `server/ai/aiProviderError.js`'s classification (`rate_limited | quota_exceeded | timeout | server_error |
+  network_error | auth_error | other`).
+- **Task-aware routing** (`server/ai/aiTasks.js`): every call site passes a `task` label (`SUMMARY`,
+  `CORRELATION`, `INVESTIGATION`, `INDUSTRY_INTELLIGENCE`, `DETECTION_ENGINEERING`, `SOC_ASSISTANT`, etc.) used
+  for telemetry and, absent an explicit `tier`, a sensible fast/default fallback. `minContextWindow` (used by
+  `server/aiThreatSummary.js`'s 16,000+ token structured report) skips any provider whose configured context
+  window (`server/ai/config.js`) can't fit the call.
+- **Response caching** (`server/ai/aiResponseCache.js`): opt-in via `{cacheKey}` — the 3 highest-value,
+  most-likely-to-repeat callers (Should I Care?, AI Correlation Summary, the AI Investigation Report) key their
+  cache entry off a hash of their own evidence payload, so re-opening the same investigation within the TTL
+  window doesn't re-spend AI credits generating an identical narrative over identical evidence.
+- **Telemetry** (`server/ai/aiRequestLog.js`): every attempt (success or failure) is recorded — provider,
+  model, task, latency, token usage, error reason, whether it was a fallback or a cache hit — never prompts,
+  responses, or API keys. Rolled up per-provider and per-task at `GET /api/dashboard/ai-usage`.
+- **Live status**: `GET /api/dashboard/ai-provider-health` (rendered as the AI Provider Health panel in the
+  Sources tab, next to Feed Health) shows each provider's configured/cooldown/success-rate/latency state in
+  real time — the same admin/developer surface as Feed Health, not surfaced in the analyst-facing
+  Investigation Workspace.
+- Run `npm run ai:example` for a live end-to-end demo of `summarize()`.
+- A couple of model defaults have needed correcting over time because the vendor retired them: Gemini's
+  pinned `gemini-2.5-flash` 404s for newer API keys (now defaults to `gemini-flash-latest`, Google's
+  maintained alias), and Cohere's undated `command-r` was retired entirely (now defaults to
   `command-r-08-2024`, the last live dated snapshot — Cohere has no `-latest` equivalent, so this one will
-  need bumping by hand again eventually).
+  need bumping by hand again eventually). Every provider's model is env-overridable for exactly this reason.
 
 ## Environment variables
 

@@ -19,6 +19,7 @@ import { AttackTacticHeatmap } from "@/components/dashboard/AttackTacticHeatmap"
 import { ThreatActorsHub } from "@/components/dashboard/ThreatActorsHub";
 import { SecurityNews } from "@/components/dashboard/SecurityNews";
 import { SourcesHealthPanel } from "@/components/dashboard/SourcesHealthPanel";
+import { AiProviderHealthPanel } from "@/components/dashboard/AiProviderHealthPanel";
 import { McpServerPanel } from "@/components/dashboard/McpServerPanel";
 import { GithubIntel } from "@/components/dashboard/GithubIntel";
 import { Chatbot } from "@/components/dashboard/Chatbot";
@@ -244,6 +245,7 @@ export function DashboardPage() {
       {activeTab === "sources" && (
         <>
           <SourcesHealthPanel />
+          <AiProviderHealthPanel />
           <McpServerPanel />
         </>
       )}
