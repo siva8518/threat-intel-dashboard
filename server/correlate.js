@@ -1,11 +1,29 @@
 import malwareAttackMap from "./data/malware-attack-map.json" with { type: "json" };
-import industryMap from "./data/industry-map.json" with { type: "json" };
 import countryCodes from "./data/country-codes.json" with { type: "json" };
 import { splitFamilies } from "./correlationEngine.js";
+import { matchIndustries as classifyIndustryText } from "./industryClassification.js";
 
 const TRENDING_MALWARE_LIMIT = 15;
 const ATTACK_TECHNIQUES_LIMIT = 15;
 const HEATMAP_INDUSTRIES = ["LSHC", "TMT", "FSI", "Consumer"];
+// This widget deliberately keeps its original coarse 4-bucket display
+// (a wider grid doesn't fit the homepage layout) -- but the DATA now comes
+// from the unified 21-industry engine (server/industryClassification.js)
+// instead of a separate, duplicate 4-bucket keyword map, so it benefits
+// from the same accuracy fixes (technology signal, explicit-targeting
+// phrase coverage) as every other industry-facing feature. Any of the 21
+// catalog industries not listed here rolls up to "Other".
+const LEGACY_BUCKET_ROLLUP = {
+  Healthcare: "LSHC",
+  Pharmaceuticals: "LSHC",
+  Technology: "TMT",
+  Telecommunications: "TMT",
+  "Media & Entertainment": "TMT",
+  "Financial Services": "FSI",
+  Insurance: "FSI",
+  Retail: "Consumer",
+  Hospitality: "Consumer",
+};
 const HEATMAP_TOP_ACTORS = 10;
 const GEO_TOP_ACTORS_PER_COUNTRY = 3;
 
@@ -373,16 +391,18 @@ export function mergeThreatActors(ransomwareCampaigns, otxActorSignals, newsActo
 }
 
 /**
- * Case-insensitive substring match against the curated sector->industry-bucket
- * seed map. Exported so routes/dashboard.js can tag each ransomware campaign
- * with its bucket for client-side industry filtering (see the Executive
- * Threat Summary's "Industries Targeted" click-through).
+ * Classifies a ransomware-tracker sector label (e.g. "Healthcare",
+ * "Finance") via the unified industry engine, then rolls the real
+ * 21-industry result up to this widget's coarse 4-bucket display. Exported
+ * so routes/dashboard.js can tag each ransomware campaign with its bucket
+ * for client-side industry filtering (see the Executive Threat Summary's
+ * "Industries Targeted" click-through).
  */
 export function industryForSector(sector) {
   if (!sector) return "Other";
-  const lower = sector.toLowerCase();
-  for (const bucket of HEATMAP_INDUSTRIES) {
-    if ((industryMap[bucket] ?? []).some((keyword) => lower.includes(keyword))) return bucket;
+  for (const industry of classifyIndustryText(sector)) {
+    const bucket = LEGACY_BUCKET_ROLLUP[industry];
+    if (bucket) return bucket;
   }
   return "Other";
 }

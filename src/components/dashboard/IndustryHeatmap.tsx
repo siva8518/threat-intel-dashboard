@@ -19,6 +19,13 @@ export const INDUSTRY_EMOJI: Record<IndustryName, string> = {
   Hospitality: "🏨",
   Insurance: "📄",
   Pharmaceuticals: "💊",
+  "Professional Services": "💼",
+  "Defense & Aerospace": "🛡",
+  Automotive: "🚗",
+  "Real Estate": "🏢",
+  Construction: "🏗",
+  Agriculture: "🌾",
+  "Cross-Industry / Enterprise": "🏢",
 };
 
 const RELEVANCE_BADGE_VARIANT: Record<IndustryRelevanceLevel, "critical" | "high" | "medium" | "low" | "muted"> = {

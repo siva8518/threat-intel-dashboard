@@ -17,7 +17,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { matchCveIds, matchIndustries, matchCountries } from "./newsCorrelation.js";
+import { matchCveIds, matchCountries } from "./newsCorrelation.js";
+import { taggingIndustries as matchIndustries } from "./industryClassification.js";
 import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
 import { getAllEntities as getActorEntities } from "./threatActorIntelligence.js";
 
@@ -160,6 +161,27 @@ export function getAllEntities() {
     if (a.verified !== b.verified) return a.verified ? -1 : 1;
     return new Date(b.lastSeen) - new Date(a.lastSeen);
   });
+}
+
+/**
+ * One-time (per taxonomy change) recompute of every stored entity's
+ * `targetedIndustries` -- this store never persisted per-article industry
+ * annotations (unlike threatActorIntelligence.js/campaignIntelligence.js),
+ * so the only way to replace stale values from a retired taxonomy/matcher
+ * is to re-run the current engine against each entity's own stored article
+ * titles (title-only -- summaries were never persisted on stored article
+ * records here either) and rebuild the field from scratch, same "own real
+ * grounding text, never invented" principle as the entity-store backfills.
+ */
+export function backfillIndustryClassification() {
+  let updated = 0;
+  for (const entity of state.entities) {
+    const text = entity.articles.map((a) => a.title).join(" ");
+    entity.targetedIndustries = matchIndustries(text);
+    updated++;
+  }
+  if (updated > 0) persist();
+  return updated;
 }
 
 export function saveAfterMentions() {

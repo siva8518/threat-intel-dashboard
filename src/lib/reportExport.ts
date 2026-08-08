@@ -241,7 +241,9 @@ function buildReportBodyHtml(report: AiThreatSummaryReport): string {
     if (flagged.length === 0) {
       parts.push(paragraph("Affected Industries: Not specifically identified by the vendor."));
     } else {
-      const rows = flagged.map((r) => `<li><strong>${esc(r.relevance)}</strong> -- ${esc(r.industry)}</li>`).join("");
+      const rows = flagged
+        .map((r) => `<li><strong>${esc(r.relevance)}</strong> -- ${esc(r.industry)}${r.relevanceBasis === "TECHNOLOGY" ? " (technology-relevant, not explicitly targeted)" : ""}</li>`)
+        .join("");
       parts.push(`<ul>${rows}</ul>`);
     }
   }

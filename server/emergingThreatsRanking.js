@@ -19,7 +19,7 @@
 // to avoid any confusion between the two -- this module never touches that
 // connector or its cache entry.
 import { INDUSTRY_CATALOG } from "./aiThreatSummary.js";
-import industryKeywords from "./data/industry-map-14.json" with { type: "json" };
+import { taggingIndustries } from "./industryClassification.js";
 
 const WEIGHTS = { risk: 0.35, kev: 0.15, namedThreat: 0.15, industryRisk: 0.2, recency: 0.15 };
 const RECENCY_FULL_WINDOW_MS = 24 * 60 * 60 * 1000; // full recency credit for anything published in the last 24h
@@ -236,27 +236,19 @@ const RELEVANCE_RANK = { Critical: 4, High: 3, Medium: 2, Low: 1, "Not Applicabl
 const SEVERITY_TO_RELEVANCE = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
 const RELEVANCE_TO_PRIORITY = { Critical: "Immediate", High: "High", Medium: "Normal", Low: "Low" };
 
-// Leading-word-boundary regex per keyword, not a plain substring match -- a
-// plain `.includes("factory")` matched inside "Artifactory" (JFrog's
-// product), misfiling unrelated DevOps stories as Manufacturing. Only the
-// *start* of the keyword is boundary-anchored (not the end), so this still
-// catches plurals/possessives the old substring match relied on ("telecom"
-// still matches inside "telecommunications") while refusing to match a
-// keyword embedded mid-word like "factory" inside "artifactory".
-const INDUSTRY_KEYWORD_PATTERNS = Object.entries(industryKeywords)
-  .filter(([industry]) => !industry.startsWith("_"))
-  .map(([industry, keywords]) => [
-    industry,
-    keywords.map((k) => new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")),
-  ]);
-
-/** Case-insensitive, leading-word-boundary match against a title -- see server/data/industry-map-14.json. Same "curated list, not NLP" convention as matchIndustries() in server/newsCorrelation.js (a distinct, older 4-bucket function of the same name for a different widget), just scoped to this feature's own 14-sector taxonomy. Exported for reuse by server/industryBriefing.js so it doesn't duplicate the keyword-map loading/matching logic. */
-export function matchIndustries(title) {
-  const hits = [];
-  for (const [industry, patterns] of INDUSTRY_KEYWORD_PATTERNS) {
-    if (patterns.some((re) => re.test(title))) hits.push(industry);
-  }
-  return hits;
+/**
+ * Industry relevance for one article -- re-exports server/industryClassification.js's
+ * unified engine (explicit-targeting text match UNION technology/vendor
+ * relevance against the full title+summary, not title-only) so this file's
+ * many internal callers (computeAggregateIndustryHeatmap, the ranked feed
+ * below) and server/industryBriefing.js (which reuses this same export)
+ * don't each need their own import. Formerly a second, independent 14-sector
+ * implementation duplicating server/newsCorrelation.js's own (differently
+ * scoped, differently tiered) matchIndustries() -- both now delegate to the
+ * one engine.
+ */
+export function matchIndustries(title, summary) {
+  return taggingIndustries(summary ? `${title} ${summary}` : title);
 }
 
 /**

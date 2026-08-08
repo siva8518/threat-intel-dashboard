@@ -29,6 +29,7 @@ import { getAllEntities as getDarkWebEntities } from "../darkWebIntelligence.js"
 import { ransomwareCampaigns as getRansomwareCampaigns } from "../ransomwareCampaigns.js";
 import { getAllReports as getAiReports, getReportById } from "../aiThreatSummaryStore.js";
 import { buildCveProfile } from "../cveProfile.js";
+import { matchVendorProductIndustries, classifyIndustryRelevance, INDUSTRY_TIER, INDUSTRY_TIER_RANK } from "../industryClassification.js";
 import { getAllGithubRepos } from "../githubIntel/index.js";
 import { crossReferenceIndicator } from "./crossReference.js";
 import { resolveDnsRecords, reverseDns } from "../lib/dnsRecords.js";
@@ -145,6 +146,18 @@ const RELATIONSHIP_SEMANTICS = {
   "targets victims here": semantics("algorithmic-guess"),
   "targets industry": semantics("algorithmic-guess"),
   "targeted by": semantics("algorithmic-guess"),
+  "technology relevant to industry": semantics("algorithmic-guess", {
+    guardrailNote: "This CVE's affected vendor/product is commonly used in this industry -- does not by itself establish that this specific industry was targeted or exploited.",
+  }),
+  "potentially exposes industry": semantics("algorithmic-guess", {
+    guardrailNote: "This CVE's affected vendor/product is broadly used across many sectors, including this one -- a much weaker signal than targeting, shown only as possible exposure.",
+  }),
+  "technology relevant to": semantics("algorithmic-guess", {
+    guardrailNote: "This entity's own coverage mentions a product/vendor commonly used in this industry -- does not by itself establish that this industry was targeted.",
+  }),
+  "potentially exposes": semantics("algorithmic-guess", {
+    guardrailNote: "This entity's own coverage mentions a product/vendor broadly used across many sectors, including this one -- a much weaker signal than targeting.",
+  }),
 };
 function semanticsFor(relationship) {
   return RELATIONSHIP_SEMANTICS[relationship] ?? DEFAULT_SEMANTICS;
@@ -379,6 +392,33 @@ function valueRecencyMap(articles, field) {
   return map;
 }
 
+// Per-industry strongest tier across an entity's whole article history --
+// entity.targetedIndustries itself is stored as a flat, tier-less name list
+// (see threatActorIntelligence.js/campaignIntelligence.js's upsertMention),
+// so this re-derives DIRECT vs TECHNOLOGY_RELEVANT vs POTENTIALLY_EXPOSED
+// per value the same way valueRecencyMap re-derives lastSeen: by scanning
+// each contributing article's own title through the classification engine
+// again and keeping the strongest tier seen. This is what makes a "targets
+// industry" edge (explicit text) visibly different from a "technology
+// relevant to industry" edge (a product/vendor mention only) instead of
+// both collapsing into one flat relationship label.
+function industryTierMap(articles) {
+  const map = new Map();
+  for (const a of articles ?? []) {
+    for (const hit of classifyIndustryRelevance(a.title)) {
+      const existing = map.get(hit.industry);
+      if (!existing || INDUSTRY_TIER_RANK[hit.tier] > INDUSTRY_TIER_RANK[existing]) map.set(hit.industry, hit.tier);
+    }
+  }
+  return map;
+}
+
+function industryEdgeRelationship(tier) {
+  if (tier === INDUSTRY_TIER.DIRECT) return "targets industry";
+  if (tier === INDUSTRY_TIER.TECHNOLOGY_RELEVANT) return "technology relevant to industry";
+  return "potentially exposes industry";
+}
+
 // --- Actor ---------------------------------------------------------------
 
 function gatherActor(key) {
@@ -397,8 +437,13 @@ function gatherActor(key) {
     if (entity.country) edges.push(edge("country", entity.country, entity.country, "originates from", "Direct: actor.country (ATT&CK)"));
     const industryRecency = valueRecencyMap(entity.articles, "industries");
     const countryRecency = valueRecencyMap(entity.articles, "countries");
+    const industryTiers = industryTierMap(entity.articles);
     for (const c of entity.targetedCountries) edges.push(edge("country", c, c, "targets victims in", "Indirect: actor.targetedCountries (news text match)", { lastSeen: countryRecency.get(c) ?? null }));
-    for (const i of entity.targetedIndustries ?? []) edges.push(edge("industry", i, i, "targets industry", "Indirect: actor.targetedIndustries (news text match)", { lastSeen: industryRecency.get(i) ?? null }));
+    for (const i of entity.targetedIndustries ?? []) {
+      const tier = industryTiers.get(i) ?? INDUSTRY_TIER.DIRECT;
+      const basis = tier === INDUSTRY_TIER.DIRECT ? "Indirect: actor.targetedIndustries (explicit news text match)" : "Indirect: actor.targetedIndustries (technology/vendor signal, not an explicit sector claim)";
+      edges.push(edge("industry", i, i, industryEdgeRelationship(tier), basis, { lastSeen: industryRecency.get(i) ?? null }));
+    }
     attackTechniques = attackTechniqueSummaries(entity.techniqueIds, cache.getEntry("attack").data?.techniques ?? []);
 
     for (const c of getCampaignEntities()) {
@@ -454,8 +499,13 @@ function gatherCampaign(key) {
     for (const id of entity.cveExploited) edges.push(edge("cve", id, id, "exploits", "Direct: campaign.cveExploited"));
     const industryRecency = valueRecencyMap(entity.articles, "industries");
     const countryRecency = valueRecencyMap(entity.articles, "countries");
+    const industryTiers = industryTierMap(entity.articles);
     for (const c of entity.targetedCountries) edges.push(edge("country", c, c, "targets victims in", "Indirect: campaign.targetedCountries (news text match)", { lastSeen: countryRecency.get(c) ?? null }));
-    for (const i of entity.targetedIndustries ?? []) edges.push(edge("industry", i, i, "targets industry", "Indirect: campaign.targetedIndustries (news text match)", { lastSeen: industryRecency.get(i) ?? null }));
+    for (const i of entity.targetedIndustries ?? []) {
+      const tier = industryTiers.get(i) ?? INDUSTRY_TIER.DIRECT;
+      const basis = tier === INDUSTRY_TIER.DIRECT ? "Indirect: campaign.targetedIndustries (explicit news text match)" : "Indirect: campaign.targetedIndustries (technology/vendor signal, not an explicit sector claim)";
+      edges.push(edge("industry", i, i, industryEdgeRelationship(tier), basis, { lastSeen: industryRecency.get(i) ?? null }));
+    }
 
     for (const r of getRansomwareCampaigns()) {
       if (actorNames.has(norm(r.group))) edges.push(edge("victim", r.victim, r.victim, "breached victim", "Indirect: via a shared actor in campaign.associatedActors", { firstSeen: r.discoveredDate, lastSeen: r.discoveredDate }));
@@ -549,10 +599,33 @@ function gatherCve(key) {
     exploitIndex: cache.getEntry("exploitdb").data?.cveIndex,
   });
 
+  // AFFECTED TECHNOLOGY -> INDUSTRY signal (see server/industryClassification.js):
+  // this CVE's own vendor/product (already parsed by the NVD connector, see
+  // server/lib/cpe.js) mapped through the same technology-category engine
+  // every other industry-facing feature uses -- this is what lets a CVE
+  // surface industry relevance without any source ever naming a sector
+  // explicitly (the literal "Atlassian Rovo" gap this engine was built to
+  // close). Looked up from the cached last-30-days NVD pool only (no live
+  // fetch inside graph gathering) -- a CVE outside that window simply gets
+  // no technology-derived industry edge, same "don't fabricate what isn't
+  // cached" discipline as the rest of this function.
+  const nvdRecord = (cache.getEntry("nvd").data?.latestCves?.records ?? []).find((r) => norm(r.id) === norm(cveId));
+  const industryHits =
+    nvdRecord && nvdRecord.vendor !== "Unknown" ? matchVendorProductIndustries(nvdRecord.vendor, nvdRecord.product) : [];
+
   const edges = [
     ...profile.relatedActors.map((a) => edge("actor", a.name, a.name, "exploits this CVE", "Reverse: ATT&CK citation (group.cveIds / citing campaign / citing software)")),
     ...profile.relatedMalware.map((name) => edge("malware", name, name, "exploits this CVE", "Reverse: ATT&CK citation (software.cveIds)")),
     ...profile.relatedCampaigns.map((c) => edge("campaign", c.name, c.name, "exploits this CVE", "Reverse: ATT&CK citation (campaign.cveIds)")),
+    ...industryHits.map((hit) =>
+      edge(
+        "industry",
+        hit.industry,
+        hit.industry,
+        hit.tier === INDUSTRY_TIER.TECHNOLOGY_RELEVANT ? "technology relevant to industry" : "potentially exposes industry",
+        `Indirect: ${nvdRecord.vendor} ${nvdRecord.product} (${hit.category}) -- affected technology, not a source-confirmed sector target`,
+      ),
+    ),
   ];
   for (const ioc of profile.relatedIocs) {
     if (ioc.indicatorType === "ip" || ioc.indicatorType === "domain") {
@@ -804,14 +877,26 @@ function gatherCountry(key) {
 // real edge anywhere (only sat in campaign node metadata, dead for actor
 // nodes). Same "Indirect: news text match" provenance as targetedCountries.
 
+function industryReverseRelationship(tier) {
+  if (tier === INDUSTRY_TIER.DIRECT) return "targeted by";
+  if (tier === INDUSTRY_TIER.TECHNOLOGY_RELEVANT) return "technology relevant to";
+  return "potentially exposes";
+}
+
 function gatherIndustry(key) {
   const target = norm(key);
   const edges = [];
   for (const a of getActorEntities()) {
-    if ((a.targetedIndustries ?? []).some((i) => norm(i) === target)) edges.push(edge("actor", a.name, a.name, "targeted by", "Indirect: actor.targetedIndustries (news text match)"));
+    const matched = (a.targetedIndustries ?? []).find((i) => norm(i) === target);
+    if (!matched) continue;
+    const tier = industryTierMap(a.articles).get(matched) ?? INDUSTRY_TIER.DIRECT;
+    edges.push(edge("actor", a.name, a.name, industryReverseRelationship(tier), "Indirect: actor.targetedIndustries (news text match)"));
   }
   for (const c of getCampaignEntities()) {
-    if ((c.targetedIndustries ?? []).some((i) => norm(i) === target)) edges.push(edge("campaign", c.name, c.name, "targeted by", "Indirect: campaign.targetedIndustries (news text match)"));
+    const matched = (c.targetedIndustries ?? []).find((i) => norm(i) === target);
+    if (!matched) continue;
+    const tier = industryTierMap(c.articles).get(matched) ?? INDUSTRY_TIER.DIRECT;
+    edges.push(edge("campaign", c.name, c.name, industryReverseRelationship(tier), "Indirect: campaign.targetedIndustries (news text match)"));
   }
 
   return {

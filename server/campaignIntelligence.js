@@ -16,7 +16,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { matchCveIds, matchIndustries, matchCountries } from "./newsCorrelation.js";
+import { matchCveIds, matchCountries } from "./newsCorrelation.js";
+import { taggingIndustries as matchIndustries } from "./industryClassification.js";
 import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
 import { getAllEntities as getActorEntities } from "./threatActorIntelligence.js";
 import { withinDays } from "./lib/dateWindow.js";
@@ -225,6 +226,27 @@ export function backfillArticleRecency() {
       a.cves = matchCveIds(a.title);
       updated++;
     }
+  }
+  if (updated > 0) persist();
+  return updated;
+}
+
+/**
+ * One-time (per taxonomy change) unconditional recompute of every stored
+ * article's `industries` field -- see threatActorIntelligence.js's own
+ * backfillIndustryClassification for the full rationale (same pattern,
+ * mirrored here). countries/cves are untouched.
+ */
+export function backfillIndustryClassification() {
+  let updated = 0;
+  for (const entity of state.entities) {
+    const rebuilt = new Set();
+    for (const a of entity.articles) {
+      a.industries = matchIndustries(a.title);
+      for (const i of a.industries) rebuilt.add(i);
+      updated++;
+    }
+    entity.targetedIndustries = [...rebuilt];
   }
   if (updated > 0) persist();
   return updated;

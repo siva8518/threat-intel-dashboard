@@ -340,6 +340,13 @@ export function IndustryIntelligence() {
               rows={ranking.data.industryHeatmap.map((row) => ({
                 ...row,
                 subtitle: row.activeThreatCount > 0 ? `(${row.activeThreatCount} active)` : undefined,
+                // AggregateIndustryHeatmapRow doesn't carry a tier from the
+                // server (it merges keyword + AI-report signals into one
+                // relevance score, not per-signal basis) -- default to
+                // EXPLICIT for any applicable row rather than leaving this
+                // required field unset; a real per-row basis would need a
+                // server-side change out of this component's scope.
+                relevanceBasis: row.relevance === "Not Applicable" ? "NONE" : "EXPLICIT",
               }))}
               onGenerateBriefing={selectIndustry}
             />

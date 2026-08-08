@@ -1,0 +1,110 @@
+{
+  "_comment": "Vendor/product -> technology-category -> industries taxonomy. This is the signal that catches intelligence like 'Critical vulnerability in Atlassian's Rovo AI' without the source ever saying 'Technology sector' -- see server/industryClassification.js#matchTechnologyIndustries/matchVendorProductIndustries. The MECHANISM (category -> industries) is the reusable part; the vendor list below is deliberately extensible seed data, same 'curated list, not NLP, extend via this file' convention as industry-map-21.json. `specificity: narrow` categories are used by a specific, identifiable set of industries (a category-match there produces tier TECHNOLOGY_RELEVANT); `specificity: broad` categories are used by essentially any organization regardless of sector (a category-match there produces the weaker tier POTENTIALLY_EXPOSED against every industry in its `industries` list -- deliberately not 'all 21', see each category's own `industries`). Vendor/product keywords are matched case-insensitively as whole-word/leading-boundary substrings against free text (article title+summary) OR checked directly against a CVE's own vendor/product fields (server/lib/cpe.js's already-parsed CPE vendor/product) -- see matchVendorProductIndustries for the latter, which never needs the free-text regex at all.",
+  "categories": {
+    "Enterprise Collaboration & SaaS": {
+      "specificity": "broad",
+      "industries": ["Cross-Industry / Enterprise", "Technology", "Professional Services"],
+      "vendors": ["atlassian", "jira", "confluence", "rovo", "slack", "notion", "asana", "monday.com", "smartsheet", "servicenow", "microsoft teams", "sharepoint", "basecamp", "trello"]
+    },
+    "Enterprise Resource Planning (ERP)": {
+      "specificity": "narrow",
+      "industries": ["Manufacturing", "Retail", "Cross-Industry / Enterprise", "Professional Services"],
+      "vendors": ["sap", "oracle ebs", "oracle netsuite", "netsuite", "microsoft dynamics", "infor", "epicor", "sage erp", "ifs erp"]
+    },
+    "Electronic Health Records / Health IT": {
+      "specificity": "narrow",
+      "industries": ["Healthcare", "Pharmaceuticals"],
+      "vendors": ["epic systems", "cerner", "oracle health", "meditech", "allscripts", "athenahealth", "nextgen healthcare", "picture archiving", "pacs system"]
+    },
+    "Financial Messaging, Core Banking & Payments": {
+      "specificity": "narrow",
+      "industries": ["Financial Services", "Insurance"],
+      "vendors": ["swift network", "fiserv", "fis global", "temenos", "jack henry", "finastra", "visa network", "mastercard network", "ach network", "core banking platform", "plaid"]
+    },
+    "Industrial Control Systems / OT / SCADA": {
+      "specificity": "narrow",
+      "industries": ["Manufacturing", "Energy & Utilities", "Transportation & Logistics", "Construction"],
+      "vendors": ["siemens", "schneider electric", "rockwell automation", "honeywell", "ge digital", "abb ltd", "mitsubishi electric", "scada system", "programmable logic controller", "modbus protocol", "yokogawa"]
+    },
+    "Cloud Infrastructure (IaaS/PaaS)": {
+      "specificity": "broad",
+      "industries": ["Cross-Industry / Enterprise", "Technology"],
+      "vendors": ["amazon web services", "aws", "microsoft azure", "google cloud platform", "oracle cloud infrastructure", "digitalocean", "cloudflare workers", "ibm cloud"]
+    },
+    "Identity & Access Management": {
+      "specificity": "broad",
+      "industries": ["Cross-Industry / Enterprise"],
+      "vendors": ["okta", "ping identity", "microsoft entra", "azure active directory", "onelogin", "cyberark", "sailpoint", "forgerock", "duo security"]
+    },
+    "Network & Security Infrastructure": {
+      "specificity": "broad",
+      "industries": ["Cross-Industry / Enterprise"],
+      "vendors": ["cisco systems", "fortinet", "palo alto networks", "juniper networks", "check point software", "sonicwall", "citrix netscaler", "f5 networks", "ivanti", "pulse secure", "barracuda networks"]
+    },
+    "Endpoint & Device Management": {
+      "specificity": "broad",
+      "industries": ["Cross-Industry / Enterprise"],
+      "vendors": ["crowdstrike falcon", "sentinelone", "microsoft defender", "symantec endpoint", "mcafee endpoint", "trend micro", "microsoft intune", "jamf", "mobileiron"]
+    },
+    "Database & Data Platform": {
+      "specificity": "broad",
+      "industries": ["Cross-Industry / Enterprise", "Technology"],
+      "vendors": ["oracle database", "microsoft sql server", "mysql", "postgresql", "mongodb", "snowflake", "elasticsearch", "redis labs"]
+    },
+    "Customer Relationship Management (CRM)": {
+      "specificity": "narrow",
+      "industries": ["Retail", "Financial Services", "Cross-Industry / Enterprise", "Professional Services"],
+      "vendors": ["salesforce", "hubspot", "zoho crm", "microsoft dynamics crm"]
+    },
+    "HR & Payroll": {
+      "specificity": "broad",
+      "industries": ["Cross-Industry / Enterprise"],
+      "vendors": ["workday", "adp payroll", "successfactors", "bamboohr", "ultipro", "paycor"]
+    },
+    "E-commerce Platform": {
+      "specificity": "narrow",
+      "industries": ["Retail"],
+      "vendors": ["shopify", "magento", "woocommerce", "bigcommerce", "salesforce commerce cloud", "adobe commerce"]
+    },
+    "Point of Sale (POS)": {
+      "specificity": "narrow",
+      "industries": ["Retail", "Hospitality"],
+      "vendors": ["square pos", "toast pos", "clover pos", "verifone", "ncr voyix", "oracle micros"]
+    },
+    "Content Management & Web Platform": {
+      "specificity": "broad",
+      "industries": ["Media & Entertainment", "Cross-Industry / Enterprise"],
+      "vendors": ["wordpress", "drupal", "adobe experience manager", "sitecore", "contentful"]
+    },
+    "DevOps, CI/CD & Source Control": {
+      "specificity": "broad",
+      "industries": ["Technology", "Cross-Industry / Enterprise"],
+      "vendors": ["github", "gitlab", "jenkins ci", "bitbucket", "circleci", "docker", "kubernetes", "terraform", "harbor registry"]
+    },
+    "Communication & Email": {
+      "specificity": "broad",
+      "industries": ["Cross-Industry / Enterprise"],
+      "vendors": ["microsoft exchange", "outlook web access", "microsoft 365", "office 365", "google workspace", "zoom video", "cisco webex", "zimbra"]
+    },
+    "Education Technology / LMS": {
+      "specificity": "narrow",
+      "industries": ["Education"],
+      "vendors": ["blackboard learn", "canvas lms", "moodle", "powerschool", "instructure"]
+    },
+    "Insurance & Claims Platform": {
+      "specificity": "narrow",
+      "industries": ["Insurance"],
+      "vendors": ["guidewire", "duck creek technologies", "majesco"]
+    },
+    "Real Estate & Construction Management": {
+      "specificity": "narrow",
+      "industries": ["Real Estate", "Construction"],
+      "vendors": ["procore technologies", "yardi", "appfolio", "buildium", "autodesk construction cloud"]
+    },
+    "Airline / Transportation Reservation Systems": {
+      "specificity": "narrow",
+      "industries": ["Transportation & Logistics"],
+      "vendors": ["sabre corporation", "amadeus it group", "sap transportation management"]
+    }
+  }
+}

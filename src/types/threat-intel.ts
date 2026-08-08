@@ -1609,24 +1609,34 @@ export interface AiThreatSummaryOperationalImpactAssessment {
   attackerObjectives: string[];
 }
 
-/** Fixed 14-sector catalog -- see INDUSTRY_CATALOG in server/aiThreatSummary.js. Every report has all 14, most "Not Applicable"/"Low" by design; only genuinely-supported sectors are elevated. */
+/** Fixed 21-sector catalog -- see INDUSTRY_CATALOG in server/industryClassification.js (the single source of truth for this taxonomy, re-exported by server/aiThreatSummary.js for backward compatibility). Every report has all 21, most "Not Applicable"/"Low" by design; only genuinely-supported sectors are elevated. */
 export type IndustryName =
   | "Financial Services"
+  | "Insurance"
   | "Healthcare"
+  | "Pharmaceuticals"
   | "Government"
   | "Manufacturing"
   | "Retail"
   | "Technology"
   | "Telecommunications"
+  | "Media & Entertainment"
   | "Energy & Utilities"
   | "Education"
   | "Transportation & Logistics"
-  | "Media & Entertainment"
   | "Hospitality"
-  | "Insurance"
-  | "Pharmaceuticals";
+  | "Professional Services"
+  | "Defense & Aerospace"
+  | "Automotive"
+  | "Real Estate"
+  | "Construction"
+  | "Agriculture"
+  | "Cross-Industry / Enterprise";
 
 export type IndustryRelevanceLevel = "Critical" | "High" | "Medium" | "Low" | "Not Applicable";
+
+/** How an industryRelevance row's rating was actually grounded -- see server/industryClassification.js's INDUSTRY_TIER discipline, applied here to the AI Summarization report schema. EXPLICIT: the article itself names this sector/a victim in it. TECHNOLOGY: the rating rests only on this sector commonly running an affected product/vendor the article names, no explicit sector claim. NONE: relevance is "Not Applicable". Never treat TECHNOLOGY the same as EXPLICIT in UI copy -- "Technology-Relevant" is a materially weaker claim than "Targeted". */
+export type IndustryRelevanceBasis = "EXPLICIT" | "TECHNOLOGY" | "NONE";
 
 export interface AiThreatSummaryIndustryRelevance {
   industry: IndustryName;
@@ -1638,6 +1648,7 @@ export interface AiThreatSummaryIndustryRelevance {
   defensiveFocus: string[];
   riskScore: number;
   priority: "Immediate" | "High" | "Normal" | "Low";
+  relevanceBasis: IndustryRelevanceBasis;
 }
 
 /**
@@ -2016,8 +2027,8 @@ export interface IndustryBriefingThreat {
   sourceArticles: IndustryBriefingArticleRef[];
 }
 
-/** How this actor/malware/campaign was correlated to the industry -- see server/industryCorrelation.js. "direct": the entity's own real text/ransomware-victim data matches this industry. "cross-linked": linked to another directly-matched entity (shared malware/campaign). "historical": curated, widely-published sector affinity, only ever a real platform entity, used to fill remaining slots. */
-export type IndustryCorrelationTier = "direct" | "cross-linked" | "historical";
+/** How this actor/malware/campaign was correlated to the industry -- see server/industryCorrelation.js. "direct": the entity's own real text/ransomware-victim data EXPLICITLY names this industry. "technology": the entity's own text doesn't name the industry, but mentions a product/vendor this sector commonly runs (server/industryClassification.js's TECHNOLOGY_RELEVANT/POTENTIALLY_EXPOSED signal) -- a real, current signal, just a weaker claim than explicit targeting. "cross-linked": linked to another directly-matched entity (shared malware/campaign). "historical": curated, widely-published sector affinity, only ever a real platform entity, used to fill remaining slots. */
+export type IndustryCorrelationTier = "direct" | "technology" | "cross-linked" | "historical";
 
 export interface IndustryBriefingActor {
   actor: string;

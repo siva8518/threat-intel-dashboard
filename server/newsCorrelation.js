@@ -13,7 +13,7 @@
 // extractor to do better, and an occasional false tag is far less harmful
 // than silently tagging nothing.
 import countryNames from "./data/country-names.json" with { type: "json" };
-import industryMap from "./data/industry-map.json" with { type: "json" };
+import { taggingIndustries } from "./industryClassification.js";
 import { splitFamilies, getCommonAttackToolNames } from "./correlationEngine.js";
 
 const CVE_PATTERN = /CVE-\d{4}-\d{4,7}/gi;
@@ -81,10 +81,6 @@ const CRITICAL_VULN_PATTERN = /critical\b[^.]{0,25}\b(vulnerabilit\w*|flaw\w*|bu
 // unrelated words that happen to contain the letters ("Commerce", "source").
 const RCE_ACRONYM_PATTERN = /\brce\b/i;
 
-function norm(s) {
-  return (s ?? "").trim().toLowerCase();
-}
-
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -132,14 +128,18 @@ export function getNewsCveCounts(newsItems) {
   return counts;
 }
 
-export function matchIndustries(title) {
-  const lowerTitle = norm(title);
-  const hits = [];
-  for (const [bucket, keywords] of Object.entries(industryMap)) {
-    if (bucket.startsWith("_")) continue;
-    if (keywords.some((k) => lowerTitle.includes(k))) hits.push(bucket);
-  }
-  return hits;
+/**
+ * Industry relevance for one article -- delegates to
+ * server/industryClassification.js's unified engine (explicit-targeting
+ * text match UNION technology/vendor relevance), scanning title+summary so
+ * a report whose title never names a sector (e.g. "Critical Vulnerability
+ * in Atlassian's Rovo AI") can still surface via the technology it names in
+ * the body. Returns a flat, deduped industry-name list with no tier
+ * distinction -- callers that need the tier (DIRECT vs TECHNOLOGY_RELEVANT
+ * vs POTENTIALLY_EXPOSED) should call classifyIndustryRelevance directly.
+ */
+export function matchIndustries(title, summary) {
+  return taggingIndustries(summary ? `${title} ${summary}` : title);
 }
 
 export function matchCountries(title) {
@@ -182,7 +182,7 @@ export function tagNewsItems(newsItems, sources) {
     const cveIds = matchCveIds(`${item.title} ${item.summary ?? ""}`);
     const actors = matchNames(item.title, actorNames);
     const malware = matchNames(item.title, malwareNames);
-    const industries = matchIndustries(item.title);
+    const industries = matchIndustries(item.title, item.summary);
     const countries = matchCountries(item.title);
     const hasUrgentKeyword =
       URGENT_KEYWORDS.some((k) => item.title.toLowerCase().includes(k)) ||

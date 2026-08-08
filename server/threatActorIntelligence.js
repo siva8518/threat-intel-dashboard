@@ -13,7 +13,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { industryForSector } from "./correlate.js";
-import { matchCveIds, matchIndustries, matchCountries } from "./newsCorrelation.js";
+import { matchCveIds, matchCountries } from "./newsCorrelation.js";
+import { taggingIndustries as matchIndustries } from "./industryClassification.js";
 import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
 import { withinDays } from "./lib/dateWindow.js";
 
@@ -396,6 +397,38 @@ export function backfillArticleRecency() {
       a.cves = matchCveIds(a.title);
       updated++;
     }
+  }
+  if (updated > 0) persist();
+  return updated;
+}
+
+/**
+ * One-time (per taxonomy change) unconditional recompute of every stored
+ * article's `industries` field AND the entity's own all-time
+ * `targetedIndustries` -- unlike backfillArticleRecency above, this does
+ * NOT skip already-annotated entries, since the whole point is replacing
+ * stale values computed under a retired taxonomy/matcher with fresh ones
+ * from the current server/industryClassification.js engine (see
+ * scripts/backfillIndustryClassification.js, run once after that engine's
+ * technology-signal + 21-industry-catalog rework shipped).
+ * `targetedIndustries` is a monotonically-growing mergeUnique() field (see
+ * upsertMention above) -- it never shrinks or gets reprocessed on its own,
+ * so a stale 4-bucket-era value (e.g. "TMT") sits there forever unless
+ * explicitly rebuilt here from the now-fresh per-article data. Rebuilt as
+ * the union of every article's own (just-recomputed) industries, not
+ * re-derived from raw title text a second time. countries/cves are
+ * untouched -- only industries classification changed.
+ */
+export function backfillIndustryClassification() {
+  let updated = 0;
+  for (const entity of state.entities) {
+    const rebuilt = new Set();
+    for (const a of entity.articles) {
+      a.industries = matchIndustries(a.title);
+      for (const i of a.industries) rebuilt.add(i);
+      updated++;
+    }
+    entity.targetedIndustries = [...rebuilt];
   }
   if (updated > 0) persist();
   return updated;

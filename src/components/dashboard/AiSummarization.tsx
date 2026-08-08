@@ -669,6 +669,11 @@ function ReportRow({ report, expanded, onToggle }: { report: AiThreatSummaryRepo
                       <li key={r.industry} className="flex items-center gap-2 text-sm">
                         <Badge variant={priorityVariant(r.relevance)}>{r.relevance}</Badge>
                         <span className="font-medium text-foreground">{r.industry}</span>
+                        {r.relevanceBasis === "TECHNOLOGY" && (
+                          <span className="text-xs text-muted" title="Based on this sector commonly using a product/vendor the article names -- the article does not explicitly say this sector was targeted.">
+                            (technology-relevant, not explicitly targeted)
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>

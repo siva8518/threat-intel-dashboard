@@ -3,46 +3,41 @@
 // Why this file exists: the original Industry Intelligence implementation
 // only ever showed an actor/malware/campaign if it happened to be named in
 // the title of one of the ~50 articles keyword-matched to that industry's own
-// pool (see poolForIndustry in industryBriefing.js) -- a narrow, title-only
-// signal that left most sectors' Active Threat Actors / Active Campaigns /
-// Trending Malware Families cards empty most of the time, even though this
-// platform has ~900 actor entities, ~220 campaign entities, and hundreds of
-// ransomware victim disclosures sitting right there in its own stores.
-//
-// Root cause confirmed live: server/threatActorIntelligence.js,
-// server/campaignIntelligence.js, and server/darkWebIntelligence.js all tag
-// their own entities' targetedIndustries using server/newsCorrelation.js's
-// matchIndustries() -- an OLDER, different 4-bucket taxonomy (FSI/TMT/LSHC/
-// Consumer, see server/data/industry-map.json) than the 14-sector taxonomy
-// this feature uses (server/data/industry-map-14.json, "Financial Services",
-// "Healthcare", etc., via server/emergingThreatsRanking.js's OWN, differently
-// named matchIndustries()). A direct `entity.targetedIndustries.includes(
-// "Financial Services")` check can never succeed -- entity.targetedIndustries
-// never contains that exact 14-sector string. This file works around that
-// mismatch by recomputing industry relevance at read-time against each
-// entity's own real accumulated text (article titles, ATT&CK's own free-text
-// targetIndustries, ransomware.live's own sector field) using the 14-sector
-// matcher plus a small synonym table for the common single-word labels
-// (e.g. ATT&CK's "Banking", ransomware.live's "Finance") that the 14-sector
-// keyword list's own multi-word phrases ("financial services") don't catch --
-// no data migration, no change to how the entity stores persist.
+// pool (see poolForIndustry in industryBriefing.js) -- a narrow, title-only,
+// EXPLICIT-SECTOR-WORDS-ONLY signal that left most sectors' Active Threat
+// Actors / Active Campaigns / Trending Malware Families cards empty most of
+// the time, even though this platform has ~900 actor entities, ~220 campaign
+// entities, and hundreds of ransomware victim disclosures sitting right
+// there in its own stores -- and separately missed real relevance entirely
+// whenever a report's only industry signal was a mentioned product/vendor
+// rather than a named sector (the "Atlassian Rovo" gap -- see
+// server/industryClassification.js, the shared engine this file now
+// delegates all matching to instead of running its own, third, independent
+// implementation).
 //
 // Every entity surfaced below is real (an actual record in this platform's
 // own entity stores) and every tier is honestly labeled with WHY it was
 // included -- this deliberately does not invent names the platform has never
-// observed. Three tiers, most to least confident:
+// observed. Four tiers, most to least confident:
 //   "direct"       -- the entity's own text (articles, ransomware victims,
-//                      ATT&CK targeting data) matches this industry.
-//   "cross-linked" -- the entity doesn't directly match, but is linked
-//                      (actor<->malware<->campaign co-mention, already
-//                      computed by each store's own reconcile()) to another
-//                      entity that DOES directly match.
+//                      ATT&CK targeting data) EXPLICITLY names this industry.
+//   "technology"    -- the entity's own text doesn't name the industry, but
+//                      mentions a product/vendor server/industryClassification.js
+//                      knows is commonly used there (INDUSTRY_TIER.TECHNOLOGY_RELEVANT
+//                      /POTENTIALLY_EXPOSED) -- a real, current signal from
+//                      this entity's own data, just a weaker claim than
+//                      explicit targeting language.
+//   "cross-linked" -- the entity doesn't directly match (by either signal
+//                      above), but is linked (actor<->malware<->campaign
+//                      co-mention, already computed by each store's own
+//                      reconcile()) to another entity that DOES directly
+//                      match.
 //   "historical"   -- a small, curated, widely-published sector-affinity
 //                      list (e.g. FIN7 -> Retail/Hospitality) used ONLY to
-//                      fill remaining slots when tiers 1-2 are thin, and
+//                      fill remaining slots when tiers 1-3 are thin, and
 //                      ONLY ever surfaces entities this platform already has
 //                      a real record for -- never a name invented here.
-import { matchIndustries as matchIndustries14 } from "./emergingThreatsRanking.js";
+import { matchIndustries, classifyIndustryRelevance, INDUSTRY_TIER } from "./industryClassification.js";
 import { getAllEntities as getActorEntities } from "./threatActorIntelligence.js";
 import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
 import { getAllEntities as getCampaignEntities } from "./campaignIntelligence.js";
@@ -56,67 +51,14 @@ function clampConfidence(n) {
   return Math.max(1, Math.min(99, Math.round(n)));
 }
 
-// Single-word/short-phrase labels that show up verbatim in ATT&CK's own
-// targetIndustries data and ransomware.live's own `activity` field, but
-// aren't literally substrings of the 14-sector keyword map's own
-// multi-word phrases (server/data/industry-map-14.json requires e.g.
-// "financial services", not bare "financial" or "banking" -- though
-// "banking"/"bank" happen to already be in that list; this table only adds
-// what the phrase list genuinely misses). Deliberately conservative: an
-// ambiguous label (ransomware.live's "Consumer", ATT&CK-style "TMT") is left
-// unmapped rather than force-guessed into one sector.
-const INDUSTRY_SYNONYMS = new Map(
-  Object.entries({
-    financial: "Financial Services",
-    finance: "Financial Services",
-    fsi: "Financial Services",
-    insurer: "Insurance",
-    health: "Healthcare",
-    hospital: "Healthcare",
-    medical: "Healthcare",
-    lshc: "Healthcare",
-    biotech: "Pharmaceuticals",
-    defense: "Government",
-    military: "Government",
-    federal: "Government",
-    industrial: "Manufacturing",
-    automotive: "Manufacturing",
-    aerospace: "Manufacturing",
-    retail: "Retail",
-    ecommerce: "Retail",
-    "e-commerce": "Retail",
-    technology: "Technology",
-    tech: "Technology",
-    software: "Technology",
-    telecom: "Telecommunications",
-    telecommunication: "Telecommunications",
-    media: "Media & Entertainment",
-    entertainment: "Media & Entertainment",
-    energy: "Energy & Utilities",
-    utility: "Energy & Utilities",
-    utilities: "Energy & Utilities",
-    oil: "Energy & Utilities",
-    power: "Energy & Utilities",
-    education: "Education",
-    academic: "Education",
-    transportation: "Transportation & Logistics",
-    logistics: "Transportation & Logistics",
-    shipping: "Transportation & Logistics",
-    aviation: "Transportation & Logistics",
-    hospitality: "Hospitality",
-    hotel: "Hospitality",
-    tourism: "Hospitality",
-  }),
-);
-
-/** Every 14-sector industry a free-text blob (article titles, ATT&CK targetIndustries, ransomware.live sector/victim) real-world matches -- phrase-based keyword match first, then the single-word synonym table above for common short labels the phrase list itself doesn't cover. */
+/** Every industry a free-text blob (article titles, ATT&CK targetIndustries, ransomware.live sector/victim) explicitly names -- EXPLICIT TARGETING signal only, delegates entirely to server/industryClassification.js#matchIndustries (single source of truth for this app's industry taxonomy + synonym table). Kept as its own export here since this file's many callers already import it from here. */
 export function industriesFromText(text) {
-  const hits = new Set(matchIndustries14(text ?? ""));
-  const lower = norm(text);
-  for (const [word, industry] of INDUSTRY_SYNONYMS) {
-    if (lower.includes(word)) hits.add(industry);
-  }
-  return [...hits];
+  return matchIndustries(text ?? "");
+}
+
+/** Whether this free-text blob is TECHNOLOGY_RELEVANT or POTENTIALLY_EXPOSED (but NOT already DIRECT -- callers check industriesFromText first) for the given industry, via the affected product/vendor signal. */
+function technologyMatchesIndustry(text, industry) {
+  return classifyIndustryRelevance(text ?? "").some((hit) => hit.industry === industry && hit.tier !== INDUSTRY_TIER.DIRECT);
 }
 
 /** This entity's own real grounding text -- article titles, description, and (for actors) whatever free-text sector labels ATT&CK/ransomware-tracker reconciliation already attached to targetedIndustries -- concatenated for one industriesFromText() pass. */
@@ -249,6 +191,24 @@ export function rankActorsForIndustry(industry, { limit = 12 } = {}) {
     });
   }
 
+  // TECHNOLOGY_RELEVANT: this actor's own coverage never names the industry
+  // explicitly, but mentions a product/vendor server/industryClassification.js
+  // knows is commonly used there -- a real signal from this entity's own
+  // current data, just a weaker claim than explicit targeting language (see
+  // this file's own header comment on why "technology" ranks below "direct").
+  for (const entity of actorEntities) {
+    if (results.has(entity.id)) continue;
+    const techEvidence = (entity.articles ?? []).filter((a) => technologyMatchesIndustry(a.title, industry)).length;
+    if (techEvidence === 0 && !technologyMatchesIndustry(entityText(entity), industry)) continue;
+    results.set(entity.id, {
+      entity,
+      tier: "technology",
+      confidenceScore: clampConfidence(38 + Math.min(techEvidence, 5) * 3),
+      reason: `Own coverage mentions technology commonly used in ${industry}, though no source explicitly names this actor as targeting the sector.`,
+      evidence: techEvidence,
+    });
+  }
+
   // Ransomware groups with real victim disclosures in this industry but no
   // matching entity in threatActorIntelligence.js at all (most ransomware
   // brand names are never independently extracted as a news actor mention
@@ -346,8 +306,22 @@ export function rankMalwareForIndustry(industry, actorResults, { limit = 12 } = 
     });
   }
 
+  // TECHNOLOGY_RELEVANT -- same product/vendor signal as rankActorsForIndustry above.
+  for (const entity of malwareEntities) {
+    if (results.has(entity.id)) continue;
+    const techEvidence = (entity.articles ?? []).filter((a) => technologyMatchesIndustry(a.title, industry)).length;
+    if (techEvidence === 0 && !technologyMatchesIndustry(entityText(entity), industry)) continue;
+    results.set(entity.id, {
+      entity,
+      tier: "technology",
+      confidenceScore: clampConfidence(38 + Math.min(techEvidence, 5) * 3),
+      reason: `Own coverage mentions technology commonly used in ${industry}, though no source explicitly names this family as targeting the sector.`,
+      evidence: techEvidence,
+    });
+  }
+
   for (const actorResult of actorResults ?? []) {
-    if (actorResult.tier === "historical") continue; // two low-confidence hops stacked is too speculative to show as "cross-linked"
+    if (actorResult.tier === "historical" || actorResult.tier === "technology") continue; // two low-confidence hops stacked is too speculative to show as "cross-linked"
     for (const malwareName of actorResult.entity.malwareUsed ?? []) {
       const entity = findEntityByName(malwareEntities, malwareName);
       if (!entity || results.has(entity.id)) continue;
@@ -428,13 +402,15 @@ export function rankCampaignsForIndustry(industry, actorResults, malwareResults,
     const key = `named:${entity.id}`;
     if (seen.has(key)) continue;
     const directHit = industriesFromText(entityText(entity)).includes(industry);
+    const techHit = !directHit && technologyMatchesIndustry(entityText(entity), industry);
     const linkedActors = (entity.associatedActors ?? []).filter((a) => directActorNames.has(norm(a)));
     const linkedMalware = (entity.associatedMalware ?? []).filter((m) => directMalwareNames.has(norm(m)));
-    if (!directHit && linkedActors.length === 0 && linkedMalware.length === 0) continue;
+    if (!directHit && !techHit && linkedActors.length === 0 && linkedMalware.length === 0) continue;
     seen.add(key);
 
-    const tier = directHit ? "direct" : "cross-linked";
+    const tier = directHit ? "direct" : linkedActors.length + linkedMalware.length > 0 ? "cross-linked" : "technology";
     const reasonBits = [];
+    if (techHit && tier === "technology") reasonBits.push(`own coverage mentions technology commonly used in ${industry}`);
     if (directHit) reasonBits.push(`its own coverage matches ${industry}`);
     if (linkedActors.length) reasonBits.push(`linked to ${linkedActors.slice(0, 2).join(", ")}`);
     if (linkedMalware.length) reasonBits.push(`uses ${linkedMalware.slice(0, 2).join(", ")}`);
@@ -448,8 +424,10 @@ export function rankCampaignsForIndustry(industry, actorResults, malwareResults,
       verified: Boolean(entity.verified),
       mentionCount: entity.mentionCount ?? 0,
       tier,
-      confidenceScore: clampConfidence(directHit ? 72 + Math.min(entity.mentionCount ?? 0, 9) * 3 : 45 + Math.min(linkedActors.length + linkedMalware.length, 4) * 4),
-      reason: `Campaign ${reasonBits.join("; ")}.`,
+      confidenceScore: clampConfidence(
+        directHit ? 72 + Math.min(entity.mentionCount ?? 0, 9) * 3 : tier === "technology" ? 38 : 45 + Math.min(linkedActors.length + linkedMalware.length, 4) * 4,
+      ),
+      reason: `Campaign ${reasonBits.join("; ") || `may be relevant to ${industry}`}.`,
     });
   }
 

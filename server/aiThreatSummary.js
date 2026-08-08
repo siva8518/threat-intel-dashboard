@@ -24,6 +24,7 @@
 // synthesis, not the extraction pipeline.
 import { aiRouter } from "./ai/aiRouter.js";
 import { AI_TASK } from "./ai/aiTasks.js";
+import { INDUSTRY_CATALOG } from "./industryClassification.js";
 import { extractEntities } from "./githubIntel/extractor.js";
 import { detectionRulesFor } from "./correlate.js";
 import { fetchArticleText } from "./lib/articleText.js";
@@ -57,7 +58,7 @@ const SYSTEM_PROMPT =
   '"technicalAnalysis": {"whatHappened": string, "whyItMatters": string (technical/operational significance -- what an attacker gains, the blast radius -- distinct from the business-language executiveSummary; if the article describes a named campaign/operation or ongoing threat-actor activity rather than a standalone vulnerability, this MUST also state why THIS campaign specifically matters -- what makes it notable versus routine activity from the same actor/family, e.g. new scale, new targeting, a new capability, or a first confirmed sighting -- not just a restatement of the technical mechanism), "whoIsAffected": string, "exploitationStatus": string (state plainly: confirmed active exploitation / public PoC only / theoretical, with the evidence), "attackVector": string[], "rootCause": string[], "exploitationDetails": string[], "technicalFindings": string[], "attackChain": string (1-2 sentence kill-chain overview), "initialAccess": string|null, "privilegeEscalation": string|null, "execution": string|null, "persistence": string|null, "defenseEvasion": string|null, "lateralMovement": string|null, "commandAndControl": string|null, "dataTheft": string|null, "ransomwareDeployment": string|null, "products": string[], "versions": string[], "operatingSystems": string[], "cloudServices": string[], "applications": string[], "vendorSeverity": string, "activeExploitation": string, "overallSocPriority": "Critical"|"High"|"Medium"|"Low"} -- kill-chain fields: null (not "Not Reported") for any stage not described in the article, do not fabricate a kill chain the article doesn\'t support. affectedProducts fields: exactly as named in the article. vendorSeverity is the vendor\'s own stated rating, not your own guess -- CVSS/EPSS/KEV are supplied separately, don\'t restate them here. Every bullet should read like it came from a technical researcher, not a press release -- name the specific thing, don\'t generalize it away.\n' +
   '"threatRelevance": {"industriesAtRisk": string[], "technologiesTargeted": string[], "geographicFocus": string[]} -- ground every field only in what the article states or directly implies; [] if unsupported. Do not restate MITRE technique IDs here -- those belong in mitreAttack below. Do NOT include who is likely targeted (technicalAnalysis.whoIsAffected already answers that) or how initial access is gained (technicalAnalysis.initialAccess in the kill chain already answers that) -- this field is only the aggregate targeting picture across industries/technologies/geography, never a second victim-profile or access-vector narrative.\n' +
   '"operationalImpact": {"businessImpact": string (the operational/systemic consequence for the SOC/analyst -- what actually breaks or is at risk operationally, not the executive risk framing already covered in businessRisk; do not restate businessRisk\'s or executiveSummary\'s sentences here), "detectionChallenges": string[] (specific, concrete reasons this activity is hard to detect with typical tooling -- e.g. "living-off-the-land binary abuse blends with legitimate admin activity", "C2 traffic uses valid TLS to a reputable CDN" -- never generic "hard to detect"), "evasionTechniques": string[] (specific evasion/anti-detection methods the article describes or that are well-documented for this technique/malware family -- name the actual method, not generic "obfuscation"), "attackerObjectives": string[] (what the attacker is actually trying to achieve here -- data theft, ransomware deployment, espionage, financial fraud, initial-access resale, etc., grounded in the article, not assumed)}\n' +
-  '"industryRelevance": array of EXACTLY these 14 entries, one each, in this exact order and with these exact "industry" strings -- "Financial Services", "Healthcare", "Government", "Manufacturing", "Retail", "Technology", "Telecommunications", "Energy & Utilities", "Education", "Transportation & Logistics", "Media & Entertainment", "Hospitality", "Insurance", "Pharmaceuticals" -- each shaped {"industry": string (copied exactly from the list above), "relevance": "Critical"|"High"|"Medium"|"Low"|"Not Applicable", "confidence": "High"|"Medium"|"Low" (your confidence in the relevance call itself), "whyAffected": string (2-3 sentences: why attackers may target this sector, which business processes are at risk, which technologies common in this sector are relevant here, and why this sector is more or less applicable than others -- "Not Applicable" if relevance is Not Applicable), "potentialImpact": string[] (2-4 items, e.g. "Credential Theft", "Ransomware", "Business Email Compromise", "Customer Data Exposure" -- [] if Not Applicable), "likelyTargetAssets": string[] (2-4 items, e.g. "Active Directory", "SAP", "OT/ICS Systems", "VPN" -- [] if Not Applicable), "defensiveFocus": string[] (3-5 concrete, sector-specific recommendations, e.g. for Manufacturing: "Monitor OT/ICS segmentation", "Review engineering workstation access" -- never generic advice, [] if Not Applicable), "riskScore": integer 0-10, "priority": "Immediate"|"High"|"Normal"|"Low"} -- DO NOT rate every industry Critical or High: only assign Critical/High when there is a clear technical or operational reason grounded in what the article actually describes (the affected product/sector, the attack vector, who is named as a target); for the common case of a narrow, sector-agnostic vulnerability or an article that names no specific victim sector, most industries should be "Low" or "Not Applicable" -- a heatmap that is mostly Low/Not Applicable with 1-3 genuinely elevated sectors is correct, not incomplete. Ground every "why" in the article or in well-established sector/technology overlap (e.g. a vulnerability in a hospital-focused device is High for Healthcare, a drug-manufacturing SCADA flaw is High for Pharmaceuticals) -- never invent a sector-specific detail the article doesn\'t support.\n' +
+  `"industryRelevance": array of EXACTLY these ${INDUSTRY_CATALOG.length} entries, one each, in this exact order and with these exact "industry" strings -- ${INDUSTRY_CATALOG.map((i) => `"${i}"`).join(", ")} -- each shaped {"industry": string (copied exactly from the list above), "relevance": "Critical"|"High"|"Medium"|"Low"|"Not Applicable", "confidence": "High"|"Medium"|"Low" (your confidence in the relevance call itself), "whyAffected": string (2-3 sentences: why attackers may target this sector, which business processes are at risk, which technologies common in this sector are relevant here, and why this sector is more or less applicable than others -- "Not Applicable" if relevance is Not Applicable), "potentialImpact": string[] (2-4 items, e.g. "Credential Theft", "Ransomware", "Business Email Compromise", "Customer Data Exposure" -- [] if Not Applicable), "likelyTargetAssets": string[] (2-4 items, e.g. "Active Directory", "SAP", "OT/ICS Systems", "VPN" -- [] if Not Applicable), "defensiveFocus": string[] (3-5 concrete, sector-specific recommendations, e.g. for Manufacturing: "Monitor OT/ICS segmentation", "Review engineering workstation access" -- never generic advice, [] if Not Applicable), "riskScore": integer 0-10, "priority": "Immediate"|"High"|"Normal"|"Low", "relevanceBasis": "EXPLICIT"|"TECHNOLOGY"|"NONE" (EXPLICIT only when the article itself names this sector or a victim/organization in it as affected/targeted; TECHNOLOGY when your rating is based on this sector commonly running an affected product/vendor the article names, with no explicit sector claim in the article; NONE when relevance is "Not Applicable")} -- DO NOT rate every industry Critical or High: only assign Critical/High when there is a clear technical or operational reason grounded in what the article actually describes (the affected product/sector, the attack vector, who is named as a target); for the common case of a narrow, sector-agnostic vulnerability or an article that names no specific victim sector, most industries should be "Low" or "Not Applicable" -- a heatmap that is mostly Low/Not Applicable with 1-3 genuinely elevated sectors is correct, not incomplete. Ground every "why" in the article or in well-established sector/technology overlap (e.g. a vulnerability in a hospital-focused device is High for Healthcare, a drug-manufacturing SCADA flaw is High for Pharmaceuticals, an enterprise SaaS/collaboration platform vulnerability is TECHNOLOGY-basis Medium for Cross-Industry / Enterprise) -- never invent a sector-specific detail the article doesn't support, and never mark something EXPLICIT when your reasoning is really about the affected technology's typical userbase.\n` +
   '"mitreAttack": array of {"technique": string, "techniqueId": string or null, "evidence": string (a short direct quote or close paraphrase FROM THE ARTICLE that specifically supports this technique -- not a restatement of the technique\'s generic definition; an entry with no article-grounded evidence is discarded entirely, so leave this array empty rather than including a technique you cannot point to specific article text for), "confidence": "High"|"Medium"|"Low" (High only when the article explicitly names this technique or describes the exact behavior; Medium when it\'s a reasonable but not explicit inference; Low when it\'s a weak/generic association -- prefer omitting Low-confidence guesses entirely), "reason": string (why this technique applies, grounded in what the article describes), "killChainPhase": string} -- techniqueId MUST be copied exactly from the CANDIDATE MITRE ATT&CK TECHNIQUES list in the user message, or null if none genuinely apply. Never invent a technique ID that isn\'t in that list, even if it looks plausible. Only map techniques explicitly supported by the article -- do not add extra plausible-sounding techniques beyond what the article\'s own described behavior supports.\n' +
   '"threatActors": array of {"group": string, "aliases": string[], "motivation": string|null, "targetSectors": string[], "geography": string|null, "knownCampaigns": string[]} -- only actors explicitly named in the article.\n' +
   '"malware": array of {"family": string, "capabilities": string[], "persistence": string|null, "payload": string|null, "deliveryMechanism": string|null} -- only malware explicitly named in the article.\n' +
@@ -245,39 +246,33 @@ function safeOperationalImpact(v) {
 }
 
 // Fixed catalog, not model-defined -- same reasoning as RECOMMENDED_ACTION_CATALOG
-// above: lets the UI render a stable 14-row heatmap every time (and the
-// Emerging Threats tab aggregate one across reports) and lets a genuinely
-// unsupported response default to "Not Applicable" per row rather than
-// dropping the industry entirely. Widened from an earlier 10-sector catalog
-// for the Industry Intelligence page -- several old buckets split into more
-// specific sectors (Life Sciences & Health Care -> Healthcare +
-// Pharmaceuticals; Technology, Media & Telecommunications -> Technology +
-// Telecommunications + Media & Entertainment; Consumer -> Retail +
-// Hospitality; Financial Services -> Financial Services + Insurance).
-// Reports generated before this change carry the old 10 names in their
-// stored industryRelevance array (reports are immutable once generated,
-// see aiThreatSummaryJob.js) -- accepted as a known gap that self-resolves
-// as the 300-report cache cycles, not worth migrating.
-export const INDUSTRY_CATALOG = [
-  "Financial Services",
-  "Healthcare",
-  "Government",
-  "Manufacturing",
-  "Retail",
-  "Technology",
-  "Telecommunications",
-  "Energy & Utilities",
-  "Education",
-  "Transportation & Logistics",
-  "Media & Entertainment",
-  "Hospitality",
-  "Insurance",
-  "Pharmaceuticals",
-];
+// above: lets the UI render a stable heatmap row per industry every time
+// (and the Emerging Threats tab aggregate one across reports) and lets a
+// genuinely unsupported response default to "Not Applicable" per row rather
+// than dropping the industry entirely. Re-exported from
+// server/industryClassification.js (the single source of truth for the
+// industry taxonomy, shared by every industry-facing feature in this app)
+// rather than defined here a second time -- kept as a re-export, not a
+// direct import at every call site, so the many existing `import {
+// INDUSTRY_CATALOG } from "./aiThreatSummary.js"` call sites across this
+// app don't all need to change. Widened over time: originally 10 sectors,
+// then 14 (Life Sciences & Health Care -> Healthcare + Pharmaceuticals;
+// Technology, Media & Telecommunications -> Technology + Telecommunications
+// + Media & Entertainment; Consumer -> Retail + Hospitality; Financial
+// Services -> Financial Services + Insurance), now 21 (added Professional
+// Services, Defense & Aerospace, Automotive, Real Estate, Construction,
+// Agriculture, Cross-Industry / Enterprise -- see industryClassification.js
+// for why "Cross-Industry / Enterprise" exists as its own catalog entry).
+// Reports generated before a taxonomy widening carry the old, smaller set
+// of names in their stored industryRelevance array (reports are immutable
+// once generated, see aiThreatSummaryJob.js) -- accepted as a known gap
+// that self-resolves as the 300-report cache cycles, not worth migrating.
+export { INDUSTRY_CATALOG };
 
 const INDUSTRY_RELEVANCE_LEVELS = new Set(["Critical", "High", "Medium", "Low", "Not Applicable"]);
 const INDUSTRY_CONFIDENCE_LEVELS = new Set(["High", "Medium", "Low"]);
 const INDUSTRY_PRIORITIES = new Set(["Immediate", "High", "Normal", "Low"]);
+const INDUSTRY_RELEVANCE_BASES = new Set(["EXPLICIT", "TECHNOLOGY", "NONE"]);
 
 function safeIndustryRelevance(v) {
   const byIndustry = new Map();
@@ -303,6 +298,16 @@ function safeIndustryRelevance(v) {
       defensiveFocus: applicable ? safeArray(entry?.defensiveFocus) : [],
       riskScore: Number.isFinite(n) ? Math.max(0, Math.min(10, Math.round(n))) : 0,
       priority: INDUSTRY_PRIORITIES.has(entry?.priority) ? entry.priority : "Low",
+      // Whether this rating rests on the article explicitly naming the
+      // sector vs. only on the affected technology's typical userbase --
+      // see the RELEVANCE TIER discipline this app applies everywhere else
+      // industry relevance is computed (server/industryClassification.js).
+      // Not model-trusted blindly: falls back to "NONE" for a Not
+      // Applicable row and "EXPLICIT" for an applicable row the model
+      // didn't tag, the more conservative of the two real options for
+      // legacy/malformed responses (never silently downgrades a real
+      // EXPLICIT claim, but also never invents an unearned TECHNOLOGY tag).
+      relevanceBasis: INDUSTRY_RELEVANCE_BASES.has(entry?.relevanceBasis) ? entry.relevanceBasis : applicable ? "EXPLICIT" : "NONE",
     };
   });
 }

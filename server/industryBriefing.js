@@ -26,7 +26,7 @@
 import { aiRouter, AllProvidersFailedError } from "./ai/aiRouter.js";
 import { AI_TASK } from "./ai/aiTasks.js";
 import { INDUSTRY_CATALOG } from "./aiThreatSummary.js";
-import { matchIndustries } from "./emergingThreatsRanking.js";
+import { classifyIndustryRelevance, INDUSTRY_TIER } from "./industryClassification.js";
 import { getAllEntities as getMalwareEntities } from "./malwareIntelligence.js";
 import { getAllEntities as getActorEntities } from "./threatActorIntelligence.js";
 import { buildEntityHuntingQueries } from "./huntingLibrary.js";
@@ -105,9 +105,15 @@ export function poolForIndustry(industry, taggedNewsItems, reports, kevIds) {
 
     const report = reportsByLink.get(item.link);
     const reportRow = report?.industryRelevance?.find((r) => r.industry === industry);
-    const keywordHit = matchIndustries(item.title).includes(industry);
+    // Scans title+summary through the unified engine (explicit-targeting
+    // text UNION affected-technology signal) instead of the old title-only,
+    // explicit-sector-words-only keyword match -- this is what lets an
+    // article like "Critical Vulnerability in Atlassian's Rovo AI" reach
+    // this industry's pool even though it never names a sector, as long as
+    // the affected product is one this industry commonly runs.
+    const industryHit = classifyIndustryRelevance(`${item.title} ${item.summary ?? ""}`).find((h) => h.industry === industry);
     const reportHit = reportRow && (reportRow.relevance === "Critical" || reportRow.relevance === "High");
-    if (!keywordHit && !reportHit) continue;
+    if (!industryHit && !reportHit) continue;
 
     const cveIds = item.tags?.cveIds ?? [];
     matched.push({
@@ -126,6 +132,13 @@ export function poolForIndustry(industry, taggedNewsItems, reports, kevIds) {
       actors: item.tags?.actors ?? [],
       malware: item.tags?.malware ?? [],
       reportRelevance: reportRow?.relevance ?? null,
+      // How this article earned its place in this industry's pool -- DIRECT
+      // (explicit sector language), TECHNOLOGY_RELEVANT/POTENTIALLY_EXPOSED
+      // (affected product/vendor only), or null when only the AI report row
+      // qualified it (no direct classifier hit at all). Threaded through to
+      // the model's grounding table and the frontend so "Technology-Relevant"
+      // coverage is never silently presented as "Targeted".
+      industryTier: industryHit?.tier ?? null,
     });
   }
 
@@ -171,6 +184,18 @@ function buildTechniqueCandidatesBlock(candidates) {
   return `CANDIDATE MITRE ATT&CK TECHNIQUES (techniqueId in topAttackTechniques must be copied exactly from this list, or null if none genuinely apply):\n${lines}`;
 }
 
+// Marks each row with WHY it earned a place in this industry's pool -- an
+// explicit sector claim (DIRECT) vs. only an affected product/vendor this
+// industry commonly runs (TECHNOLOGY_RELEVANT/POTENTIALLY_EXPOSED, see
+// server/industryClassification.js). Sent to the model so it can't collapse
+// a technology-only match into "this article targets the sector" language
+// -- see the RELEVANCE TIER instruction in SYSTEM_PROMPT below.
+function tierLabel(tier) {
+  if (tier === INDUSTRY_TIER.DIRECT || !tier) return null; // null: no extra marker needed for an explicit hit (the default assumption)
+  if (tier === INDUSTRY_TIER.TECHNOLOGY_RELEVANT) return "TECH-RELEVANT (affected product used in this sector, not an explicit sector claim)";
+  return "POSSIBLE-EXPOSURE (affected product used broadly across many sectors)";
+}
+
 function buildGroundingTable(pool) {
   return pool
     .map((a, i) => {
@@ -179,6 +204,8 @@ function buildGroundingTable(pool) {
       if (a.knownExploited) bits.push("KNOWN EXPLOITED (KEV)");
       if (a.actors.length) bits.push(`actor: ${a.actors.join(", ")}`);
       if (a.malware.length) bits.push(`malware: ${a.malware.join(", ")}`);
+      const marker = tierLabel(a.industryTier);
+      if (marker) bits.push(marker);
       return bits.join(" | ");
     })
     .join("\n");
@@ -188,6 +215,7 @@ const SYSTEM_PROMPT =
   "You are a Senior Cyber Threat Intelligence Analyst producing a sector-specific briefing for CISOs, Threat Intelligence Analysts, and SOC teams. " +
   "You will be given a numbered table of real, verified recent articles (title, source, date, severity, CVE/KEV status, named actors/malware) that were matched to one specific industry. " +
   "This is a STRICT GROUNDING task: every claim you make must trace back to one or more numbered articles in that table, or to a clearly-hedged, well-established general pattern for a vulnerability/technique/actor CATEGORY (e.g. \"ransomware groups have historically moved quickly to double-extortion tactics\") -- never assert a specific unconfirmed fact about an incident, actor, or campaign that is not in the table. Never invent a CVE ID, a vendor report title, a statistic, or a date. If the table is thin for a section, write a short, honest section rather than padding it with generic filler or invented specifics. " +
+  "RELEVANCE TIER (critical): most table rows are an EXPLICIT match for this sector and need no special handling. Some rows instead carry a \"TECH-RELEVANT\" or \"POSSIBLE-EXPOSURE\" marker -- these were included because the affected product/vendor is one this industry commonly runs, NOT because any source claims this industry was targeted. For those rows specifically: never write \"targets this sector\"/\"targeting the industry\"/\"attackers are going after\" language. Instead say the affected technology is used in this sector and organizations here may be exposed. Do not silently upgrade a TECH-RELEVANT/POSSIBLE-EXPOSURE row into a targeting claim anywhere in the briefing, including executiveSummary and industryRiskAssessment. " +
   "Every entry that names a specific threat, actor, or technique MUST include \"sourceArticleIds\": an array of the article numbers (integers, e.g. [3, 7]) from the table that support it -- this is checked against the real table after you respond, and any number not in the table is discarded, so only cite numbers you actually see. Do not cite article numbers for an entry that isn't really grounded in them. " +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
   '"executiveSummary": string, 3-5 short paragraphs separated by \\n\\n, a concise overview of the current threat landscape for this industry grounded in the table.\n' +
@@ -266,7 +294,7 @@ function safeTopEmergingThreats(value, pool) {
 }
 
 const NO_DETAIL_FALLBACK = "Not enough article-level detail in this platform's corpus for this sector specifically -- see this entity's full profile in Threat Actor/Malware Intelligence.";
-const TIER_TO_CONFIDENCE = { direct: "High", "cross-linked": "Medium", historical: "Low" };
+const TIER_TO_CONFIDENCE = { direct: "High", "cross-linked": "Medium", technology: "Medium", historical: "Low" };
 
 /**
  * Left-joins the model's own (already-shape-validated) narrative onto the
