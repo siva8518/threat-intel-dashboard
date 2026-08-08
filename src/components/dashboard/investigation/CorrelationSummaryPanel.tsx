@@ -128,19 +128,6 @@ export function CorrelationSummaryPanel({ summary, pending, error, onFocusEntity
           )}
         </div>
 
-        {summary.nextSteps.length > 0 && (
-          <div className="rounded-xl border border-primary/20 bg-primary/[0.04] p-3">
-            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
-              <Sparkles className="h-3.5 w-3.5" /> What To Investigate Next
-            </p>
-            <ul className="list-disc space-y-1 pl-4 text-sm text-foreground">
-              {summary.nextSteps.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         <Badge variant="muted">AI-generated — {summary.model}</Badge>
       </div>
     </Section>

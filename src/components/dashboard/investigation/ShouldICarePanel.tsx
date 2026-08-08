@@ -1,15 +1,19 @@
 // Renders server/investigation/shouldICare.js's synthesis layer -- the
 // section that sits ABOVE EvidencePanel.tsx's per-source card grid and never
-// restates it. Four explicit blocks: a deterministic OVERALL ASSESSMENT
+// restates it. Three explicit blocks: a deterministic OVERALL ASSESSMENT
 // (Risk/Confidence/Analyst Decision/Reason -- straight from the verdict
 // engine, never model-authored), COMBINED INTELLIGENCE ASSESSMENT (what the
 // evidence indicates once compared -- conflicts, independence, shared
-// infrastructure), LIKELY MALICIOUS INTENT (only ever populated when real
-// evidence supports a specific intent -- fail-closed enforced server-side),
-// and NEXT ACTION (a concrete step). `analystDecision` is deterministic
-// pass-through; the three prose fields are the model's narrative synthesis,
-// grounded and validated server-side before this component ever sees them.
-import { Sparkles, ShieldAlert, Layers, Target, Building2, Compass } from "lucide-react";
+// infrastructure), and LIKELY MALICIOUS INTENT (only ever populated when
+// real evidence supports a specific intent -- fail-closed enforced
+// server-side), plus ENVIRONMENTAL RELEVANCE. `assessment.nextAction` is
+// deliberately NOT rendered here -- it's folded into the standalone "What To
+// Investigate Next" section instead (see WhatToInvestigateNextPanel.tsx),
+// so a next-step recommendation lives in exactly one place on the page.
+// `analystDecision` is deterministic pass-through; the prose fields are the
+// model's narrative synthesis, grounded and validated server-side before
+// this component ever sees them.
+import { Sparkles, ShieldAlert, Layers, Target, Building2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Section } from "../reportPrimitives";
@@ -120,13 +124,6 @@ export function ShouldICarePanel({ assessment, pending, error, overview }: Shoul
             <Building2 className="h-3.5 w-3.5" /> Environmental Relevance
           </p>
           <p className="text-sm text-foreground">{assessment.environmentalRelevance}</p>
-        </div>
-
-        <div className="rounded-xl border border-primary/20 bg-primary/[0.04] p-3">
-          <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
-            <Compass className="h-3.5 w-3.5" /> Next Action
-          </p>
-          <p className="text-sm text-foreground">{assessment.nextAction}</p>
         </div>
 
         <Badge variant="muted">

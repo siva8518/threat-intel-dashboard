@@ -20,13 +20,15 @@ import { CorrelationSummaryPanel } from "./investigation/CorrelationSummaryPanel
 import { ShouldICarePanel } from "./investigation/ShouldICarePanel";
 import { SearchCoveragePanel } from "./investigation/SearchCoveragePanel";
 import { EvidencePanel } from "./investigation/EvidencePanel";
+import { WhatToInvestigateNextPanel } from "./investigation/WhatToInvestigateNextPanel";
+import { RecommendationsPanel } from "./investigation/RecommendationsPanel";
 import { InvestigationGraph } from "./InvestigationGraph";
 import { useSelection } from "@/context/SelectionContext";
 import { useGenerateInvestigationAiReport } from "@/hooks/useInvestigate";
 import { useInvestigationWorkspace } from "@/hooks/useInvestigationWorkspace";
 import { sectionFamilyFor, INDICATOR_TYPE_LABEL } from "@/investigation/moduleConfig";
 import { virusTotalLookupUrl } from "@/lib/vtLookup";
-import type { IndicatorType, InvestigationResult, MalwareIntelligenceEntity, CveRecord, CveProfile, DetectionRuleRef, IocLookupResult, VerdictState } from "@/types/threat-intel";
+import type { IndicatorType, InvestigationResult, MalwareIntelligenceEntity, CveRecord, CveProfile, DetectionRuleRef, VerdictState } from "@/types/threat-intel";
 import { cn } from "@/lib/utils";
 
 interface WorkspaceProps {
@@ -139,76 +141,6 @@ function VerdictBanner({ overview }: { overview: InvestigationResult["overview"]
   );
 }
 
-function safe(v: unknown): string {
-  return v == null || v === "" ? "—" : String(v);
-}
-
-interface KeyFact {
-  label: string;
-  value: string;
-}
-
-/** A compact "so what" summary distinct from the deeper Indicator-Specific Intelligence panels below it. */
-function buildKeyFacts(result: InvestigationResult): KeyFact[] {
-  const facts: KeyFact[] = [];
-  const md = result.moduleData;
-  const find = (source: string) => (md.lookupResults as IocLookupResult[] | undefined)?.find((r) => r.source === source);
-
-  if (result.type === "ip") {
-    const abuseIpdb = find("AbuseIPDB");
-    const shodan = find("Shodan");
-    const network = md.network as Record<string, unknown> | undefined;
-    if (network?.country) facts.push({ label: "Country", value: safe(network.country) });
-    if (network?.organization) facts.push({ label: "Organization", value: safe(network.organization) });
-    if (abuseIpdb) facts.push({ label: "Abuse Reports", value: `${abuseIpdb.abuseConfidenceScore}% confidence` });
-    if (shodan && Array.isArray(shodan.openPorts) && shodan.openPorts.length > 0) facts.push({ label: "Open Ports", value: (shodan.openPorts as number[]).slice(0, 8).join(", ") });
-  } else if (result.type === "domain") {
-    const reg = md.registration as Record<string, unknown> | null;
-    const cert = find("crt.sh");
-    if (reg?.registrar) facts.push({ label: "Registrar", value: safe(reg.registrar) });
-    if (cert) facts.push({ label: "Subdomains Found", value: safe(cert.subdomainCount) });
-    const security = md.security as Record<string, Record<string, unknown>> | undefined;
-    if (security?.typosquatting?.flagged) facts.push({ label: "Typosquat Risk", value: `Resembles "${security.typosquatting.closestBrandMatch}"` });
-  } else if (result.type === "url") {
-    const scan = md.scan as Record<string, unknown> | null;
-    const components = md.components as Record<string, unknown> | undefined;
-    if (components?.host) facts.push({ label: "Host", value: safe(components.host) });
-    if (scan && !scan.notScanned) facts.push({ label: "urlscan.io Classification", value: scan.malicious ? "Malicious" : "No malicious classification" });
-  } else if (result.type === "sha256" || result.type === "sha1" || result.type === "md5") {
-    const detection = md.detection as Record<string, unknown> | null;
-    if (detection) facts.push({ label: "VirusTotal Detections", value: `${detection.malicious} / ${(detection.malicious as number) + (detection.suspicious as number) + (detection.harmless as number)}` });
-    if (md.malwareFamily) facts.push({ label: "Malware Family", value: String(md.malwareFamily) });
-  } else if (result.type === "cve") {
-    const cve = md.cve as CveRecord | null;
-    if (cve) {
-      facts.push({ label: "CVSS", value: safe(cve.cvssScore) });
-      facts.push({ label: "Known Exploited (KEV)", value: cve.knownExploited ? "Yes" : "No" });
-    }
-  } else if (result.type === "name") {
-    facts.push({ label: "Matches Found", value: safe(md.total) });
-  }
-
-  return facts;
-}
-
-function KeyFactsPanel({ facts }: { facts: KeyFact[] }) {
-  if (facts.length === 0) return null;
-  return (
-    <Section title="Key Facts">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-        {facts.map((f) => (
-          <div key={f.label} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
-            <p className="text-[10px] uppercase tracking-wide text-muted">{f.label}</p>
-            <p className="mt-0.5 text-xs font-semibold text-foreground" title={f.value}>
-              {f.value}
-            </p>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
 /** Just the AI Summarization report cross-references now -- matched malware/actor/campaign names moved to the richer Relationships section below (same data, but with why/confidence/dates/sources instead of a bare chip), so this isn't duplicated in two places. */
 function RelatedAiReportsSection({ result }: { result: InvestigationResult }) {
   const rel = result.relatedIntelligence;
@@ -311,18 +243,27 @@ function QuickActions({ result }: { result: InvestigationResult }) {
  * rule: it lives in exactly one place, and later sections reference it by
  * name rather than restating it.
  *
- * Page order puts every source's own finding and the synthesis over it
- * immediately after the verdict, before anything else: Verdict -> Search
- * Coverage -> Should I Care? (server/investigation/shouldICare.js's
- * Overall Assessment / Combined Intelligence Assessment / Likely Malicious
- * Intent / Environmental Relevance / Next Action) -> Intelligence Evidence
- * (EvidencePanel.tsx's per-source card grid -- one card per queried source,
- * see server/investigation/evidence.js#buildEvidenceCards) -> Investigation
- * Graph -> AI Investigation Summary -> AI Correlation Summary -> Key Facts
- * -> AI/vendor reports -> real Detections & Hunting -> Recommended Actions
- * (SOC/Detection Engineering/Threat Intelligence/Incident Response) ->
- * Indicator-Specific raw lookup evidence -> deeper opt-in AI narrative ->
- * Quick Actions.
+ * Page order: (1) Verdict (Conflicting Intelligence badge and conflict
+ * pointer live here). (2) Intelligence Evidence (EvidencePanel.tsx's
+ * per-source card grid, see server/investigation/evidence.js#buildEvidenceCards)
+ * clubbed together with Search Coverage -- what every source found, and
+ * what this platform even checked, side by side. (3) Should I Care?
+ * (server/investigation/shouldICare.js's Overall Assessment / Combined
+ * Intelligence Assessment / Likely Malicious Intent / Environmental
+ * Relevance -- NOT Next Action, which now lives only in (6) below).
+ * (4) Investigation Graph. (5) Investigation Summary -- one umbrella
+ * section wrapping the AI Investigation Summary (graph insights), AI
+ * Correlation Summary (incl. Infrastructure Reuse), and Indicator-Specific
+ * Intelligence, so the deeper synthesis and the raw per-type lookup detail
+ * live together instead of scattered across the page. (6) What To
+ * Investigate Next -- merges ShouldICarePanel's next-step guidance with
+ * CorrelationSummaryPanel's next-steps list into one place, since both were
+ * answering the same question. (7) Recommendations -- the AI Investigation
+ * Summary's own recommendations list, pulled out to its own section. Then:
+ * AI/vendor reports -> Recommended Actions (SOC/Detection
+ * Engineering/Threat Intelligence/Incident Response) -> real Detections &
+ * Hunting -> deeper opt-in AI Investigation Summary (the manual "Generate AI
+ * Report" narrative) -> Quick Actions.
  */
 export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampaignSearch, goToMalwareSearch, goToAiSummarySearch, initialQuery }: WorkspaceProps) {
   const [input, setInput] = useState("");
@@ -422,16 +363,19 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
               )}
             </p>
 
+            {/* 1. Conflicting Intelligence / verdict. */}
             <VerdictBanner overview={result.overview} />
+
+            {/* 2. Intelligence Evidence -- Source by Source, clubbed with Search Coverage: what every source found, and what this platform even checked, together. */}
+            <EvidencePanel evidence={result.overview.verdict.evidence} />
 
             <SearchCoveragePanel coverage={result.coverage} />
 
+            {/* 3. Should I Care? (Overall Assessment / Combined Intelligence Assessment / Likely Malicious Intent / Environmental Relevance). */}
             <ShouldICarePanel assessment={shouldICare} pending={shouldICarePending} error={shouldICareError} overview={result.overview} />
 
-            <EvidencePanel evidence={result.overview.verdict.evidence} />
-
             {/*
-              The Investigation Graph is the primary relationship view on this
+              4. Investigation Graph -- the primary relationship view on this
               page -- it already auto-selects the searched entity on load, so
               its side panel shows exactly the relationships a standalone
               "Relationships" section here would duplicate. One relationships
@@ -452,47 +396,57 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
               />
             )}
 
-            <AiGraphInsightsPanel insights={graphInsights} pending={graphInsightsPending} error={graphInsightsError} onFocusEntity={runInvestigation} />
+            {/* 5. Investigation Summary -- AI Investigation Summary + AI Correlation Summary + Indicator-Specific Intelligence, grouped under one umbrella instead of scattered as separate cards. */}
+            <Section title="Investigation Summary">
+              <div className="space-y-5">
+                <AiGraphInsightsPanel insights={graphInsights} pending={graphInsightsPending} error={graphInsightsError} onFocusEntity={runInvestigation} />
 
-            <CorrelationSummaryPanel summary={correlationSummary} pending={correlationSummaryPending} error={correlationSummaryError} onFocusEntity={runInvestigation} />
+                <CorrelationSummaryPanel summary={correlationSummary} pending={correlationSummaryPending} error={correlationSummaryError} onFocusEntity={runInvestigation} />
 
-            <KeyFactsPanel facts={buildKeyFacts(result)} />
+                <Section title="Indicator-Specific Intelligence">
+                  {family === "network" && result.type === "ip" && (
+                    <IpIntelligenceSection data={result.moduleData as unknown as Parameters<typeof IpIntelligenceSection>[0]["data"]} onPivotToIndicator={runInvestigation} />
+                  )}
+                  {family === "network" && result.type === "domain" && <DomainIntelligenceSection data={result.moduleData as unknown as Parameters<typeof DomainIntelligenceSection>[0]["data"]} />}
+                  {family === "network" && result.type === "url" && <UrlIntelligenceSection data={result.moduleData as unknown as Parameters<typeof UrlIntelligenceSection>[0]["data"]} />}
+                  {family === "hash" && <HashIntelligenceSection data={result.moduleData as unknown as Parameters<typeof HashIntelligenceSection>[0]["data"]} />}
+                  {family === "cve" &&
+                    (result.moduleData.found ? (
+                      <CveIntelligenceSection
+                        cve={result.moduleData.cve as CveRecord}
+                        profile={result.moduleData.profile as CveProfile | null}
+                        onViewProfile={() => selectCve(result.moduleData.cve as CveRecord)}
+                      />
+                    ) : (
+                      <EmptyState message={`${result.indicator} not found in NVD or CIRCL.`} />
+                    ))}
+                  {family === "entity" && (
+                    <EntityIntelligenceSection
+                      data={result.moduleData as unknown as Parameters<typeof EntityIntelligenceSection>[0]["data"]}
+                      onOpenMalware={openMalware}
+                      onOpenActor={onOpenActor}
+                      onOpenCampaign={onOpenCampaign}
+                    />
+                  )}
+                  {family === "artifact" && (
+                    <ArtifactIntelligenceSection note={result.moduleData.note as string} crossReference={result.relatedIntelligence!} />
+                  )}
+                </Section>
+              </div>
+            </Section>
 
+            {/* 6. What To Investigate Next -- merges ShouldICarePanel's next-step guidance with CorrelationSummaryPanel's next-steps list. */}
+            <WhatToInvestigateNextPanel shouldICare={shouldICare} shouldICarePending={shouldICarePending} correlationSummary={correlationSummary} correlationSummaryPending={correlationSummaryPending} />
+
+            {/* 7. Recommendations -- the AI Investigation Summary's own recommendations list. */}
+            <RecommendationsPanel recommendations={graphInsights?.recommendations ?? null} pending={graphInsightsPending} model={graphInsights?.model} />
+
+            {/* 8. Then the rest: AI/vendor reports, different-team Recommended Actions, real Detections & Hunting, the deeper opt-in AI Investigation Summary narrative, and Quick Actions. */}
             <RelatedAiReportsSection result={result} />
-
-            <RealDetectionsHuntingPanel graphNode={graphNode} />
 
             {recommendedActions && <RecommendedActionsPanel guidance={recommendedActions} />}
 
-            <Section title="Indicator-Specific Intelligence">
-              {family === "network" && result.type === "ip" && (
-                <IpIntelligenceSection data={result.moduleData as unknown as Parameters<typeof IpIntelligenceSection>[0]["data"]} onPivotToIndicator={runInvestigation} />
-              )}
-              {family === "network" && result.type === "domain" && <DomainIntelligenceSection data={result.moduleData as unknown as Parameters<typeof DomainIntelligenceSection>[0]["data"]} />}
-              {family === "network" && result.type === "url" && <UrlIntelligenceSection data={result.moduleData as unknown as Parameters<typeof UrlIntelligenceSection>[0]["data"]} />}
-              {family === "hash" && <HashIntelligenceSection data={result.moduleData as unknown as Parameters<typeof HashIntelligenceSection>[0]["data"]} />}
-              {family === "cve" &&
-                (result.moduleData.found ? (
-                  <CveIntelligenceSection
-                    cve={result.moduleData.cve as CveRecord}
-                    profile={result.moduleData.profile as CveProfile | null}
-                    onViewProfile={() => selectCve(result.moduleData.cve as CveRecord)}
-                  />
-                ) : (
-                  <EmptyState message={`${result.indicator} not found in NVD or CIRCL.`} />
-                ))}
-              {family === "entity" && (
-                <EntityIntelligenceSection
-                  data={result.moduleData as unknown as Parameters<typeof EntityIntelligenceSection>[0]["data"]}
-                  onOpenMalware={openMalware}
-                  onOpenActor={onOpenActor}
-                  onOpenCampaign={onOpenCampaign}
-                />
-              )}
-              {family === "artifact" && (
-                <ArtifactIntelligenceSection note={result.moduleData.note as string} crossReference={result.relatedIntelligence!} />
-              )}
-            </Section>
+            <RealDetectionsHuntingPanel graphNode={graphNode} />
 
             <AiSummaryPanel
               report={aiReportM.data}

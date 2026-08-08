@@ -53,17 +53,6 @@ export function AiGraphInsightsPanel({ insights, pending, error, onFocusEntity, 
       <div className="space-y-4">
         <p className="text-sm text-foreground">{insights.summary}</p>
 
-        {insights.standoutRelationships.length > 0 && (
-          <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Standout Relationships</p>
-            <ul className="list-disc space-y-1 pl-4 text-sm text-foreground">
-              {insights.standoutRelationships.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         {(insights.likelyAttackChain || insights.strongestActorMatch) && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {insights.likelyAttackChain && (
@@ -112,19 +101,6 @@ export function AiGraphInsightsPanel({ insights, pending, error, onFocusEntity, 
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Cross-Report Patterns</p>
             <ul className="list-disc space-y-1 pl-4 text-sm text-foreground">
               {insights.crossReportPatterns.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {insights.recommendations.length > 0 && (
-          <div className="rounded-xl border border-primary/20 bg-primary/[0.04] p-3">
-            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
-              <Sparkles className="h-3.5 w-3.5" /> AI Recommendations
-            </p>
-            <ul className="list-disc space-y-1 pl-4 text-sm text-foreground">
-              {insights.recommendations.map((line, i) => (
                 <li key={i}>{line}</li>
               ))}
             </ul>

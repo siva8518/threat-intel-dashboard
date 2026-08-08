@@ -3,121 +3,11 @@
 // these three types, plus the new sub-panels (Network Intelligence,
 // Registration/DNS/Email Security, URL scan) the redesign adds.
 import { ExternalLink } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Section, KeyValueBlock } from "../reportPrimitives";
 import type { IocLookupResult } from "@/types/threat-intel";
 
 function safe(v: unknown): string {
   return v == null || v === "" ? "—" : String(v);
-}
-
-const VERDICT_BADGE = { malicious: "critical", suspicious: "high", clean: "low", unknown: "muted" } as const;
-
-function renderSourceFacts(r: IocLookupResult): Array<{ label: string; value: string }> {
-  switch (r.source) {
-    case "OTX":
-      return [
-        { label: "Pulses", value: safe(r.pulseCount) },
-        ...(Array.isArray(r.tags) && r.tags.length > 0 ? [{ label: "Tags", value: (r.tags as string[]).slice(0, 8).join(", ") }] : []),
-      ];
-    case "AbuseIPDB":
-      return [
-        { label: "Abuse Confidence", value: `${r.abuseConfidenceScore}%` },
-        { label: "Total Reports", value: safe(r.totalReports) },
-        { label: "Country", value: safe(r.countryCode) },
-      ];
-    case "Pulsedive":
-      return [
-        { label: "Risk", value: safe(r.risk) },
-        ...(Array.isArray(r.threats) && r.threats.length > 0 ? [{ label: "Threats", value: (r.threats as string[]).join(", ") }] : []),
-      ];
-    case "VirusTotal":
-      return [
-        { label: "Detections", value: `${r.malicious} malicious · ${r.suspicious} suspicious · ${r.harmless} harmless` },
-        ...(r.threatLabel ? [{ label: "Threat Classification", value: String(r.threatLabel) }] : []),
-      ];
-    case "GreyNoise":
-      return [
-        { label: "Classification", value: safe(r.classification) },
-        ...(r.name ? [{ label: "Known Actor/Scanner", value: String(r.name) }] : []),
-        { label: "Known-Benign Service (RIOT)", value: r.riot ? "Yes" : "No" },
-      ];
-    case "Shodan":
-      return [
-        ...(r.org ? [{ label: "Organization", value: String(r.org) }] : []),
-        ...(Array.isArray(r.openPorts) && r.openPorts.length > 0 ? [{ label: "Open Ports", value: (r.openPorts as number[]).join(", ") }] : []),
-        { label: "Known Vulnerabilities", value: safe(r.vulnCount) },
-      ];
-    case "LeakIX":
-      return [
-        { label: "Exposed Services", value: safe(r.serviceCount) },
-        { label: "Leaks Found", value: safe(r.leakCount) },
-      ];
-    case "RIPEstat":
-      return [
-        { label: "ASN", value: safe(r.asn) },
-        { label: "Prefix", value: safe(r.prefix) },
-        { label: "Holder", value: safe(r.holder) },
-      ];
-    case "Team Cymru":
-      return [
-        { label: "ASN", value: safe(r.asn) },
-        { label: "Prefix", value: safe(r.prefix) },
-        { label: "Country", value: safe(r.country) },
-      ];
-    case "SANS ISC":
-      return [
-        { label: "Reports", value: safe(r.reportCount) },
-        { label: "Attack Targets", value: safe(r.attackTargets) },
-        { label: "Listed On", value: Array.isArray(r.threatFeeds) ? (r.threatFeeds as string[]).join(", ") : "—" },
-      ];
-    case "MISP Warning Lists":
-      return Array.isArray(r.matchedLists) && r.matchedLists.length > 0
-        ? [{ label: "Matched Lists", value: (r.matchedLists as string[]).join(", ") }]
-        : [{ label: "Matched Lists", value: "None" }];
-    case "crt.sh":
-      return [
-        { label: "Certificates", value: safe(r.certificateCount) },
-        { label: "Subdomains Found", value: safe(r.subdomainCount) },
-        ...(r.latestIssuer ? [{ label: "Latest Issuer", value: String(r.latestIssuer) }] : []),
-      ];
-    case "Hudson Rock":
-      return [
-        { label: "Infostealer Infections", value: safe(r.infostealerInfections) },
-        { label: "Employees Exposed", value: safe(r.employeesExposed) },
-      ];
-    default:
-      return Object.entries(r)
-        .filter(([k]) => k !== "source" && k !== "verdict")
-        .slice(0, 6)
-        .map(([k, v]) => ({ label: k, value: typeof v === "object" ? JSON.stringify(v) : String(v) }));
-  }
-}
-
-export function SourceBreakdown({ results }: { results: IocLookupResult[] }) {
-  if (results.length === 0) return null;
-  return (
-    <Section title="Reputation Source Breakdown">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {results.map((r) => (
-          <div key={r.source} className="rounded-md border border-border p-3 text-xs">
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="font-semibold">{r.source}</span>
-              <Badge variant={VERDICT_BADGE[r.verdict]}>{r.verdict}</Badge>
-            </div>
-            <dl className="space-y-1">
-              {renderSourceFacts(r).map((f) => (
-                <div key={f.label} className="flex gap-1.5">
-                  <dt className="shrink-0 text-muted">{f.label}:</dt>
-                  <dd className="min-w-0 break-words text-foreground">{f.value}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
 }
 
 export function NotConfiguredNotice({ notConfigured, rateLimited, skipped }: { notConfigured: string[]; rateLimited: string[]; skipped: { source: string; reason: string }[] }) {
@@ -157,32 +47,6 @@ interface IpModuleData {
   };
   internalInvestigation: { connected: boolean; message: string };
   relatedIndicators?: { sameCampaignOrActor: RelatedIndicatorEntry[]; sameAsn: SameAsnEntry[] };
-}
-
-interface TimelineEvent {
-  date: string;
-  label: string;
-}
-
-/** Real, dated events only -- pulled from whichever sources actually returned a timestamp (see server/lookups/abuseipdb.js, virustotal.js, connectors/otx.js). A source with no date is simply omitted, never backfilled with a guess. */
-function buildIpTimeline(data: IpModuleData): TimelineEvent[] {
-  const events: TimelineEvent[] = [];
-  const find = (source: string) => data.lookupResults.find((r) => r.source === source);
-
-  const abuseIpdb = find("AbuseIPDB");
-  if (abuseIpdb?.lastSeen) events.push({ date: String(abuseIpdb.lastSeen), label: "Last reported to AbuseIPDB" });
-
-  const vt = find("VirusTotal");
-  if (vt?.lastSeen) events.push({ date: String(vt.lastSeen), label: "Last analyzed by VirusTotal" });
-
-  const otx = find("OTX");
-  if (Array.isArray(otx?.pulses)) {
-    for (const pulse of otx.pulses as Array<{ name: string; created: string }>) {
-      events.push({ date: pulse.created, label: `Added to OTX pulse: ${pulse.name}` });
-    }
-  }
-
-  return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
 function RelatedIndicatorsSection({ data, onPivotToIndicator }: { data: IpModuleData; onPivotToIndicator: (value: string) => void }) {
@@ -247,7 +111,6 @@ function RelatedIndicatorsSection({ data, onPivotToIndicator }: { data: IpModule
 }
 
 export function IpIntelligenceSection({ data, onPivotToIndicator }: { data: IpModuleData; onPivotToIndicator: (value: string) => void }) {
-  const timeline = buildIpTimeline(data);
   return (
     <div className="space-y-4">
       <Section title="Network Intelligence">
@@ -296,29 +159,9 @@ export function IpIntelligenceSection({ data, onPivotToIndicator }: { data: IpMo
 
       <RelatedIndicatorsSection data={data} onPivotToIndicator={onPivotToIndicator} />
 
-      <Section title="Timeline">
-        {timeline.length === 0 ? (
-          <p className="text-xs text-muted">No dated activity reported by any configured source for this indicator.</p>
-        ) : (
-          <ol className="space-y-2 border-l border-white/10 pl-3 text-xs">
-            {timeline.map((event, i) => (
-              <li key={`${event.date}-${i}`} className="relative">
-                <span className="absolute -left-[16px] top-1 h-1.5 w-1.5 rounded-full bg-primary" />
-                <div className="flex items-start justify-between gap-3">
-                  <span className="font-medium text-foreground">{event.label}</span>
-                  <span className="shrink-0 text-muted">{new Date(event.date).toLocaleString()}</span>
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-      </Section>
-
       <Section title="Internal Investigation">
         <div className="rounded-lg border border-dashed border-white/15 bg-white/[0.02] p-3 text-xs text-muted">{data.internalInvestigation.message}</div>
       </Section>
-
-      <SourceBreakdown results={data.lookupResults} />
     </div>
   );
 }
@@ -434,8 +277,6 @@ export function DomainIntelligenceSection({ data }: { data: DomainModuleData }) 
           ]}
         />
       )}
-
-      <SourceBreakdown results={data.lookupResults} />
     </div>
   );
 }
@@ -494,8 +335,6 @@ export function UrlIntelligenceSection({ data }: { data: UrlModuleData }) {
           <p className="text-xs text-muted">Not available — {data.scan?.reason ?? "No scan data returned."}</p>
         )}
       </Section>
-
-      <SourceBreakdown results={data.lookupResults} />
     </div>
   );
 }

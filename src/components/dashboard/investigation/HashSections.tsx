@@ -1,6 +1,5 @@
 // File Hash (SHA256/SHA1/MD5) Indicator-Specific Intelligence.
 import { Section, KeyValueBlock } from "../reportPrimitives";
-import { SourceBreakdown } from "./NetworkIndicatorSections";
 import type { IocLookupResult } from "@/types/threat-intel";
 
 interface HashModuleData {
@@ -60,8 +59,6 @@ export function HashIntelligenceSection({ data }: { data: HashModuleData }) {
           ]}
         />
       )}
-
-      <SourceBreakdown results={data.lookupResults} />
     </div>
   );
 }
