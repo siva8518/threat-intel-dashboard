@@ -48,6 +48,28 @@ import { log } from "./lib/log.js";
 const MAX_ARTICLES_PER_CYCLE = 40;
 const CYCLE_INTERVAL_MS = 2 * 60 * 1000;
 
+// Confirmed live: with no pacing at all, a healthy provider answers each
+// extraction call in well under a second, so a 40-article cycle could fire
+// all 40 calls within seconds -- comfortably exceeding every configured
+// provider's free-tier per-minute quota (Gemini/Cohere free tiers sit around
+// 15-20 RPM) well before the cycle finishes. Once the first-priority
+// provider starts rate-limiting mid-cycle, EVERY remaining article's call
+// then fails over through all 4 providers in turn, burning through their
+// quotas too -- this is the direct cause of interactive requests (the
+// Investigation Workspace's AI panels, Industry Intelligence briefings)
+// seeing "All AI providers failed" even though each provider is healthy in
+// isolation, just already spent for the current minute. Pacing each call
+// keeps the whole cycle's request rate under any single provider's typical
+// free-tier ceiling without lowering MAX_ARTICLES_PER_CYCLE (which exists
+// specifically to keep backlog-drain time bounded -- see that constant's own
+// comment) -- a 40-article cycle now takes ~2-3 minutes instead of a few
+// seconds, comfortably absorbed by this job's self-rescheduling (never
+// overlaps the next cycle; see loop() below).
+const ARTICLE_PACING_MS = 4000;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Malware families with no live indicator behind them at all still get a
 // count but no records to show -- that's real ("Magecart" tagged but
 // nothing currently in the deduped feed"), not a bug in this function.
@@ -184,7 +206,8 @@ async function runCycle() {
   let newEntities = 0;
   let updatedEntities = 0;
 
-  for (const article of unprocessed) {
+  for (const [index, article] of unprocessed.entries()) {
+    if (index > 0) await sleep(ARTICLE_PACING_MS);
     try {
       const { malware, actors, campaigns, techniques, darkweb, tools } = await extractAllEntities({ title: article.title, summary: article.summary });
       extracted += malware.length + actors.length + campaigns.length + techniques.length + darkweb.length + tools.length;

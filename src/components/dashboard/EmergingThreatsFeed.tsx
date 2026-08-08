@@ -19,8 +19,9 @@ function truncateTitle(title: string) {
  * status, peak per-industry risk, and recency). A companion glance to CVE
  * Severity Distribution above it: that widget is CVE-only, this one spans
  * every recent article regardless of whether it names a CVE. Clicking any
- * bar opens the Emerging Threats tab for the full ranked list, aggregate
- * industry heatmap, and score breakdown.
+ * bar opens the Industry Intelligence tab for the full ranked list, aggregate
+ * industry heatmap, and score breakdown (the former standalone "Emerging
+ * Threats" tab was absorbed into that page).
  */
 export function EmergingThreatsFeed({ onOpenTab }: { onOpenTab: () => void }) {
   const { data, isLoading, isError, error } = useEmergingThreatsRanking();

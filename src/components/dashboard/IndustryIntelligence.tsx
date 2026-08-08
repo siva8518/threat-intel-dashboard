@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Flame,
   Radar,
+  RefreshCw,
   ShieldAlert,
   Skull,
   Sparkles,
@@ -24,12 +25,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, EmptyState } from "./ErrorState";
-import { INDUSTRY_EMOJI } from "./IndustryHeatmap";
+import { SeverityBadge } from "./SeverityBadge";
+import { INDUSTRY_EMOJI, IndustryHeatmap } from "./IndustryHeatmap";
 import { RankedBarChart, type ChartDatum } from "./RankedBarChart";
 import { useIndustryBriefing } from "@/hooks/useIndustryBriefing";
 import { useEmergingThreatsRanking } from "@/hooks/useEmergingThreatsRanking";
 import { downloadIocFeedAsCsv, downloadIocFeedAsJson } from "@/lib/iocExport";
 import type {
+  EmergingThreatEntry,
   IndustryBriefingReport,
   IndustryDetectionOpportunity,
   IndustryName,
@@ -43,6 +46,56 @@ const LEVEL_VARIANT: Record<string, "critical" | "high" | "medium" | "low"> = {
   Medium: "medium",
   Low: "low",
 };
+
+const PRIORITY_VARIANT: Record<string, "critical" | "high" | "medium" | "low"> = {
+  Critical: "critical",
+  High: "high",
+  Medium: "medium",
+  Low: "low",
+};
+
+function timeAgo(iso: string) {
+  const ms = Date.now() - new Date(iso).getTime();
+  const hours = Math.floor(ms / (60 * 60 * 1000));
+  if (hours < 1) return "just now";
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** One article row for the per-industry "Latest News" feed below -- same rendering the old standalone Emerging Threats tab used, now scoped to whichever sector is selected. */
+function NewsRow({ entry }: { entry: EmergingThreatEntry }) {
+  return (
+    <a
+      href={entry.id}
+      target="_blank"
+      rel="noreferrer"
+      className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 transition-colors hover:border-white/20"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="truncate text-sm font-semibold text-foreground">{entry.articleTitle}</span>
+          <SeverityBadge severity={entry.severity} />
+          {entry.aiRiskPriority && <Badge variant={PRIORITY_VARIANT[entry.aiRiskPriority] ?? "medium"}>{entry.aiRiskPriority}</Badge>}
+          {entry.knownExploited && (
+            <Badge variant="critical" className="gap-1">
+              <ShieldAlert className="h-3 w-3" />
+              KEV
+            </Badge>
+          )}
+          {entry.hasReport && (
+            <Badge variant="cyan" title="A full AI Summarization report exists for this article -- see the AI Summarization tab">
+              AI Report
+            </Badge>
+          )}
+        </div>
+        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+          {entry.articleSource} &middot; {timeAgo(entry.publishedDate)}
+        </div>
+      </div>
+      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted" />
+    </a>
+  );
+}
 
 const DETECTION_PLATFORM_LABEL: Record<string, string> = {
   sentinelKql: "Microsoft Sentinel (KQL)",
@@ -145,15 +198,27 @@ function DetectionQueryCard({ item }: { item: IndustryDetectionOpportunity }) {
 
 /**
  * "Industry Intelligence" -- select one of 14 sectors, see every real signal
- * this platform has correlated for it: executive summary, active
+ * this platform has correlated for it: an aggregate industry heatmap, the
+ * latest ingested news for that sector, executive summary, active
  * actors/campaigns/malware, CVSS/EPSS/KEV-enriched critical CVEs, an
  * exportable IOC feed, ATT&CK profile, recent reports, detection/hunting
  * guidance, and an AI-generated risk assessment. Nothing here is
  * placeholder data -- every section either comes straight from a real
  * entity/CVE/cache record or (executive summary, risk assessment) from the
- * same strictly-cited Groq generation server/industryBriefing.js already
- * produces for the Emerging Threats heatmap drawer, just rendered as its own
- * full page instead of a slide-over.
+ * same strictly-cited aiRouter generation server/industryBriefing.js already
+ * produces.
+ *
+ * Absorbs the former standalone "Emerging Threats" tab (its Industry Heatmap
+ * card + ranked-articles list) -- that tab was largely a superset-free
+ * subset of this page anyway (this page already fetched the same
+ * useEmergingThreatsRanking() data just to badge its sector chips), so
+ * "click a sector, see its news + full briefing in one place" replaces
+ * "check two separate tabs." The "Sync Now" button and every click on a
+ * sector both re-derive fresh from whatever this platform has ALREADY
+ * ingested from its ~200 sources (server/emergingThreatsRanking.js reads
+ * only already-cached/tagged news, zero new external fetch) -- instant, and
+ * safe to click repeatedly without adding load to the shared AI-provider
+ * pool the rest of the app's on-demand generations share.
  */
 export function IndustryIntelligence() {
   const [selected, setSelected] = useState<IndustryName | null>(null);
@@ -202,6 +267,17 @@ export function IndustryIntelligence() {
     [data],
   );
 
+  // Every recent article across the full ~200-source pool that this
+  // sector's own keyword-matched relevance touched -- computed instantly
+  // from the already-ingested/tagged news cache (server/emergingThreatsRanking.js),
+  // no new external fetch or AI call. This is what "click an industry" syncs
+  // against: everything the platform has already ingested, re-filtered fresh
+  // on every click, not a stale precomputed slice.
+  const industryNews = useMemo(
+    () => (selected ? (ranking.data?.entries ?? []).filter((e) => e.topIndustry?.industry === selected) : []),
+    [ranking.data, selected],
+  );
+
   return (
     <div className="space-y-4">
       <Card>
@@ -242,6 +318,64 @@ export function IndustryIntelligence() {
           </div>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
+            <ShieldAlert className="h-4 w-4 text-primary" />
+            Industry Heatmap
+          </CardTitle>
+          <p className="mt-1 text-xs text-muted">
+            The worst relevance/risk seen for each sector across the last 30 days of news, keyword-matched from every source (not just AI Summarization reports).
+            Click a row for the detail, then "Generate Full Briefing" to select it below.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {ranking.isLoading ? (
+            <Skeleton className="h-64 w-full" />
+          ) : ranking.isError || !ranking.data ? (
+            <ErrorState message={(ranking.error as Error)?.message ?? "Industry Heatmap is unavailable right now."} />
+          ) : (
+            <IndustryHeatmap
+              rows={ranking.data.industryHeatmap.map((row) => ({
+                ...row,
+                subtitle: row.activeThreatCount > 0 ? `(${row.activeThreatCount} active)` : undefined,
+              }))}
+              onGenerateBriefing={selectIndustry}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      {selected && (
+        <SectionCard
+          title={`Latest News for ${selected} (${industryNews.length})`}
+          icon={<Flame className="h-4 w-4" />}
+          description="Every recent article across all ~200 sources this platform has already ingested and tagged for this sector, ranked by Threat Priority Score. Independent of the AI briefing below -- always instant, never blocked by AI-provider availability."
+          action={
+            <button
+              type="button"
+              onClick={() => ranking.refetch()}
+              disabled={ranking.isFetching}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:border-white/20 disabled:opacity-60"
+              title="Re-scans everything this platform has already ingested from its ~200 sources for this sector -- instant, no new external fetch."
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${ranking.isFetching ? "animate-spin" : ""}`} />
+              Sync Now
+            </button>
+          }
+        >
+          {industryNews.length === 0 ? (
+            <EmptyState message="No recent article in the ingested news pool currently ties to this sector -- this fills in as sources sync." />
+          ) : (
+            <div className="max-h-96 space-y-2 overflow-y-auto">
+              {industryNews.map((entry) => (
+                <NewsRow key={entry.id} entry={entry} />
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
 
       {!selected ? (
         <Card>
