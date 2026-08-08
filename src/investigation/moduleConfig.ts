@@ -20,13 +20,19 @@ const FAMILY_BY_TYPE: Record<IndicatorType, SectionFamily> = {
   processName: "artifact",
   registryKey: "artifact",
   userAgent: "artifact",
-  // Ransomware group / country / ASN have no Indicator-Specific Intelligence
-  // section of their own -- their real correlation is entirely the
-  // Investigation Graph (already rendered above this section for every
-  // type), so these render as "artifact" (a plain cross-reference note,
-  // same shape as email/fileName/etc.) rather than adding a fourth
-  // never-populated section family.
-  ransomwareGroup: "artifact",
+  // Ransomware group searches now assemble the exact same entity-centric
+  // correlation dossier a `name` search does (see
+  // server/investigation/entityCorrelation.js#buildEntityDossier, called by
+  // both entityModule.js and ransomwareGroupModule.js) -- so it renders
+  // through the same rich "entity" family instead of the bare cross-
+  // reference note "artifact" used to give it.
+  ransomwareGroup: "entity",
+  // Country / ASN have no Indicator-Specific Intelligence section of their
+  // own -- their real correlation is entirely the Investigation Graph
+  // (already rendered above this section for every type), so these render
+  // as "artifact" (a plain cross-reference note, same shape as
+  // email/fileName/etc.) rather than adding a fifth never-populated section
+  // family.
   country: "artifact",
   asn: "artifact",
   unknown: "unknown",

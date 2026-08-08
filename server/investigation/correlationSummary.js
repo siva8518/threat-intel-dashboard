@@ -18,7 +18,7 @@
 // it's handed, exactly the same division of labor already proven
 // throughout this app.
 import { aiRouter } from "../ai/aiRouter.js";
-import { checkProseGrounding, checkCveExploitationClaim } from "./groundClaims.js";
+import { checkProseGrounding, checkCveExploitationClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim } from "./groundClaims.js";
 
 function norm(v) {
   return (v ?? "").toString().trim().toLowerCase();
@@ -61,6 +61,7 @@ const SYSTEM_PROMPT =
   "You are a senior Threat Intelligence Analyst producing a correlation summary for another analyst who just searched an indicator or entity in this platform. " +
   "You are given: the searched entity/indicator, its verdict, every REAL relationship this platform's Investigation Graph already discovered (ranked by confidence), which relationship types this platform genuinely cannot answer, real matched AI Summarization reports, real deterministically-tallied lists (industries affected, reused infrastructure, ATT&CK techniques, victims) -- these lists are already final and correct, you do NOT need to and must NOT re-derive or second-guess them. " +
   "Your job is narrative synthesis ONLY: explain what this entity is, why it matters, how the discovered relationships connect, and what to investigate next -- never restate the raw lists you were given, the analyst can already see them. " +
+  "\n\nNO-REPETITION RULE: for an entity-type search (a threat actor/malware family/ransomware group/campaign) you may also be given `entityDossierCounts` -- an Entity Overview panel already on the same page shows these exact counts (malware families, campaigns, CVEs, IOCs, victims, threat reports) to the analyst. Do NOT restate those counts (\"this entity has 3 campaigns and 12 IOCs...\") or enumerate every campaign/CVE/IOC by name -- your prose adds NEW value: cross-cutting synthesis, patterns across the counts, gaps, and the single highest-value next pivot. " +
   "\n\nGROUNDING RULES:\n" +
   "- Every claim must trace to a specific item in the data you were given (an edge, a report, a tallied industry/reuse/technique entry). Never invent a name, a count, or a relationship not present in the data.\n" +
   '- If the data is too sparse to answer a question meaningfully, say so plainly (e.g. "Not enough discovered relationships to assess infrastructure reuse yet") rather than forcing an answer.\n' +
@@ -98,7 +99,8 @@ function parseModelReport(raw) {
  * @param {import("../../src/types/threat-intel.js").InvestigationResult} result
  */
 export async function generateCorrelationSummary(result) {
-  const { overview, graph, relatedIntelligence, rankedFindings, coverage } = result;
+  const { overview, graph, relatedIntelligence, rankedFindings, coverage, moduleData } = result;
+  const dossier = moduleData?.dossier ?? null;
 
   const industriesAffected = tallyIndustries(relatedIntelligence?.matchingAiReports ?? []);
   const reusedInfrastructure = reuseIndicators(relatedIntelligence, graph);
@@ -130,6 +132,19 @@ export async function generateCorrelationSummary(result) {
     relatedActors,
     relatedCampaigns,
     relatedMalware,
+    // Counts only (never the full item lists -- those already render in the
+    // Entity Overview panel; duplicating them here would just tempt the
+    // model to restate them, which the NO-REPETITION RULE above forbids).
+    entityDossierCounts: dossier
+      ? {
+          malwareFamilyCount: dossier.malwareFamilyCount,
+          campaignCount: dossier.campaignCount,
+          cveCount: dossier.cveCount,
+          iocCount: dossier.iocCount,
+          victimCount: dossier.victimCount,
+          threatReportCount: dossier.threatReportCount,
+        }
+      : null,
   };
   const userPrompt = `UNIFIED INVESTIGATION RESULT (verified by this platform, not model-generated):\n${JSON.stringify(context, null, 2)}\n\nProduce the JSON correlation summary described in your instructions.`;
 
@@ -141,7 +156,20 @@ export async function generateCorrelationSummary(result) {
   // model is allowed to reference in its narrative prose.
   const allowedNames = [overview.indicator, ...relatedActors, ...relatedCampaigns, ...relatedMalware, ...victimsTargeted];
   const cveExploitationState = overview.cveExploitationState;
-  const ground = (text) => checkCveExploitationClaim(checkProseGrounding(text, allowedNames).text, cveExploitationState).text;
+  // No-op (always true) for indicator types with no dossier at all -- these
+  // 3 checks exist specifically for the entity-dossier claims Phase 6 adds,
+  // not to re-police IOC-type narratives that checkProseGrounding already covers.
+  const hasCampaignData = dossier ? dossier.campaignCount > 0 : true;
+  const hasDirectCveAssociation = dossier ? dossier.associatedCves.some((c) => c.confidenceLabel === "DIRECT") : true;
+  const hasVictimTargetingData = dossier ? dossier.victimsTargeting.totalVictims > 0 : true;
+  const ground = (text) => {
+    let out = checkProseGrounding(text, allowedNames).text;
+    out = checkCveExploitationClaim(out, cveExploitationState).text;
+    out = checkCampaignInvolvementClaim(out, hasCampaignData).text;
+    out = checkCveExploitationByActorClaim(out, hasDirectCveAssociation).text;
+    out = checkVictimTargetingClaim(out, hasVictimTargetingData).text;
+    return out;
+  };
 
   return {
     whatIsThis: ground(safeString(parsed.whatIsThis, "Not enough data to characterize this entity.")),

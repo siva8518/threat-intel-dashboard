@@ -143,7 +143,13 @@ export function useInvestigationGraph() {
    * /investigate's inlined `graph` field) -- no network fetch. Also
    * primes React Query's own cache for this node so a later `expandNode`
    * re-visit (e.g. clicking back to the seed node) is free, same as if it
-   * had been fetched normally.
+   * had been fetched normally. `result.additionalNodes` (entity-type
+   * searches only -- see investigationGraph.js#getExpandedGraph) is merged
+   * right after the seed, one node at a time, through the exact same
+   * `mergeGraphResult` -- each additional node's own key already has a
+   * placeholder position assigned during the seed merge (since the seed's
+   * own edges already point at it), so this is what makes the graph open
+   * already showing 2 hops instead of requiring a click per hop.
    */
   const seed = useCallback(
     (type: GraphNodeType, key: string, result: GraphNodeResult) => {
@@ -156,6 +162,11 @@ export function useInvestigationGraph() {
       setErrorIds(new Map());
       queryClient.setQueryData(queryKeys.investigationGraphNode(type, key), result);
       mergeGraphResult(id, result);
+      for (const extra of result.additionalNodes ?? []) {
+        const extraId = nodeKey(extra.seedType, extra.seedKey);
+        queryClient.setQueryData(queryKeys.investigationGraphNode(extra.seedType, extra.seedKey), extra);
+        mergeGraphResult(extraId, extra);
+      }
     },
     [queryClient, mergeGraphResult]
   );

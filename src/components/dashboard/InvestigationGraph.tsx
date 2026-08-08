@@ -36,6 +36,7 @@ import {
   Flag,
   ExternalLink,
   Sparkles,
+  Factory,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -71,6 +72,7 @@ const NODE_TYPE_LABEL: Record<GraphNodeType, string> = {
   country: "Country",
   report: "AI Summarization Report",
   asn: "ASN",
+  industry: "Industry",
 };
 
 const NODE_TYPE_ICON: Record<GraphNodeType, typeof UserSearch> = {
@@ -92,6 +94,7 @@ const NODE_TYPE_ICON: Record<GraphNodeType, typeof UserSearch> = {
   country: Flag,
   report: FileText,
   asn: Network,
+  industry: Factory,
 };
 
 // Seed types an analyst can start a fresh graph from -- asn is deliberately

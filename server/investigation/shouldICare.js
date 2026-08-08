@@ -33,7 +33,7 @@
 // relationship/attribution/intent/environmental-impact claim itself.
 import { aiRouter } from "../ai/aiRouter.js";
 import { hasSharedInfrastructureSignal, hasKnownAttribution } from "./verdictEngine.js";
-import { checkProseGrounding, checkCveExploitationClaim, checkUnsupportedClaims, checkMaliciousIntentClaim } from "./groundClaims.js";
+import { checkProseGrounding, checkCveExploitationClaim, checkUnsupportedClaims, checkMaliciousIntentClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim } from "./groundClaims.js";
 
 // No SIEM/EDR/network-telemetry integration exists anywhere in this
 // platform (confirmed -- see server/investigation/ipModule.js's own
@@ -57,6 +57,21 @@ function hasIntentSupportingEvidence(evidence) {
   return evidence.items.some((i) => (i.category === "direct" || i.category === "corroborating") && INTENT_SUPPORTING_SOURCES.has(i.source));
 }
 
+// Only surfaced when a genuine majority of this entity's own tracked
+// victims fall in one industry (>=50%, at least 3 victims so 1-of-1 doesn't
+// read as a "pattern") -- computed here in JS from the dossier's own real
+// byIndustry tally (entityCorrelation.js#buildVictimsTargeting), never left
+// for the model to eyeball from a raw list.
+function victimIndustryConcentrationFor(dossier) {
+  const byIndustry = dossier?.victimsTargeting?.byIndustry ?? [];
+  const total = dossier?.victimsTargeting?.totalVictims ?? 0;
+  if (total < 3 || byIndustry.length === 0) return null;
+  const top = byIndustry[0];
+  const share = top.count / total;
+  if (share < 0.5) return null;
+  return { industry: top.industry, count: top.count, totalVictims: total, sharePercent: Math.round(share * 100) };
+}
+
 function infrastructureNote(evidence) {
   if (!hasSharedInfrastructureSignal(evidence)) return null;
   return "This indicator sits on known shared/cloud/CDN/VPN/datacenter infrastructure -- ownership of that infrastructure is context, not evidence of malicious activity. Legitimate and malicious tenants both use it; attribution requires more than IP/ASN ownership.";
@@ -76,6 +91,7 @@ const SYSTEM_PROMPT =
   "- Never claim this indicator is attacking, has compromised, or is otherwise confirmed active against the analyst's own environment -- environmentalRelevance is computed separately and always \"cannot be determined\" unless real telemetry says otherwise.\n" +
   "- Never state a CVE is actively/confirmed exploited from CVSS, EPSS, or exploit-availability alone -- only from the provided cveExploitationState.\n" +
   "- Your synthesis must be CONSISTENT with the provided analystDecision -- do not imply more or less urgency than that decision reflects.\n" +
+  "- For an entity-type search (a threat actor/malware family/ransomware group/campaign, indicated by hasVerifiedEntityProfile being non-null) your combinedAssessment should read differently than for a bare IOC: if hasVerifiedEntityProfile is true, ground the assessment in the entity's real correlated profile depth (not just a reputation verdict); if false but victim disclosures still exist, say so plainly (a tracked ransomware group with disclosed victims but no deeper platform-verified profile) rather than implying more is known than the data supports. If victimIndustryConcentration is present, you may note the concentration as a targeting pattern -- but only if it's genuinely present in the data.\n" +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
   '"combinedAssessment": string -- 2-4 sentences synthesizing what the evidence indicates ONCE COMPARED: overall strength/consistency, how any conflict was resolved or why it remains unresolved, whether apparent multi-source agreement is genuinely independent, and how shared-infrastructure context (if any) tempers the read. Never source-name-first, never restate the raw evidence list.\n' +
   '"likelyMaliciousIntent": string -- 1-3 sentences. Follow the grounding rule above exactly.\n' +
@@ -99,9 +115,10 @@ function parseModelReport(raw) {
  * @param {import("../../src/types/threat-intel.js").InvestigationResult} result
  */
 export async function generateShouldICare(result) {
-  const { overview, graph, relatedIntelligence } = result;
+  const { overview, graph, relatedIntelligence, moduleData } = result;
   const verdict = overview.verdict;
   const evidence = verdict.evidence;
+  const dossier = moduleData?.dossier ?? null;
 
   const relatedActors = (graph?.edges ?? []).filter((e) => e.targetType === "actor").map((e) => e.targetLabel);
   const relatedCampaigns = (graph?.edges ?? []).filter((e) => e.targetType === "campaign").map((e) => e.targetLabel);
@@ -152,6 +169,12 @@ export async function generateShouldICare(result) {
     attackTechniques,
     matchingAiReportCount: relatedIntelligence?.matchingAiReports?.length ?? 0,
     environmentalRelevance: hasEnvironmentalTelemetry ? "known" : "cannot be determined -- no SIEM/EDR/network-telemetry integration",
+    // null for IOC-type searches (no dossier at all); for an entity search,
+    // true only when this platform matched a real verified malware/actor/
+    // campaign profile (entityCorrelation.js `sourceType === "verified-profile"`),
+    // not merely a bare ransomware-tracker group name.
+    hasVerifiedEntityProfile: dossier ? dossier.sourceType === "verified-profile" : null,
+    victimIndustryConcentration: victimIndustryConcentrationFor(dossier),
   };
   const userPrompt = `INDICATOR ASSESSMENT INPUT (verified by this platform, not model-generated):\n${JSON.stringify(context, null, 2)}\n\nProduce the JSON "Should I Care?" synthesis described in your instructions.`;
 
@@ -161,7 +184,20 @@ export async function generateShouldICare(result) {
 
   const allowedNames = [overview.indicator, ...relatedActors, ...relatedCampaigns, ...relatedMalware, ...victimsTargeted];
   const groundingContext = { hasAttribution: attributed, hasEnvironmentalTelemetry };
-  const ground = (text) => checkUnsupportedClaims(checkCveExploitationClaim(checkProseGrounding(text, allowedNames).text, overview.cveExploitationState).text, groundingContext).text;
+  // No-op (always true) for indicator types with no dossier at all -- see
+  // the matching comment in correlationSummary.js.
+  const hasCampaignData = dossier ? dossier.campaignCount > 0 : true;
+  const hasDirectCveAssociation = dossier ? dossier.associatedCves.some((c) => c.confidenceLabel === "DIRECT") : true;
+  const hasVictimTargetingData = dossier ? dossier.victimsTargeting.totalVictims > 0 : true;
+  const ground = (text) => {
+    let out = checkProseGrounding(text, allowedNames).text;
+    out = checkCveExploitationClaim(out, overview.cveExploitationState).text;
+    out = checkUnsupportedClaims(out, groundingContext).text;
+    out = checkCampaignInvolvementClaim(out, hasCampaignData).text;
+    out = checkCveExploitationByActorClaim(out, hasDirectCveAssociation).text;
+    out = checkVictimTargetingClaim(out, hasVictimTargetingData).text;
+    return out;
+  };
 
   const combinedAssessment = ground(safeString(parsed.combinedAssessment, "Not enough data to characterize the combined intelligence picture for this indicator."));
   const rawIntent = safeString(parsed.likelyMaliciousIntent, null);

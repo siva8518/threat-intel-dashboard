@@ -26,7 +26,7 @@ import * as artifactModule from "./artifactModule.js";
 import * as ransomwareGroupModule from "./ransomwareGroupModule.js";
 import * as countryModule from "./countryModule.js";
 import { crossReferenceIndicator } from "./crossReference.js";
-import { getGraphNode } from "./investigationGraph.js";
+import { getGraphNode, getExpandedGraph } from "./investigationGraph.js";
 import { resolveCanonicalAlias } from "./knownAliasGroups.js";
 import { buildSearchCoverage } from "./coverage.js";
 import { rankFindings } from "./rankResults.js";
@@ -67,13 +67,21 @@ function resolveGraphTarget(type, normalized, moduleData) {
   const direct = DIRECT_GRAPH_TYPE[type];
   if (direct) return { type: direct, key: normalized };
 
-  if (type === "ransomwareGroup") return { type: "actor", key: normalized };
+  // `dossier.primaryEntity` (entityCorrelation.js#pickPrimaryEntity) is now
+  // the ONE shared precedence both `name` and `ransomwareGroup` searches
+  // agree on -- malware first, then a Ransomware/APT actor, then any actor,
+  // then a campaign -- computed once in the dossier both entityModule.js
+  // and ransomwareGroupModule.js attach, instead of two separate,
+  // previously-drifting implementations here.
+  if (type === "ransomwareGroup") {
+    const primary = moduleData.dossier?.primaryEntity;
+    if (primary) return { type: primary.type, key: primary.name };
+    return { type: "actor", key: normalized };
+  }
 
   if (type === "name") {
-    if (moduleData.malware?.length > 0) return { type: "malware", key: moduleData.malware[0].entity.name };
-    const primaryActor = moduleData.actors?.find((a) => a.type === "Ransomware" || a.type === "APT") ?? moduleData.actors?.[0];
-    if (primaryActor) return { type: "actor", key: primaryActor.name };
-    if (moduleData.campaigns?.length > 0) return { type: "campaign", key: moduleData.campaigns[0].name };
+    const primary = moduleData.dossier?.primaryEntity;
+    if (primary) return { type: primary.type, key: primary.name };
     // Nothing matched any of the three entity stores -- last resort, check
     // whether this is actually a victim organization (ransomware/dark-web
     // records key by org name, not by malware/actor/campaign name, so
@@ -84,15 +92,38 @@ function resolveGraphTarget(type, normalized, moduleData) {
   return null;
 }
 
+// Entity-type searches (name/ransomwareGroup -- an actor/malware/campaign/
+// ransomware-group name) auto-expand 2 hops server-side so the Investigation
+// Graph opens already showing the searched entity's own real relationships
+// PLUS one hop beyond its strongest-confidence ones, instead of requiring
+// the analyst to click every hop manually -- see
+// investigationGraph.js#getExpandedGraph. IOC-type searches (ip/domain/hash/
+// etc.) keep today's single-hop `getGraphNode` behavior unchanged -- several
+// of those trigger live network calls per node, and fanning that out
+// automatically was never part of this change's scope.
+const AUTO_EXPAND_GRAPH_TYPES = new Set(["name", "ransomwareGroup"]);
+
 /** Real graph node for this search, computed once and reused for both the Relationships view and Recommended Actions -- never a second fetch. Returns null only when no graph node type applies at all (shouldn't happen given resolveGraphTarget's victim fallback, but stays defensive). */
 async function computeGraphResult(type, normalized, moduleData) {
   const target = resolveGraphTarget(type, normalized, moduleData);
   if (!target) return null;
   try {
+    if (AUTO_EXPAND_GRAPH_TYPES.has(type)) return await getExpandedGraph(target.type, target.key);
     return await getGraphNode(target.type, target.key);
   } catch {
     return null; // graph computation failing (e.g. a live DNS/RIPEstat call throwing) should never fail the whole investigation
   }
+}
+
+function mergeReports(a, b) {
+  const seen = new Set();
+  const out = [];
+  for (const r of [...(a ?? []), ...(b ?? [])]) {
+    if (!r || seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+  return out;
 }
 
 function mostRecent(...dates) {
@@ -187,11 +218,23 @@ function assemble(indicator, type, moduleData, crossRef, graph, resolvedCanonica
           matchedMalwareFamilies: crossRef.matchedMalwareFamilies,
           associatedThreatActors: crossRef.associatedThreatActors,
           activeCampaigns: crossRef.activeCampaigns,
-          matchingAiReports: crossRef.matchingAiReports,
+          // The dossier's own name-indexed report search (entityCorrelation.js,
+          // via crossReference.js#findAiReportsByEntityName) fills the gap
+          // crossReferenceIndicator's IOC-VALUE-keyed matchingAiReports can
+          // never fill for a bare group/entity name -- merged in (deduped by
+          // id) rather than replacing crossRef's own IOC-based hits, so a
+          // ransomwareGroup search keeps both signals.
+          matchingAiReports: mergeReports(crossRef.matchingAiReports, moduleData.dossier?.threatReports),
           relatedIocs: crossRef.relatedIocs,
         }
       : type === "name"
-        ? { matchedMalwareFamilies: (moduleData.malware ?? []).map((m) => m.entity.name), associatedThreatActors: (moduleData.actors ?? []).map((a) => a.name), activeCampaigns: (moduleData.campaigns ?? []).map((c) => c.name), matchingAiReports: [], relatedIocs: [] }
+        ? {
+            matchedMalwareFamilies: (moduleData.malware ?? []).map((m) => m.entity.name),
+            associatedThreatActors: (moduleData.actors ?? []).map((a) => a.name),
+            activeCampaigns: (moduleData.campaigns ?? []).map((c) => c.name),
+            matchingAiReports: moduleData.dossier?.threatReports ?? [],
+            relatedIocs: [],
+          }
         : null,
     notConfigured: moduleData.notConfigured ?? [],
     rateLimited: moduleData.rateLimited ?? [],
@@ -234,7 +277,12 @@ export async function investigate(rawValue) {
     return assemble(normalized, type, data, crossReferenceIndicator(normalized), graph);
   }
   if (type === "ransomwareGroup") {
-    const [data, graph] = await Promise.all([ransomwareGroupModule.gather(normalized), computeGraphResult("ransomwareGroup", normalized, {})]);
+    // Genuinely sequential (like "name" below) -- the graph target now reads
+    // moduleData.dossier.primaryEntity (entityCorrelation.js), so the graph
+    // fetch must wait for the module's own dossier-building gather() to
+    // finish rather than racing it with an empty moduleData stand-in.
+    const data = await ransomwareGroupModule.gather(normalized);
+    const graph = await computeGraphResult("ransomwareGroup", normalized, data);
     return assemble(normalized, "ransomwareGroup", data, data.crossReference, graph);
   }
   if (type === "country") {

@@ -27,6 +27,7 @@ const PLURAL_LABEL: Record<GraphNodeType, string> = {
   country: "Related Countries",
   report: "Related AI Summarization Reports",
   asn: "Related ASNs",
+  industry: "Targeted Industries",
 };
 
 function LeadGroup({ type, edges, onSelect }: { type: GraphNodeType; edges: GraphEdgeWithSource[]; onSelect: (type: GraphNodeType, key: string) => void }) {

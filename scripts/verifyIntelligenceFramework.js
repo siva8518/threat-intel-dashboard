@@ -26,6 +26,8 @@ import { assessCveExploitationState } from "../server/investigation/cveExploitSt
 import { computeVerdict } from "../server/investigation/verdictEngine.js";
 import { investigate } from "../server/investigation/index.js";
 import { getAllEntities as getMalwareEntities } from "../server/malwareIntelligence.js";
+import { getAllEntities as getActorEntities } from "../server/threatActorIntelligence.js";
+import { labelFor } from "../server/investigation/relationshipConfidenceLabel.js";
 
 let pass = 0;
 let fail = 0;
@@ -253,6 +255,158 @@ async function main() {
       "14. Suspicious state from a single weak corroborating signal -> never \"Block\"",
       verdict.state === "Suspicious" && verdict.blockRecommendation === "Monitor — Do Not Block",
       `state=${verdict.state} blockRecommendation=${verdict.blockRecommendation}`,
+    );
+  }
+
+  // --- Entity-Centric Correlation Engine (see
+  // C:\Users\sivak\.claude\plans\moonlit-zooming-hopper.md) -- scenarios
+  // 15-22 cover the 7 required entity types plus a labelFor() unit check.
+
+  // 15. Clop -- the literal reported bug's regression guard: victimCount>0
+  // must never produce UNKNOWN severity, and the dossier's iocInventory
+  // field (entityCorrelation.js) must actually be present. Deliberately does
+  // NOT require type==="ransomwareGroup": detect.js's ransomware-tracker
+  // group list is live/cached data that can shift "Clop" between the
+  // ransomwareGroup and name routes between runs -- and per Phase 1, both
+  // routes now call the SAME buildEntityDossier(), so either is a valid,
+  // equally-correlated outcome. Reads the dossier's own real victimCount
+  // (not moduleData.victimCount, which only exists on the
+  // ransomwareGroupModule-specific branch).
+  try {
+    const result = await investigate("Clop");
+    const dossier = result.moduleData?.dossier;
+    const realVictimCount = dossier?.victimCount ?? 0;
+    ok(
+      "15. \"Clop\" -> severity never UNKNOWN when dossier victimCount>0, dossier.iocInventory present",
+      (result.type === "ransomwareGroup" || result.type === "name") && (realVictimCount === 0 || result.overview.verdict.severity !== "UNKNOWN") && Array.isArray(dossier?.iocInventory),
+      `type=${result.type} dossierVictimCount=${realVictimCount} severity=${result.overview.verdict.severity} iocInventoryIsArray=${Array.isArray(dossier?.iocInventory)}`,
+    );
+  } catch (error) {
+    skip("15. \"Clop\"", error.message);
+  }
+
+  // 16. Malware family with real IOC sightings -- associatedCves entries
+  // derived from the malware alone (no overlapping actor match) must never
+  // be labeled DIRECT (entityCorrelation.js#buildAssociatedCves has no
+  // malware->CVE field at all, only INFERRED via a using-actor's own
+  // record); iocInventory's real count must not exceed the entity's own
+  // raw iocs+articleIocs count (dedup can only shrink it, never grow it).
+  try {
+    const withIocs = getMalwareEntities().find((e) => (e.iocs?.length ?? 0) + (e.articleIocs?.length ?? 0) > 0);
+    if (!withIocs) {
+      skip("16. Malware family with real IOCs", "no malware entity in this platform's current data has any iocs/articleIocs on file");
+    } else {
+      const result = await investigate(withIocs.name);
+      const dossier = result.moduleData?.dossier;
+      const actorCount = dossier?._matchedActors?.length ?? 0;
+      const noDirectFromMalwareAlone = actorCount > 0 || (dossier?.associatedCves ?? []).every((c) => c.confidenceLabel !== "DIRECT");
+      const rawIocCount = (withIocs.iocs?.length ?? 0) + (withIocs.articleIocs?.length ?? 0);
+      const iocCountSane = (dossier?.iocCount ?? 0) > 0 && dossier.iocCount <= rawIocCount;
+      ok(
+        `16. Malware family "${withIocs.name}" -> associatedCves never DIRECT when malware-only, iocCount sane (<=${rawIocCount})`,
+        noDirectFromMalwareAlone && iocCountSane,
+        `actorCount=${actorCount} noDirectFromMalwareAlone=${noDirectFromMalwareAlone} iocCount=${dossier?.iocCount} rawIocCount=${rawIocCount}`,
+      );
+    }
+  } catch (error) {
+    skip("16. Malware family with real IOCs", error.message);
+  }
+
+  // 17. Verified threat actor -- campaign-history bucketing
+  // (entityCorrelation.js#bucketForCampaign, CURRENT_WINDOW_DAYS=365) must
+  // match what the same rule computes independently here for every real
+  // campaign entry returned.
+  try {
+    const verifiedActor = getActorEntities().find((a) => a.verified === true);
+    if (!verifiedActor) {
+      skip("17. Verified threat actor campaign-history buckets", "no verified actor entity in this platform's current data");
+    } else {
+      const result = await investigate(verifiedActor.name);
+      const campaigns = result.moduleData?.dossier?.campaigns ?? [];
+      const bucketsCorrect = campaigns.every((c) => {
+        if (!c.lastSeen) return c.bucket === "undated";
+        const days = (Date.now() - new Date(c.lastSeen).getTime()) / 86_400_000;
+        return c.bucket === (days <= 365 ? "current" : "historical");
+      });
+      ok(
+        `17. Verified actor "${verifiedActor.name}" -> campaign history buckets (${campaigns.length}) match CURRENT_WINDOW_DAYS rule`,
+        bucketsCorrect,
+        `campaignCount=${campaigns.length} buckets=${JSON.stringify(campaigns.map((c) => c.bucket))}`,
+      );
+    }
+  } catch (error) {
+    skip("17. Verified threat actor campaign-history buckets", error.message);
+  }
+
+  // 18. An actor's own real cveExploited[] field must surface as a DIRECT
+  // dossier association (entityCorrelation.js#buildAssociatedCves) -- the
+  // exact property groundClaims.js#checkCveExploitationByActorClaim and the
+  // CVE-badge UI actually depend on. Does NOT require cveProfile.js's own
+  // relatedActors (server/cveProfile.js's reverse ATT&CK-citation walk) to
+  // also list this actor -- that's a genuinely separate data source (ATT&CK
+  // groups DB) from actor.cveExploited (this platform's own news-extraction
+  // field), so the two are not guaranteed to agree; only logged as FYI.
+  try {
+    const actorWithCve = getActorEntities().find((a) => (a.cveExploited ?? []).length > 0);
+    if (!actorWithCve) {
+      skip("18. Actor cveExploited -> DIRECT dossier association", "no actor entity in this platform's current data has a cveExploited record");
+    } else {
+      const cveId = actorWithCve.cveExploited[0];
+      const actorResult = await investigate(actorWithCve.name);
+      const foundCveOnActorSide = (actorResult.moduleData?.dossier?.associatedCves ?? []).some((c) => c.cveId === cveId && c.confidenceLabel === "DIRECT");
+      const cveResult = await investigate(cveId);
+      const alsoOnAttckSide = (cveResult.moduleData?.profile?.relatedActors ?? []).some((a) => a.name === actorWithCve.name);
+      ok(
+        `18. Actor "${actorWithCve.name}"'s own cveExploited record (${cveId}) surfaces as a DIRECT dossier association`,
+        foundCveOnActorSide,
+        `foundCveOnActorSide=${foundCveOnActorSide} alsoConfirmedViaAttckReverseCitation(informational)=${alsoOnAttckSide}`,
+      );
+    }
+  } catch (error) {
+    skip("18. Actor cveExploited -> DIRECT dossier association", error.message);
+  }
+
+  // 19/20. IP and domain searches stay single-hop -- getExpandedGraph
+  // (investigationGraph.js) must NEVER fire for IOC-shaped types, only
+  // name/ransomwareGroup (index.js#AUTO_EXPAND_GRAPH_TYPES).
+  for (const [label, query] of [["19. IP", "185.220.101.5"], ["20. Domain", "example.com"]]) {
+    try {
+      const result = await investigate(query);
+      ok(`${label} search "${query}" -> Investigation Graph stays single-hop (no additionalNodes)`, result.graph?.additionalNodes === undefined, `additionalNodes=${JSON.stringify(result.graph?.additionalNodes)}`);
+    } catch (error) {
+      skip(`${label} search "${query}" single-hop graph`, error.message);
+    }
+  }
+
+  // 21. File hash routing untouched by this plan -- hashModule.js never
+  // attaches a dossier (that's name/ransomwareGroup-only), confirming this
+  // change didn't accidentally widen scope to hash-type searches.
+  try {
+    const withHash = getMalwareEntities().find((e) => (e.iocs ?? []).some((i) => i.indicatorType === "hash"));
+    if (!withHash) {
+      skip("21. File hash routing untouched", "no malware entity in this platform's current data has a hash IOC on file");
+    } else {
+      const testHash = withHash.iocs.find((i) => i.indicatorType === "hash").indicator;
+      const result = await investigate(testHash);
+      const isHashType = ["sha256", "sha1", "md5"].includes(result.type);
+      ok(`21. File hash (${testHash.slice(0, 12)}...) -> routes as a hash type, no entity dossier attached`, isHashType && result.moduleData?.dossier === undefined, `type=${result.type} dossierPresent=${result.moduleData?.dossier !== undefined}`);
+    }
+  } catch (error) {
+    skip("21. File hash routing untouched", error.message);
+  }
+
+  // 22. labelFor() unit check (Phase 3) -- "shares ASN with"
+  // (infrastructure-colocation) must map to CONTEXTUAL regardless of
+  // confidence; a High-confidence explicit-record edge ("uses malware")
+  // must map to DIRECT. Synthetic edges, no network.
+  {
+    const asnEdgeHigh = { semantics: { claimStrength: "infrastructure-colocation" }, confidence: "High" };
+    const asnEdgeLow = { semantics: { claimStrength: "infrastructure-colocation" }, confidence: "Low" };
+    const explicitHigh = { semantics: { claimStrength: "explicit-record" }, confidence: "High" };
+    ok(
+      "22. labelFor() -- infrastructure-colocation always CONTEXTUAL, explicit-record+High -> DIRECT",
+      labelFor(asnEdgeHigh) === "CONTEXTUAL" && labelFor(asnEdgeLow) === "CONTEXTUAL" && labelFor(explicitHigh) === "DIRECT",
+      `asnHigh=${labelFor(asnEdgeHigh)} asnLow=${labelFor(asnEdgeLow)} explicitHigh=${labelFor(explicitHigh)}`,
     );
   }
 

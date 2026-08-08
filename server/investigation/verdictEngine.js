@@ -111,41 +111,66 @@ function cveSeverityFactors(cve, exploitState) {
   };
 }
 
+// Reads EVERY matched entity (not just [0] -- that was only ever a display
+// precedence, see evidence.js's own fix), aggregated into one impact/scope/
+// technical-severity read.
 function nameEntitySeverityFactors(moduleData) {
-  const malware = moduleData?.malware?.[0]?.entity;
-  const actor = moduleData?.actors?.[0];
-  const campaign = moduleData?.campaigns?.[0];
-  if (!malware && !actor && !campaign) return notApplicableFactors("No matched malware/actor/campaign entity.");
+  const malware = (moduleData?.malware ?? []).map((m) => m.entity ?? m);
+  const actors = moduleData?.actors ?? [];
+  const campaigns = moduleData?.campaigns ?? [];
+  if (malware.length === 0 && actors.length === 0 && campaigns.length === 0) return notApplicableFactors("No matched malware/actor/campaign entity.");
 
-  const kind = malware ? "malware family" : actor ? "threat actor" : "campaign";
+  const primaryActor = actors.find((a) => a.type === "Ransomware" || a.type === "APT") ?? actors[0];
+  const totalSightings = malware.reduce((sum, m) => sum + (m.iocSightings ?? 0), 0);
+  const kind = malware.length > 0 ? "malware family" : primaryActor ? "threat actor" : "campaign";
+
   const potentialImpact =
-    actor && (actor.type === "Ransomware" || actor.type === "APT")
-      ? `${actor.type} actor -- historically capable of severe operational/data impact.`
-      : malware && (malware.iocSightings ?? 0) > 0
-        ? `Malware family with ${malware.iocSightings} live indicator sighting(s) -- actively observed in the wild.`
-        : `Tracked ${kind}, no elevated impact signal beyond being tracked.`;
-  const scope = actor
-    ? `Targeted industries: ${(actor.targetedIndustries ?? []).slice(0, 5).join(", ") || "not specified"}; countries: ${(actor.targetedCountries ?? []).slice(0, 5).join(", ") || "not specified"}.`
-    : campaign
-      ? `Targeted industries: ${(campaign.targetedIndustries ?? []).slice(0, 5).join(", ") || "not specified"}.`
-      : "Scope not separately tracked for this entity type.";
-  const technicalSeverity = malware
-    ? `${malware.iocSightings ?? 0} live indicator sighting(s) tracked.`
-    : actor
-      ? `${(actor.techniqueIds ?? []).length} tracked ATT&CK technique(s) used.`
-      : "No technical detail tracked for campaigns beyond associated actors/malware.";
+    primaryActor && (primaryActor.type === "Ransomware" || primaryActor.type === "APT")
+      ? `${primaryActor.type} actor -- historically capable of severe operational/data impact.${actors.length > 1 ? ` (${actors.length} matched actor record(s) total.)` : ""}`
+      : totalSightings > 0
+        ? `${malware.length} matched malware famil${malware.length === 1 ? "y" : "ies"} with ${totalSightings} live indicator sighting(s) total -- actively observed in the wild.`
+        : `Tracked ${kind}(s) (${malware.length} malware, ${actors.length} actor, ${campaigns.length} campaign record(s) matched), no elevated impact signal beyond being tracked.`;
+  const industries = new Set([...actors.flatMap((a) => a.targetedIndustries ?? []), ...campaigns.flatMap((c) => c.targetedIndustries ?? [])]);
+  const countries = new Set([...actors.flatMap((a) => a.targetedCountries ?? []), ...campaigns.flatMap((c) => c.targetedCountries ?? [])]);
+  const scope = industries.size > 0 || countries.size > 0
+    ? `Targeted industries: ${Array.from(industries).slice(0, 5).join(", ") || "not specified"}; countries: ${Array.from(countries).slice(0, 5).join(", ") || "not specified"}.`
+    : "Scope not separately tracked for this entity type.";
+  const techniqueCount = new Set(actors.flatMap((a) => a.techniqueIds ?? [])).size;
+  const technicalSeverity =
+    totalSightings > 0
+      ? `${totalSightings} live indicator sighting(s) tracked across ${malware.length} malware famil${malware.length === 1 ? "y" : "ies"}.`
+      : techniqueCount > 0
+        ? `${techniqueCount} distinct tracked ATT&CK technique(s) used across ${actors.length} matched actor(s).`
+        : "No technical detail tracked for campaigns beyond associated actors/malware.";
 
-  return { potentialImpact, scope, technicalSeverity, businessContext: NO_BUSINESS_CONTEXT, reasoning: `Derived from this platform's own ${kind} record, independent of how many external sources corroborate its existence.` };
+  return {
+    potentialImpact,
+    scope,
+    technicalSeverity,
+    businessContext: NO_BUSINESS_CONTEXT,
+    reasoning: `Derived from this platform's own ${malware.length + actors.length + campaigns.length} matched entity record(s), independent of how many external sources corroborate their existence.`,
+  };
 }
 
+// Reads the full dossier (entityCorrelation.js), not victimCount alone --
+// a real verified actor/malware/campaign profile is itself an impact
+// signal, distinct from (and additive to) raw disclosed-victim count.
 function ransomwareGroupSeverityFactors(moduleData) {
   const count = moduleData?.victimCount ?? 0;
+  const dossier = moduleData?.dossier;
+  const hasProfile = dossier?.sourceType === "verified-profile";
+
   return {
-    potentialImpact: count > 0 ? `Ransomware group with ${count} disclosed victim(s) -- historically capable of full operational disruption and data extortion.` : "No disclosed victims tracked -- potential impact based on ransomware-group classification alone.",
+    potentialImpact:
+      count > 0
+        ? `Ransomware group with ${count} disclosed victim(s) -- historically capable of full operational disruption and data extortion.${hasProfile ? ` Also matched a verified profile in this platform's own entity stores (${dossier.malwareFamilyCount} malware famil(ies), ${dossier.campaignCount} campaign(s)).` : ""}`
+        : hasProfile
+          ? `No disclosed victims tracked, but matched a verified malware/actor/campaign profile (${dossier.malwareFamilyCount} malware famil(ies), ${dossier.campaignCount} campaign(s), ${dossier.cveCount} CVE(s)) -- real correlation exists beyond the bare group-name classification.`
+          : "No disclosed victims and no matched entity profile -- potential impact based on the ransomware-tracker group classification alone.",
     scope: count > 0 ? `${count} distinct victim organization(s) disclosed.` : "No victim-disclosure scope data available in this platform's data.",
     technicalSeverity: "Ransomware groups by nature deploy encryption/extortion payloads -- inherently high technical severity whenever active.",
     businessContext: NO_BUSINESS_CONTEXT,
-    reasoning: `${count} disclosed victim(s) drives potentialImpact/scope; technicalSeverity reflects the ransomware-group classification itself, independent of victim count.`,
+    reasoning: `${count} disclosed victim(s) and dossier.sourceType="${dossier?.sourceType ?? "unverified-mention"}" together drive potentialImpact/scope; technicalSeverity reflects the ransomware-group classification itself, independent of either.`,
   };
 }
 
@@ -170,14 +195,33 @@ function computeSeverityFactors(entityType, evidence, cveExploitationState, cont
 
 function computeSeverityLevel(entityType, evidence, context) {
   if (entityType === "cve") return context.moduleData?.cve?.severity ?? "UNKNOWN";
-  if (entityType === "ransomwareGroup") return (context.moduleData?.victimCount ?? 0) > 0 ? "CRITICAL" : "UNKNOWN";
+  if (entityType === "ransomwareGroup") {
+    // Graded on the full dossier (entityCorrelation.js), not victimCount
+    // alone -- the literal fix for the reported "Clop is CRITICAL purely
+    // because it has victims, nothing else considered" bug. A recognized
+    // ransomware-tracker group name is never silently UNKNOWN, even with
+    // zero disclosed victims and no matched entity profile -- it's still
+    // meaningfully "a real, named group," just weaker signal than a
+    // corroborated one.
+    const count = context.moduleData?.victimCount ?? 0;
+    const dossier = context.moduleData?.dossier;
+    const hasProfile = dossier?.sourceType === "verified-profile";
+    if (count >= 10 && hasProfile) return "CRITICAL";
+    if (count > 0 || (hasProfile && (dossier.malwareFamilyCount > 0 || dossier.campaignCount > 0))) return "HIGH";
+    return "MEDIUM";
+  }
   if (entityType === "name") {
-    const malware = context.moduleData?.malware?.[0]?.entity;
-    const actor = context.moduleData?.actors?.[0];
-    const campaign = context.moduleData?.campaigns?.[0];
-    if (actor && (actor.type === "Ransomware" || actor.type === "APT")) return "HIGH";
-    if (malware && (malware.iocSightings ?? 0) > 0) return "HIGH";
-    if (malware || actor || campaign) return "MEDIUM";
+    // Reads every matched entity, not just [0] -- `[0]` was only ever a
+    // display precedence (entityCorrelation.js#pickPrimaryEntity), never
+    // meant to make severity blind to every OTHER real match.
+    const malware = (context.moduleData?.malware ?? []).map((m) => m.entity ?? m);
+    const actors = context.moduleData?.actors ?? [];
+    const campaigns = context.moduleData?.campaigns ?? [];
+    const primaryActor = actors.find((a) => a.type === "Ransomware" || a.type === "APT") ?? actors[0];
+    const totalSightings = malware.reduce((sum, m) => sum + (m.iocSightings ?? 0), 0);
+    if (primaryActor && (primaryActor.type === "Ransomware" || primaryActor.type === "APT")) return "HIGH";
+    if (totalSightings > 0) return "HIGH";
+    if (malware.length > 0 || actors.length > 0 || campaigns.length > 0) return "MEDIUM";
     return "UNKNOWN";
   }
   // Deliberately NOT driven by evidence weight/agreement (that's what
@@ -230,11 +274,32 @@ function computeVerdictState(entityType, evidence, cveExploitationState, context
   return "Unconfirmed";
 }
 
+// The literal "top of page should NOT primarily say 'X is malicious'" fix --
+// leads with the real correlation counts the dossier (entityCorrelation.js)
+// assembled, e.g. "Clop is an active ransomware/extortion group with 3
+// campaigns, 1 malware family, 7 CVEs, 146 IOCs, 20 disclosed victims, 4
+// related threat reports in this platform," falling back to the old bare
+// victim-count framing only when the dossier found nothing beyond the raw
+// tracker match.
 function buildLabel(entityType, state, cveExploitationState, context) {
   if (entityType === "cve" && cveExploitationState) return cveExploitationState.label;
   if (entityType === "ransomwareGroup") {
-    const count = context.moduleData?.victimCount ?? 0;
-    return count > 0 ? `Active Ransomware Group — ${count} Disclosed Victim(s)` : "No Disclosed Victims Found in This Platform's Data";
+    const md = context.moduleData;
+    const count = md?.victimCount ?? 0;
+    const d = md?.dossier;
+    if (!d || (count === 0 && d.sourceType !== "verified-profile")) {
+      return count > 0 ? `Active Ransomware Group — ${count} Disclosed Victim(s)` : "No Disclosed Victims Found in This Platform's Data";
+    }
+    const parts = [];
+    if (d.campaignCount > 0) parts.push(`${d.campaignCount} campaign${d.campaignCount === 1 ? "" : "s"}`);
+    if (d.malwareFamilyCount > 0) parts.push(`${d.malwareFamilyCount} malware famil${d.malwareFamilyCount === 1 ? "y" : "ies"}`);
+    if (d.cveCount > 0) parts.push(`${d.cveCount} CVE${d.cveCount === 1 ? "" : "s"}`);
+    if (d.iocCount > 0) parts.push(`${d.iocCount} IOC${d.iocCount === 1 ? "" : "s"}`);
+    if (count > 0) parts.push(`${count} disclosed victim${count === 1 ? "" : "s"}`);
+    if (d.threatReportCount > 0) parts.push(`${d.threatReportCount} related threat report${d.threatReportCount === 1 ? "" : "s"}`);
+    return parts.length > 0
+      ? `Active ransomware/extortion group with ${parts.join(", ")} in this platform`
+      : "Recognized Ransomware Group — Limited Correlation Found in This Platform's Data";
   }
   return STATE_LABELS[state] ?? state;
 }

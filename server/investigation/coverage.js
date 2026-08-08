@@ -55,7 +55,7 @@ export function buildSearchCoverage(type, moduleData, crossRef, graph) {
           matchedMalwareFamilies: (moduleData?.malware ?? []).map((m) => m.entity.name),
           associatedThreatActors: (moduleData?.actors ?? []).map((a) => a.name),
           activeCampaigns: (moduleData?.campaigns ?? []).map((c) => c.name),
-          matchingAiReports: [],
+          matchingAiReports: moduleData?.dossier?.threatReports ?? [],
         }
       : null);
   if (crossRefSource) {
@@ -66,6 +66,24 @@ export function buildSearchCoverage(type, moduleData, crossRef, graph) {
         true,
         hits,
         hits > 0 ? `${hits} match(es) across this platform's own entity stores and reports.` : "No match in this platform's own tracked intelligence.",
+      ),
+    );
+  }
+
+  // Entity-centric correlation engine (entityCorrelation.js) -- IOC
+  // inventory / CVE / victim-tracking depth, distinct from the raw entity-
+  // store match count above. Only present for name/ransomwareGroup searches.
+  const dossier = moduleData?.dossier;
+  if (dossier) {
+    const hits = dossier.iocCount + dossier.cveCount + dossier.victimCount;
+    layers.push(
+      layer(
+        "Entity correlation (IOC inventory, CVE exploitation, victim/targeting data)",
+        true,
+        hits,
+        hits > 0
+          ? `${dossier.iocCount} IOC(s), ${dossier.cveCount} CVE(s), ${dossier.victimCount} disclosed victim(s) correlated.`
+          : "Entity stores matched, but no IOC/CVE/victim correlation found yet -- contextual intelligence only (aliases/ATT&CK techniques may still be present, see the entity dossier above).",
       ),
     );
   }

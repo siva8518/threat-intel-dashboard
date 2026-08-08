@@ -27,7 +27,7 @@ import { getAllEntities as getMalwareEntities } from "../malwareIntelligence.js"
 import { getAllEntities as getCampaignEntities } from "../campaignIntelligence.js";
 import { findByNameOrAlias, norm } from "./entityLookup.js";
 
-const KNOWN_ALIAS_GROUPS = [
+export const KNOWN_ALIAS_GROUPS = [
   { canonical: "APT29", aliases: ["Cozy Bear", "Midnight Blizzard", "Nobelium", "The Dukes", "Iron Hemlock"] },
   { canonical: "APT28", aliases: ["Fancy Bear", "Forest Blizzard", "Sofacy", "Sednit", "STRONTIUM"] },
   { canonical: "Sandworm Team", aliases: ["Sandworm", "Seashell Blizzard", "Voodoo Bear", "APT44", "Iridium"] },

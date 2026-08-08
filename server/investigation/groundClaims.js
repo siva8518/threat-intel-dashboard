@@ -163,3 +163,49 @@ export function checkMaliciousIntentClaim(text, hasIntentEvidence) {
   if (hasIntentEvidence || SAFE_DEFAULT_INTENT_PHRASE.test(text)) return { text, flagged: false };
   return { text: fallback, flagged: true };
 }
+
+// The 3 entity-dossier-aware checks below (Phase 6 of the entity-centric
+// correlation engine plan) follow the exact same fail-closed, whole-field-
+// replacement shape as checkMaliciousIntentClaim above -- a caveat isn't
+// enough for these because each pattern names a SPECIFIC relationship
+// (this campaign, this CVE, this industry) that either is or isn't in the
+// real dossier server/investigation/entityCorrelation.js#buildEntityDossier
+// already computed. `has*` booleans are always real, code-computed values
+// from that dossier (or `true`/no-op for indicator types that have no
+// dossier at all, e.g. an IP/domain search) -- never taken from the model.
+
+const CAMPAIGN_INVOLVEMENT_LANGUAGE = /\b(participated in|involved in|part of|conducted|carried out|orchestrated|the actor behind|responsible for)\b[^.]{0,60}\bcampaign\b/i;
+
+/** Fail-closed guard for a claim that this entity took part in a specific campaign -- requires the dossier to actually have at least one campaign in its Campaign History; a bare 0-campaign dossier can never support this language, no matter how the model phrases it. */
+export function checkCampaignInvolvementClaim(text, hasCampaignData) {
+  if (!text || typeof text !== "string") return { text, flagged: false };
+  if (hasCampaignData || !CAMPAIGN_INVOLVEMENT_LANGUAGE.test(text)) return { text, flagged: false };
+  return {
+    text: "Not established by available evidence: this platform's dossier does not record a specific campaign association for this entity.",
+    flagged: true,
+  };
+}
+
+const CVE_EXPLOITATION_BY_ACTOR_LANGUAGE = /\b(exploit(s|ed|ing)?|leverage[sd]?|weaponiz(es|ed|ing)?|abuse[sd]?)\b[^.]{0,80}\bCVE-\d{4}-\d+/i;
+
+/** Fail-closed guard for a claim that this entity exploits/exploited a named CVE -- requires the dossier to have at least one DIRECT (not INFERRED-via-actor) associatedCves entry (entityCorrelation.js#buildAssociatedCves' `confidenceLabel: "DIRECT"`). An inferred-only dossier can describe the CVE as "used by actors associated with this malware," never as this entity's own exploitation. */
+export function checkCveExploitationByActorClaim(text, hasDirectCveAssociation) {
+  if (!text || typeof text !== "string") return { text, flagged: false };
+  if (hasDirectCveAssociation || !CVE_EXPLOITATION_BY_ACTOR_LANGUAGE.test(text)) return { text, flagged: false };
+  return {
+    text: "Not established by available evidence: this platform's dossier has no first-party record of this entity exploiting that CVE (only an inferred, actor-derived association at most).",
+    flagged: true,
+  };
+}
+
+const VICTIM_TARGETING_LANGUAGE = /\btarget(s|ed|ing)?\b[^.]{0,50}\b(industry|sector|organizations? in|companies in|businesses in)\b/i;
+
+/** Fail-closed guard for a claim that this entity targets a specific industry/sector -- requires the dossier's victimsTargeting aggregation (entityCorrelation.js#buildVictimsTargeting) to have at least one real victim record; a 0-victim dossier can never support a targeting claim, however plausible-sounding. */
+export function checkVictimTargetingClaim(text, hasVictimTargetingData) {
+  if (!text || typeof text !== "string") return { text, flagged: false };
+  if (hasVictimTargetingData || !VICTIM_TARGETING_LANGUAGE.test(text)) return { text, flagged: false };
+  return {
+    text: "Not established by available evidence: this platform's dossier has no recorded victim/targeting data supporting a specific industry or sector claim for this entity.",
+    flagged: true,
+  };
+}

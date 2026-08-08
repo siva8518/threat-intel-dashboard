@@ -426,6 +426,7 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
                       onOpenMalware={openMalware}
                       onOpenActor={onOpenActor}
                       onOpenCampaign={onOpenCampaign}
+                      onPivotToIndicator={runInvestigation}
                     />
                   )}
                   {family === "artifact" && (

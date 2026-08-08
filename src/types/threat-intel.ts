@@ -524,6 +524,17 @@ export interface GraphEdgeConflict {
   source: string;
 }
 
+/**
+ * A user-facing 5-value confidence scale for entity-search relationships --
+ * always DERIVED from a GraphEdge's existing `semantics.claimStrength` +
+ * `confidence`, never stored or computed independently. See
+ * server/investigation/relationshipConfidenceLabel.js#labelFor(). An
+ * `infrastructure-colocation` edge (e.g. "shares ASN with") is always
+ * CONTEXTUAL regardless of confidence score -- the concrete enforcement of
+ * "shared infrastructure is never attribution."
+ */
+export type RelationshipConfidenceLabel = "DIRECT" | "STRONG" | "MODERATE" | "WEAK" | "CONTEXTUAL";
+
 /** One concrete, entity-type-specific recommended action -- never generic "investigate the IOC" text. See server/investigation/actionability.js#buildActionabilityGuidance. */
 export interface ActionabilityAction {
   action: string;
@@ -590,6 +601,84 @@ export interface InvestigationRelatedIntelligence {
 }
 
 /**
+ * The assembled "everything this platform knows about this entity" result --
+ * see server/investigation/entityCorrelation.js#buildEntityDossier(). Built
+ * entirely from stores/functions that already exist (malware/actor/campaign
+ * intelligence, ransomware/dark-web victim tracking, ATT&CK, CVE profiles,
+ * AI Summarization reports, detection/hunting content) -- no new ingestion.
+ * Every list here is real, deterministically-tallied data; the AI layer only
+ * narrates over it (see shouldICare.js/correlationSummary.js), never invents
+ * it. Attached to `moduleData.dossier` for `name`/`ransomwareGroup` searches.
+ */
+export interface EntityDossier {
+  /** "ransomware-tracker-only" means this platform has victim disclosures for this name but no verified actor/malware/campaign profile -- never fabricated to look like a full profile. */
+  sourceType: "verified-profile" | "ransomware-tracker-only" | "unverified-mention";
+  primaryEntity: { type: "actor" | "malware" | "campaign"; name: string } | null;
+  aliases: string[];
+  malwareFamilyCount: number;
+  campaignCount: number;
+  cveCount: number;
+  iocCount: number;
+  victimCount: number;
+  threatReportCount: number;
+  campaigns: CampaignHistoryEntry[];
+  associatedCves: AssociatedCveEntry[];
+  iocInventory: IocInventoryBucket[];
+  attackTechniques: Array<{ id: string; name: string; tactic: string | null; observedVia: string; source: string }>;
+  victimsTargeting: VictimTargetingSummary;
+  threatReports: Array<{ id: string; articleTitle: string; articleLink: string; articleSource: string; publishedDate: string }>;
+  detectionRules: Array<{ label: string; path: string; url: string }>;
+  huntingQueries: Array<{ platform: string; query: string; description: string }>;
+}
+
+export interface CampaignHistoryEntry {
+  name: string;
+  bucket: "current" | "historical" | "undated";
+  firstSeen: string | null;
+  lastSeen: string | null;
+  targetedIndustries: string[];
+  targetedCountries: string[];
+  associatedMalware: string[];
+  cveIds: string[];
+  initialAccessTechniques: Array<{ id: string; name: string }>;
+  victimCount: number;
+  iocCount: number;
+  sources: string[];
+}
+
+export interface AssociatedCveEntry {
+  cveId: string;
+  relationship: "direct" | "inferred";
+  /** e.g. "Direct: campaign.cveExploited (ATT&CK + news text match)" or "INFERRED -- via <actor>'s own CVE record, not a first-party malware↔CVE citation" -- always shown to the analyst, never hidden. */
+  source: string;
+  exploitationContext: string | null;
+  affectedTech: string | null;
+  campaignRelationship: string[];
+  confidenceLabel: RelationshipConfidenceLabel;
+}
+
+export interface IocInventoryItem {
+  indicator: string;
+  firstSeen: string | null;
+  lastSeen: string | null;
+  /** Which matched malware family this indicator came from. */
+  source: string;
+}
+
+export interface IocInventoryBucket {
+  indicatorType: "ip" | "domain" | "url" | "hash" | "email";
+  count: number;
+  items: IocInventoryItem[];
+}
+
+export interface VictimTargetingSummary {
+  totalVictims: number;
+  byIndustry: Array<{ industry: string; count: number }>;
+  byCountry: Array<{ country: string; count: number }>;
+  sample: Array<{ victim: string; sector: string | null; country: string | null; discoveredDate: string | null; source: string }>;
+}
+
+/**
  * The full per-indicator investigation result -- moduleData's shape depends
  * on `type` (see server/investigation/{ip,domain,url,hash,cve,entity,artifact}Module.js
  * for exactly what each returns); left loosely typed here rather than as a
@@ -652,7 +741,7 @@ export interface SearchCoverage {
 // pivoted to from an IP.
 export type GraphNodeType =
   | "actor" | "campaign" | "malware" | "cve" | "victim" | "ip" | "domain" | "url" | "hash"
-  | "email" | "fileName" | "processName" | "registryKey" | "userAgent" | "attackTechnique" | "country" | "report" | "asn";
+  | "email" | "fileName" | "processName" | "registryKey" | "userAgent" | "attackTechnique" | "country" | "report" | "asn" | "industry";
 
 export type GraphConfidence = "High" | "Medium" | "Low";
 
@@ -692,6 +781,8 @@ export interface GraphNodeResult {
   node: GraphNode;
   edges: GraphEdge[];
   unavailableRelationships: Array<{ relationshipType: string; reason: string }>;
+  /** Present only when this result came from investigationGraph.js#getExpandedGraph (entity-type searches -- name/ransomwareGroup) -- one extra GraphNodeResult per auto-expanded hop-1 node (capped, top-confidence targets only), each tagged with the seed edge's own targetType/targetKey so the frontend can merge it using the SAME key its placeholder node was already created under. Absent/empty for every IOC-type search, which stays single-hop. */
+  additionalNodes?: Array<GraphNodeResult & { seedType: GraphNodeType; seedKey: string }>;
 }
 
 /**

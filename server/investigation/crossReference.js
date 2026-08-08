@@ -107,6 +107,24 @@ export function crossReferenceIndicator(value) {
   };
 }
 
+/**
+ * Reverse-index of AI Summarization reports by entity NAME -- report.malware[].family /
+ * report.threatActors[].group / report.campaignName exist on every stored report but were
+ * never queried by name before this (crossReferenceIndicator's own AI-report match above is
+ * IOC-VALUE-keyed only, via aiReportIocSet, which never checks entity-name fields). Fixes the
+ * confirmed gap where a name/ransomwareGroup search always got `matchingAiReports: []`. Used
+ * only by entity-name searches (entityCorrelation.js) -- never touches the hot IOC-value path
+ * every other indicator type routes through above.
+ */
+export function findAiReportsByEntityName(names) {
+  const targets = new Set((names ?? []).filter(Boolean).map(norm));
+  if (targets.size === 0) return [];
+  return getAiReports()
+    .filter((r) => (r.malware ?? []).some((m) => targets.has(norm(m.family))) || (r.threatActors ?? []).some((a) => targets.has(norm(a.group))) || targets.has(norm(r.campaignName ?? "")))
+    .slice(0, 15)
+    .map((r) => ({ id: r.id, articleTitle: r.articleTitle, articleLink: r.articleLink, articleSource: r.articleSource, publishedDate: r.publishedDate }));
+}
+
 /** Name-search variant for malware/actor/campaign-name indicators -- reused by entityModule.js and artifactModule.js's fallback search. */
 export function searchEntitiesByName(query) {
   const q = norm(query);

@@ -301,12 +301,18 @@ function cveEvidence(moduleData, cveExploitationState) {
 // Malware/Threat Actor/Campaign name search -- `verified` (confirmed
 // against MITRE ATT&CK/a live indicator feed/a ransomware tracker, vs.
 // reported by news coverage alone) is the real evidence-strength signal
-// here, not a generic "found a record" hit.
+// here, not a generic "found a record" hit. Reads EVERY matched entity
+// (capped, to keep the evidence-card list scannable), not just the first --
+// entityModule.js/entityCorrelation.js's own `[0]` was only ever a *display*
+// precedence for "which entity is the headline," never meant to say every
+// other real match should be silently dropped from the evidence itself.
+const CAP_ENTITY_EVIDENCE = 5;
 function nameEntityEvidence(moduleData) {
   const items = [];
   const SOURCE = "This platform's own tracked intelligence";
-  const malware = moduleData?.malware?.[0]?.entity;
-  if (malware) {
+
+  for (const m of (moduleData?.malware ?? []).slice(0, CAP_ENTITY_EVIDENCE)) {
+    const malware = m.entity ?? m;
     const sightings = malware.iocSightings ?? 0;
     items.push(
       item({
@@ -319,8 +325,7 @@ function nameEntityEvidence(moduleData) {
       }),
     );
   }
-  const actor = moduleData?.actors?.[0];
-  if (actor) {
+  for (const actor of (moduleData?.actors ?? []).slice(0, CAP_ENTITY_EVIDENCE)) {
     items.push(
       item({
         category: actor.verified ? "direct" : "indirect",
@@ -332,8 +337,7 @@ function nameEntityEvidence(moduleData) {
       }),
     );
   }
-  const campaign = moduleData?.campaigns?.[0];
-  if (campaign) {
+  for (const campaign of (moduleData?.campaigns ?? []).slice(0, CAP_ENTITY_EVIDENCE)) {
     items.push(
       item({
         category: campaign.verified ? "corroborating" : "indirect",
@@ -348,19 +352,40 @@ function nameEntityEvidence(moduleData) {
   return items;
 }
 
+// Distinguishes "victim disclosures only" (a bare ransomware-tracker group
+// name with no verified actor/malware/campaign profile in this platform's
+// own entity stores) from "victim disclosures + a verified profile" -- the
+// dossier's own sourceType (entityCorrelation.js) is itself evidence-
+// strength signal, not just display metadata.
 function ransomwareGroupEvidence(moduleData) {
   const count = moduleData?.victimCount ?? 0;
-  if (count === 0) return [];
-  return [
-    item({
-      category: "direct",
-      source: "Ransomware Victim Tracking (ransomware.live / RansomWatch / RansomLook)",
-      claim: `${count} disclosed victim(s) attributed to this group`,
-      polarity: "malicious",
-      weight: 0.85,
-      rawField: "victimCount",
-    }),
-  ];
+  const items = [];
+  if (count > 0) {
+    items.push(
+      item({
+        category: "direct",
+        source: "Ransomware Victim Tracking (ransomware.live / RansomWatch / RansomLook)",
+        claim: `${count} disclosed victim(s) attributed to this group`,
+        polarity: "malicious",
+        weight: 0.85,
+        rawField: "victimCount",
+      }),
+    );
+  }
+  const dossier = moduleData?.dossier;
+  if (dossier?.sourceType === "verified-profile") {
+    items.push(
+      item({
+        category: "corroborating",
+        source: "This platform's own tracked intelligence",
+        claim: `Matched a verified malware/actor/campaign profile in this platform's own entity stores (${dossier.malwareFamilyCount} malware famil${dossier.malwareFamilyCount === 1 ? "y" : "ies"}, ${dossier.campaignCount} campaign(s), ${dossier.cveCount} CVE(s))`,
+        polarity: "malicious",
+        weight: 0.5,
+        rawField: "sourceType",
+      }),
+    );
+  }
+  return items;
 }
 
 // --- Per-source Evidence Card roster -- Stage 1b. Distinct from the

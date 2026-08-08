@@ -44,8 +44,17 @@ import * as cache from "../cache.js";
 
 export const GRAPH_NODE_TYPES = [
   "actor", "campaign", "malware", "cve", "victim", "ip", "domain", "url", "hash",
-  "email", "fileName", "processName", "registryKey", "userAgent", "attackTechnique", "country", "report",
+  "email", "fileName", "processName", "registryKey", "userAgent", "attackTechnique", "country", "report", "industry",
 ];
+
+// Entity-shaped node types eligible for the auto-expand orchestrator below
+// (getExpandedGraph) -- deliberately excludes IOC/leaf types (ip, domain,
+// url, hash, email, fileName, processName, registryKey, userAgent, asn,
+// report, attackTechnique): several of those trigger live network calls
+// (gatherIpOrDomain's DNS/RIPEstat/crt.sh/RDAP) that shouldn't fan out
+// automatically, and the rest are cheap, already-rich leaves better left to
+// deliberate click-to-expand than auto-fetched on every entity search.
+const AUTO_EXPAND_TYPES = new Set(["actor", "campaign", "malware", "cve", "victim", "country", "industry"]);
 
 const CROSS_REF_ONLY_TYPES = new Set(["url", "hash", "email", "fileName", "processName", "registryKey", "userAgent"]);
 
@@ -134,6 +143,8 @@ const RELATIONSHIP_SEMANTICS = {
   "shares SSL/TLS certificate with": semantics("reverse-lookup", { guardrailNote: "A shared certificate indicates shared infrastructure configuration, not confirmed common ownership or attacker control." }),
   "targets victims in": semantics("algorithmic-guess"),
   "targets victims here": semantics("algorithmic-guess"),
+  "targets industry": semantics("algorithmic-guess"),
+  "targeted by": semantics("algorithmic-guess"),
 };
 function semanticsFor(relationship) {
   return RELATIONSHIP_SEMANTICS[relationship] ?? DEFAULT_SEMANTICS;
@@ -338,6 +349,7 @@ function gatherActor(key) {
     for (const id of entity.cveExploited) edges.push(edge("cve", id, id, "exploits", "Direct: actor.cveExploited"));
     if (entity.country) edges.push(edge("country", entity.country, entity.country, "originates from", "Direct: actor.country (ATT&CK)"));
     for (const c of entity.targetedCountries) edges.push(edge("country", c, c, "targets victims in", "Indirect: actor.targetedCountries (news text match)"));
+    for (const i of entity.targetedIndustries ?? []) edges.push(edge("industry", i, i, "targets industry", "Indirect: actor.targetedIndustries (news text match)"));
     for (const id of entity.techniqueIds ?? []) edges.push(edge("attackTechnique", id, id, "uses technique", "Direct: actor.techniqueIds (ATT&CK)"));
 
     for (const c of getCampaignEntities()) {
@@ -392,6 +404,7 @@ function gatherCampaign(key) {
     }
     for (const id of entity.cveExploited) edges.push(edge("cve", id, id, "exploits", "Direct: campaign.cveExploited"));
     for (const c of entity.targetedCountries) edges.push(edge("country", c, c, "targets victims in", "Indirect: campaign.targetedCountries (news text match)"));
+    for (const i of entity.targetedIndustries ?? []) edges.push(edge("industry", i, i, "targets industry", "Indirect: campaign.targetedIndustries (news text match)"));
 
     for (const r of getRansomwareCampaigns()) {
       if (actorNames.has(norm(r.group))) edges.push(edge("victim", r.victim, r.victim, "breached victim", "Indirect: via a shared actor in campaign.associatedActors", { firstSeen: r.discoveredDate, lastSeen: r.discoveredDate }));
@@ -733,6 +746,29 @@ function gatherCountry(key) {
   };
 }
 
+// --- Industry ---------------------------------------------------------------
+// Near-copy of gatherCountry's reverse-scan pattern -- entity.targetedIndustries
+// exists on both actor and campaign entities but, before this, never became a
+// real edge anywhere (only sat in campaign node metadata, dead for actor
+// nodes). Same "Indirect: news text match" provenance as targetedCountries.
+
+function gatherIndustry(key) {
+  const target = norm(key);
+  const edges = [];
+  for (const a of getActorEntities()) {
+    if ((a.targetedIndustries ?? []).some((i) => norm(i) === target)) edges.push(edge("actor", a.name, a.name, "targeted by", "Indirect: actor.targetedIndustries (news text match)"));
+  }
+  for (const c of getCampaignEntities()) {
+    if ((c.targetedIndustries ?? []).some((i) => norm(i) === target)) edges.push(edge("campaign", c.name, c.name, "targeted by", "Indirect: campaign.targetedIndustries (news text match)"));
+  }
+
+  return {
+    node: { type: "industry", id: key, label: key, summary: null, found: edges.length > 0, metadata: null },
+    edges: dedupeEdges(edges),
+    unavailableRelationships: [{ relationshipType: "victim", reason: "No source links a targeted-industry classification directly to a specific victim organization -- pivot via an actor or campaign instead." }],
+  };
+}
+
 // --- Report ---------------------------------------------------------------
 
 function gatherReport(key) {
@@ -798,10 +834,44 @@ export async function getGraphNode(nodeType, key) {
       return gatherAttackTechnique(key);
     case "country":
       return gatherCountry(key);
+    case "industry":
+      return gatherIndustry(key);
     case "report":
       return gatherReport(key);
     default:
       if (CROSS_REF_ONLY_TYPES.has(nodeType)) return gatherCrossReferenceOnly(nodeType, key);
       throw new Error(`Unknown graph node type "${nodeType}"`);
   }
+}
+
+/**
+ * Bounded, one-level auto-expand for entity-type searches (name/
+ * ransomwareGroup) -- "make the graph the center of the experience" without
+ * requiring the analyst to click every hop manually. Fetches the seed node
+ * (hop 0, unchanged `getGraphNode`), then the top `maxNodesPerHop`
+ * entity-shaped targets (by the SAME confidenceScore every edge already
+ * carries -- no new ranking logic) from the seed's own edges, in parallel.
+ * Purely additive to `GraphNodeResult`'s existing `{node, edges,
+ * unavailableRelationships}` shape (via `additionalNodes`) -- every existing
+ * consumer of a single node's own `.node`/`.edges` (coverage.js,
+ * correlationSummary.js, shouldICare.js, rankResults.js) reads the SEED's
+ * own fields unchanged; only the graph canvas (useInvestigationGraph.ts)
+ * needs to know about the extra hop. IOC-type searches never call this --
+ * they keep today's single-hop-per-click `getGraphNode` behavior unchanged.
+ */
+export async function getExpandedGraph(seedType, seedKey, { depth = 2, maxNodesPerHop = 8 } = {}) {
+  const seed = await getGraphNode(seedType, seedKey);
+  if (depth <= 1) return { ...seed, additionalNodes: [] };
+
+  const candidates = seed.edges
+    .filter((e) => AUTO_EXPAND_TYPES.has(e.targetType))
+    .sort((a, b) => b.confidenceScore - a.confidenceScore)
+    .slice(0, maxNodesPerHop);
+
+  const results = await Promise.allSettled(candidates.map((e) => getGraphNode(e.targetType, e.targetKey)));
+  const additionalNodes = results
+    .map((result, i) => (result.status === "fulfilled" ? { seedType: candidates[i].targetType, seedKey: candidates[i].targetKey, ...result.value } : null))
+    .filter(Boolean);
+
+  return { ...seed, additionalNodes };
 }
