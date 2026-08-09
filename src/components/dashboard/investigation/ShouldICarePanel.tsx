@@ -123,7 +123,17 @@ export function ShouldICarePanel({ assessment, pending, error, overview }: Shoul
           <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
             <Building2 className="h-3.5 w-3.5" /> Environmental Relevance
           </p>
-          <p className="text-sm text-foreground">{assessment.environmentalRelevance}</p>
+          <div className="space-y-1.5 rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
+            <Badge variant="muted">{assessment.environmentalRelevance.label}</Badge>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Reason</p>
+              <p className="text-xs text-foreground">{assessment.environmentalRelevance.reason}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Recommended Analyst Action</p>
+              <p className="text-xs text-foreground">{assessment.environmentalRelevance.recommendedAction}</p>
+            </div>
+          </div>
         </div>
 
         <Badge variant="muted">

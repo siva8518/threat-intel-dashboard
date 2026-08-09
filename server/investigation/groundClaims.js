@@ -118,6 +118,11 @@ const UNSUPPORTED_CLAIM_RULES = [
   { pattern: /belongs to (a |the )?(known |tracked )?threat actor|is (a |part of )?(a |the )?known threat actor/i, requires: "hasAttribution", label: "threat-actor ownership" },
   { pattern: /ransomware campaign|part of a ransomware/i, requires: "hasAttribution", label: "ransomware-campaign membership" },
   { pattern: /attacking your (organization|environment|network|company)|compromised your|has compromised your|is currently attacking|actively targeting your/i, requires: "hasEnvironmentalTelemetry", label: "a confirmed attack against your environment" },
+  // Claiming ABSENCE ("not observed in our environment") is just as ungrounded
+  // as claiming presence -- this platform has no telemetry to confirm either
+  // direction, so a false "all clear" read is exactly as dangerous as a false
+  // "you're compromised" read.
+  { pattern: /not (currently |yet )?(been )?(observed|seen|detected|found|present)\s+in\s+(our|your|the)\s+(organization|environment|network)/i, requires: "hasEnvironmentalTelemetry", label: "knowledge of whether this indicator is present or absent in your environment" },
 ];
 
 /**
@@ -162,6 +167,31 @@ export function checkMultiSourceCorroborationClaim(text, independentDirectMalici
   if (independentDirectMaliciousSourceCount >= 2 || !MULTI_SOURCE_CORROBORATION_LANGUAGE.test(text)) return { text, flagged: false };
   return {
     text: "Not established by available evidence: this platform's data does not support a claim of multi-source corroboration for this indicator -- at most one independent direct source currently provides a malicious/suspicious signal.",
+    flagged: true,
+  };
+}
+
+const INTERNAL_TELEMETRY_ACTION_LANGUAGE = /\b(search|check|query|identify|hunt (for|in)|correlate)\b[^.]{0,60}\b(EDR|SIEM|firewall|proxy logs?|DNS logs?|endpoint telemetry|network telemetry|email security logs?)\b/i;
+const CONDITIONAL_QUALIFIER = /\bif\b[^.]{0,40}\b(observed|found|present|detected|seen|exists?|identified)\b/i;
+
+/**
+ * Defense-in-depth for this platform's explicit "never imply the platform
+ * itself has EDR/SIEM/network-telemetry access" constraint. The primary fix
+ * lives in the deterministic action strings (server/investigation/
+ * actionability.js), which are never AI-authored -- this catches the same
+ * pattern if AI-generated prose (shouldICare.js's nextAction, correlationSummary.js's
+ * nextSteps) recommends an internal-tool search WITHOUT the required "if
+ * observed in your X" conditional framing. Not a factual hallucination
+ * (there's no boolean ground truth to check against), so this appends a
+ * clarifying note rather than replacing the whole field -- the underlying
+ * recommendation is still useful, it just needs the ownership boundary made
+ * explicit.
+ */
+export function checkInternalTelemetryClaim(text) {
+  if (!text || typeof text !== "string") return { text, flagged: false };
+  if (!INTERNAL_TELEMETRY_ACTION_LANGUAGE.test(text) || CONDITIONAL_QUALIFIER.test(text)) return { text, flagged: false };
+  return {
+    text: `${text} [Note: this platform has no EDR/SIEM/network-telemetry integration -- this is a recommendation for your own internal tools, not something this platform has already checked.]`,
     flagged: true,
   };
 }

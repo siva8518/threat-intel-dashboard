@@ -20,8 +20,8 @@
 import { aiRouter } from "../ai/aiRouter.js";
 import { AI_TASK } from "../ai/aiTasks.js";
 import { hashForCacheKey } from "../ai/aiResponseCache.js";
-import { checkProseGrounding, checkCveExploitationClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim, checkMultiSourceCorroborationClaim } from "./groundClaims.js";
-import { evidenceSignals } from "./verdictEngine.js";
+import { checkProseGrounding, checkCveExploitationClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim, checkMultiSourceCorroborationClaim, checkInternalTelemetryClaim, checkUnsupportedClaims } from "./groundClaims.js";
+import { evidenceSignals, hasKnownAttribution } from "./verdictEngine.js";
 
 function norm(v) {
   return (v ?? "").toString().trim().toLowerCase();
@@ -69,7 +69,7 @@ const SYSTEM_PROMPT =
   "\n\nGROUNDING RULES:\n" +
   "- Every claim must trace to a specific item in the data you were given (an edge, a report, a tallied industry/reuse/technique entry). Never invent a name, a count, or a relationship not present in the data.\n" +
   '- If the data is too sparse to answer a question meaningfully, say so plainly (e.g. "Not enough discovered relationships to assess infrastructure reuse yet") rather than forcing an answer.\n' +
-  '- Phrase "nextSteps" as direct, second-person analyst advice grounded in the actual data, e.g. "Pivot to <entity> next because <reason from the data>."\n' +
+  '- Phrase "nextSteps" as direct, second-person analyst advice grounded in the actual data, e.g. "Pivot to <entity> next because <reason from the data>." This platform has NO EDR/SIEM/firewall/DNS/proxy/network-telemetry integration -- never phrase a step as though the platform itself already searched or checked one of those systems (e.g. never "Search EDR and identify affected hosts" as a completed/platform-performed action). Intelligence-pivot steps (malware, hashes, domains, IPs, campaigns, actors, victims, industries, reports) are this platform\'s own job and may be phrased directly; any step that touches the analyst\'s own internal tools must be conditional and attributed to the analyst: "If observed in your EDR/SIEM, investigate the affected host(s)..." not a bare imperative.\n' +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
   '"whatIsThis": string -- 1-3 sentences identifying what the searched entity/indicator actually is, grounded in its verdict/summary/metadata.\n' +
   '"whyItMatters": string -- 2-4 sentences on why this matters to a defender right now, grounded in severity/confidence/relationships actually present.\n' +
@@ -81,6 +81,7 @@ const SYSTEM_PROMPT =
   "- Shared ASN / hosting-provider / infrastructure co-location is NEVER by itself evidence of attribution or malicious association -- do not upgrade it into an attribution claim.\n" +
   "- Never state a CVE is \"actively exploited\" or \"confirmed exploited\" from CVSS, EPSS, or exploit-code-availability alone -- only from an explicit KEV/confirmed-exploitation signal in the provided entity data.\n" +
   "- Never use your own general security knowledge to fill a gap -- if the provided data doesn't support a claim, say so plainly instead.\n" +
+  "- This platform has NO EDR/SIEM/network-telemetry integration -- never claim this indicator is confirmed active against, or confirmed NOT present in, the analyst's own environment. Claiming absence (\"not observed in your environment\") is exactly as unsupported as claiming presence; this platform simply cannot see either way.\n" +
   "No other text, no markdown formatting, no code fences.";
 
 function safeString(value, fallback) {
@@ -191,13 +192,22 @@ export async function generateCorrelationSummary(result) {
   const hasDirectCveAssociation = dossier ? dossier.associatedCves.some((c) => c.confidenceLabel === "DIRECT") : true;
   const hasVictimTargetingData = dossier ? dossier.victimsTargeting.totalVictims > 0 : true;
   const independentDirectMaliciousSourceCount = evidenceSignals(overview.verdict.evidence).independentDirectSources;
+  // hasEnvironmentalTelemetry is always false -- see shouldICare.js's own
+  // comment on this same fact. Reused here so checkUnsupportedClaims can
+  // block a correlation-summary narrative from claiming a confirmed attack
+  // on (or confirmed absence from) the analyst's own environment, the exact
+  // gap this module previously had (shouldICare.js already enforced it,
+  // this one didn't call checkUnsupportedClaims at all).
+  const groundingContext = { hasAttribution: hasKnownAttribution(overview.verdict.evidence), hasEnvironmentalTelemetry: false };
   const ground = (text) => {
     let out = checkProseGrounding(text, allowedNames).text;
     out = checkCveExploitationClaim(out, cveExploitationState).text;
+    out = checkUnsupportedClaims(out, groundingContext).text;
     out = checkCampaignInvolvementClaim(out, hasCampaignData).text;
     out = checkCveExploitationByActorClaim(out, hasDirectCveAssociation).text;
     out = checkVictimTargetingClaim(out, hasVictimTargetingData).text;
     out = checkMultiSourceCorroborationClaim(out, independentDirectMaliciousSourceCount).text;
+    out = checkInternalTelemetryClaim(out).text;
     return out;
   };
 
@@ -206,7 +216,7 @@ export async function generateCorrelationSummary(result) {
     whyItMatters: ground(safeString(parsed.whyItMatters, "Not enough data to assess significance.")),
     relationshipNarrative: ground(safeString(parsed.relationshipNarrative, "No coherent relationship pattern found in the discovered data.")),
     infrastructureReuseAssessment: ground(safeString(parsed.infrastructureReuseAssessment, "No infrastructure reuse detected in this platform's current data.")),
-    nextSteps: safeStringArray(parsed.nextSteps),
+    nextSteps: safeStringArray(parsed.nextSteps).map(ground),
     // Deterministic, real lists -- pass-through, never model-authored.
     industriesAffected,
     reusedInfrastructure,

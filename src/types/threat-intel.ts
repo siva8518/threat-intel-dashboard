@@ -549,6 +549,8 @@ export interface ActionabilityGuidance {
   huntingQueries: Array<{ platform: string; query: string; source: string; sourceUrl: string }>;
   /** Roles this entity type genuinely has nothing actionable for -- an honest omission, not a silent gap. */
   notApplicable: string[];
+  /** Deterministic, never-AI-authored list of what the analyst must check in their OWN EDR/SIEM/firewall/DNS/proxy/email-security -- this platform has no internal telemetry integration and never claims to have already performed these searches. See server/investigation/actionability.js#environmentalValidationChecklist. */
+  environmentalValidationChecklist: string[];
 }
 
 // --- Intelligence Investigation Console -- see server/investigation/index.js ---
@@ -873,19 +875,29 @@ export interface CorrelationSummary {
  * when evidence genuinely supports a specific intent; otherwise an honest
  * "not established" statement, never inferred from reputation/ASN/naming
  * alone), Environmental Relevance (environmentalRelevance -- whether this
- * indicator is known to have touched this environment, honest
- * "cannot be determined" until this platform has real telemetry), and Next
- * Action (nextAction -- a concrete analyst step). `analystDecision` is
- * deterministic pass-through from the verdict engine, never model-authored;
- * the four prose fields are the model's narrative synthesis over the real
- * evidence/verdict data it was given, fail-closed validated against it (see
- * groundClaims.js) before being returned.
+ * indicator is known to have touched this environment -- always the
+ * deterministic, code-computed "UNKNOWN" object below, this platform has no
+ * EDR/SIEM/network-telemetry integration anywhere and the model is never
+ * asked to author this field), and Next Action (nextAction -- a concrete
+ * analyst step, grounded to never imply the platform already searched an
+ * internal tool). `analystDecision` is deterministic pass-through from the
+ * verdict engine, never model-authored; the three prose fields
+ * (combinedAssessment/likelyMaliciousIntent/nextAction) are the model's
+ * narrative synthesis over the real evidence/verdict data it was given,
+ * fail-closed validated against it (see groundClaims.js) before being
+ * returned.
  */
+export interface EnvironmentalRelevance {
+  label: "UNKNOWN";
+  reason: string;
+  recommendedAction: string;
+}
+
 export interface ShouldICareAssessment {
   analystDecision: AnalystDecision;
   combinedAssessment: string;
   likelyMaliciousIntent: string;
-  environmentalRelevance: string;
+  environmentalRelevance: EnvironmentalRelevance;
   nextAction: string;
   model: string;
   provider: string;

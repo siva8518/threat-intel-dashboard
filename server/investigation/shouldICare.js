@@ -35,15 +35,22 @@ import { aiRouter } from "../ai/aiRouter.js";
 import { AI_TASK } from "../ai/aiTasks.js";
 import { hashForCacheKey } from "../ai/aiResponseCache.js";
 import { hasSharedInfrastructureSignal, hasKnownAttribution, evidenceSignals } from "./verdictEngine.js";
-import { checkProseGrounding, checkCveExploitationClaim, checkUnsupportedClaims, checkMaliciousIntentClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim, checkMultiSourceCorroborationClaim } from "./groundClaims.js";
+import { checkProseGrounding, checkCveExploitationClaim, checkUnsupportedClaims, checkMaliciousIntentClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim, checkMultiSourceCorroborationClaim, checkInternalTelemetryClaim } from "./groundClaims.js";
 
 // No SIEM/EDR/network-telemetry integration exists anywhere in this
 // platform (confirmed -- see server/investigation/ipModule.js's own
 // `internalInvestigation` placeholder, the only per-type module that even
 // has a field for this). Generalized here so every entity type gets the
-// same honest statement instead of only IP searches.
-const ENVIRONMENTAL_RELEVANCE_UNKNOWN =
-  "Cannot currently be determined -- this platform has no connected SIEM/EDR/network-telemetry integration, so it cannot tell you whether this indicator has actually been observed in your environment. The next step is to check your own logs for it.";
+// same honest statement instead of only IP searches. Structured (not a
+// single prose string) so the UI can render Label / Reason / Recommended
+// Analyst Action as three explicit, non-mergeable lines -- this platform
+// must never let "unknown" read as "clean" or "malicious," and must never
+// imply it already searched the analyst's own tools.
+const ENVIRONMENTAL_RELEVANCE_UNKNOWN = {
+  label: "UNKNOWN",
+  reason: "This platform has no EDR/SIEM/network-telemetry integration and therefore cannot determine whether this indicator has been observed in the organization's environment.",
+  recommendedAction: "Search this indicator in your organization's EDR, SIEM, firewall, DNS, proxy, or other relevant telemetry.",
+};
 
 // Sources whose findings describe a SPECIFIC observed behavior or a real
 // malware/campaign/victim association -- as opposed to a bare reputation
@@ -91,7 +98,8 @@ const SYSTEM_PROMPT =
   "- Shared/cloud/CDN/VPN/datacenter infrastructure ownership is NEVER evidence of malicious activity -- if infrastructureContext is present, acknowledge it explicitly as a reason for caution, not as something to ignore.\n" +
   "- likelyMaliciousIntent: if hasIntentEvidence is false, you MUST write exactly this sentence and nothing else: \"Not established from available intelligence -- insufficient evidence to determine intent.\" Do NOT infer intent from VirusTotal/AbuseIPDB detection counts, cloud/ASN/hosting-provider membership, domain-naming patterns, multi-domain resolution, or \"this ASN has malicious activity elsewhere\" -- none of those establish intent. If hasIntentEvidence is true, describe the SPECIFIC type of malicious activity the real evidence supports (e.g. \"credential-harvesting infrastructure\", \"SSH brute-force scanning\", \"malware C2 for the X family\") -- never a generic \"this is malicious.\"\n" +
   "- Never claim this indicator is confirmed C2, belongs to a named threat actor, or is part of a named ransomware campaign unless hasAttribution is true in the data you were given.\n" +
-  "- Never claim this indicator is attacking, has compromised, or is otherwise confirmed active against the analyst's own environment -- environmentalRelevance is computed separately and always \"cannot be determined\" unless real telemetry says otherwise.\n" +
+  "- Never claim this indicator is attacking, has compromised, or is otherwise confirmed active against the analyst's own environment -- environmentalRelevance is computed separately and always \"cannot be determined\" unless real telemetry says otherwise. Do NOT claim the opposite either -- never write \"not currently observed in your environment,\" \"not present in our network,\" or similar absence language; this platform has no telemetry to confirm presence OR absence, so both directions are equally unsupported.\n" +
+  "- This platform has NO EDR/SIEM/firewall/DNS/proxy/email-security/network-telemetry integration -- never write as though the platform itself already searched, checked, identified, or found something in any of those systems (e.g. never say \"Search EDR and identify affected hosts\" as a completed or platform-performed action). If nextAction recommends checking an internal tool, phrase it conditionally and as the analyst's own action: \"If this indicator is observed in your EDR, investigate the affected host(s)...\" -- never bare imperative internal-tool language without that conditional framing.\n" +
   "- Never state a CVE is actively/confirmed exploited from CVSS, EPSS, or exploit-availability alone -- only from the provided cveExploitationState.\n" +
   "- Your synthesis must be CONSISTENT with the provided analystDecision -- do not imply more or less urgency than that decision reflects.\n" +
   "- For an entity-type search (a threat actor/malware family/ransomware group/campaign, indicated by hasVerifiedEntityProfile being non-null) your combinedAssessment should read differently than for a bare IOC: if hasVerifiedEntityProfile is true, ground the assessment in the entity's real correlated profile depth (not just a reputation verdict); if false but victim disclosures still exist, say so plainly (a tracked ransomware group with disclosed victims but no deeper platform-verified profile) rather than implying more is known than the data supports. If victimIndustryConcentration is present, you may note the concentration as a targeting pattern -- but only if it's genuinely present in the data.\n" +
@@ -99,7 +107,7 @@ const SYSTEM_PROMPT =
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
   '"combinedAssessment": string -- 2-4 sentences synthesizing what the evidence indicates ONCE COMPARED: overall strength/consistency, how any conflict was resolved or why it remains unresolved, whether apparent multi-source agreement is genuinely independent, and how shared-infrastructure context (if any) tempers the read. Never source-name-first, never restate the raw evidence list.\n' +
   '"likelyMaliciousIntent": string -- 1-3 sentences. Follow the grounding rule above exactly.\n' +
-  '"nextAction": string -- 2-4 sentences: a CONCRETE next step grounded in the assessment above and the fact that environmental relevance is unknown (e.g. what to search for in the analyst\'s own logs, which service/host type to prioritize) -- never a generic "investigate the IOC" line.\n' +
+  '"nextAction": string -- 2-4 sentences: a CONCRETE next step grounded in the assessment above and the fact that environmental relevance is unknown. Distinguish what this platform can do (pivot to related malware/hashes/domains/IPs/campaigns/actors -- external intelligence) from what the analyst must do in their own tools (conditionally: "if observed in your EDR/SIEM/logs, then...") -- never a generic "investigate the IOC" line, and never phrase an internal-tool check as something already done.\n' +
   "No other text, no markdown formatting, no code fences.";
 
 function safeString(value, fallback) {
@@ -224,6 +232,7 @@ export async function generateShouldICare(result) {
     out = checkCveExploitationByActorClaim(out, hasDirectCveAssociation).text;
     out = checkVictimTargetingClaim(out, hasVictimTargetingData).text;
     out = checkMultiSourceCorroborationClaim(out, independentDirectMaliciousSourceCount).text;
+    out = checkInternalTelemetryClaim(out).text;
     return out;
   };
 
@@ -236,7 +245,11 @@ export async function generateShouldICare(result) {
     analystDecision: verdict.analystDecision,
     combinedAssessment: infraNote ? `${combinedAssessment} ${infraNote}` : combinedAssessment,
     likelyMaliciousIntent,
-    environmentalRelevance: hasEnvironmentalTelemetry ? safeString(parsed.environmentalRelevance, ENVIRONMENTAL_RELEVANCE_UNKNOWN) : ENVIRONMENTAL_RELEVANCE_UNKNOWN,
+    // Always the deterministic, code-computed structured object today -- see
+    // ENVIRONMENTAL_RELEVANCE_UNKNOWN's own comment. hasEnvironmentalTelemetry
+    // is a hardcoded false everywhere in this platform; the model is never
+    // asked to author this field.
+    environmentalRelevance: ENVIRONMENTAL_RELEVANCE_UNKNOWN,
     nextAction,
     model: response.model,
     provider: response.provider,

@@ -8,6 +8,20 @@
 // server/huntingLibrary.js#buildEntityHuntingQueries for this exact search),
 // the same real content already shown in Detection & Hunting -- reused, not
 // duplicated.
+//
+// PLATFORM CONSTRAINT (applies to every action string below): this platform
+// has NO EDR/SIEM/XDR/firewall/DNS/proxy/netflow/VPN or other internal
+// security telemetry integration anywhere. Every action that touches one of
+// those systems must be phrased as a recommendation FOR the analyst,
+// conditioned on "if observed in your X" -- never as something this
+// platform already searched, checked, identified, or found. External-
+// intelligence-only actions (block at the perimeter, pivot the graph,
+// deploy a detection rule) may stay imperative since those genuinely are
+// this platform's own job. `environmentalValidationChecklist()` below is
+// the deterministic, always-conditional counterpart: what the analyst must
+// check in their own tools, kept structurally separate from `actions` so
+// the frontend never conflates "what this platform found" with "what you
+// still need to check."
 function action(text, rationale, role, priority) {
   return { action: text, rationale, role, priority };
 }
@@ -23,7 +37,14 @@ function iocActions(type, indicator, verdict, moduleData) {
 
   if (verdict.blockRecommendation === "Block") {
     actions.push(action(`Block ${label} "${indicator}" at the perimeter firewall/proxy (egress and ingress) and add it to the SIEM watchlist.`, verdict.reasoning, "socAnalyst", verdict.recommendedPriority));
-    actions.push(action(`Hunt for prior connections to "${indicator}" across the last 90 days${recencyNote}.`, "This platform's own evidence indicates active malicious use -- retroactive hunting finds any already-occurred exposure.", "threatHunter", verdict.recommendedPriority));
+    actions.push(
+      action(
+        `If "${indicator}" is observed in your firewall/proxy/DNS/network logs, hunt for prior connections to it across the last 90 days${recencyNote}.`,
+        "This platform's own external evidence indicates active malicious use -- this platform has no network-telemetry integration, so whether it was actually observed can only be confirmed in your own logs.",
+        "threatHunter",
+        verdict.recommendedPriority,
+      ),
+    );
   } else if (verdict.blockRecommendation === "Monitor — Do Not Block") {
     actions.push(action(`Add "${indicator}" to a monitoring watchlist rather than an outright block. ${verdict.blockRecommendationReasoning}`, verdict.reasoning, "socAnalyst", "Normal"));
   } else if (verdict.state === "Clean-Benign") {
@@ -55,24 +76,24 @@ function hashActions(indicator, verdict, moduleData, graph) {
     actions.push(action(`Add hash "${indicator}" to the EDR block-list.`, verdict.reasoning, "socAnalyst", verdict.recommendedPriority));
     actions.push(
       action(
-        `Search EDR telemetry for "${indicator}" across the last 90 days -- identify every endpoint where the file was written or executed, the parent process, the user/account involved, and any outbound network connections made after execution.`,
-        "Confirmed/likely-malicious file -- retroactive hunting finds any already-occurred execution and its blast radius, not just presence.",
+        `External intelligence confirms "${indicator}" is malicious. This platform has no EDR/endpoint-telemetry integration, so it cannot tell you whether this file exists in your environment -- if the hash is observed in your EDR, investigate the affected host(s): identify every endpoint where it was written or executed, the parent process, the user/account involved, and any outbound network connections made after execution.`,
+        "Confirmed/likely-malicious file per external evidence -- whether it was actually executed anywhere is only knowable from your own EDR telemetry, which this platform does not have access to.",
         "socAnalyst",
         verdict.recommendedPriority,
       ),
     );
     actions.push(
       action(
-        `Quarantine any endpoint where execution of "${indicator}" is confirmed, per policy.`,
-        "Isolation should follow CONFIRMED execution, not mere presence of the file on disk.",
+        `If execution of "${indicator}" is confirmed on any endpoint in your EDR, quarantine that endpoint per policy.`,
+        "Isolation should follow CONFIRMED execution, not mere presence of the file on disk -- and confirmation can only come from your own EDR.",
         "socAnalyst",
         verdict.recommendedPriority,
       ),
     );
     actions.push(
       action(
-        `Retro-hunt for "${indicator}"${malwareFamily ? ` and other samples/filenames associated with the "${malwareFamily}" family` : ""} across all endpoints and historical telemetry, and check for lateral spread or persistence mechanisms if any host is confirmed.`,
-        "Confirmed/likely-malicious file -- retroactive hunting finds any already-occurred exposure beyond the single host where it was first seen.",
+        `If "${indicator}"${malwareFamily ? ` or other samples/filenames associated with the "${malwareFamily}" family` : ""} is observed in your endpoint telemetry, retro-hunt across all endpoints and historical data, and check for lateral spread or persistence mechanisms if any host is confirmed.`,
+        "Confirmed/likely-malicious file per external evidence -- this platform cannot see your endpoint telemetry, so any prior exposure beyond the single sample already known can only be found in your own historical data.",
         "threatHunter",
         verdict.recommendedPriority,
       ),
@@ -110,7 +131,14 @@ function hashActions(indicator, verdict, moduleData, graph) {
     }
   } else if (verdict.blockRecommendation === "Monitor — Do Not Block") {
     actions.push(action(`Add hash "${indicator}" to a monitoring watchlist rather than an outright block. ${verdict.blockRecommendationReasoning}`, verdict.reasoning, "socAnalyst", "Normal"));
-    actions.push(action(`Search EDR telemetry for "${indicator}" to determine whether it has been observed in your environment before deciding whether to escalate.`, verdict.reasoning, "threatHunter", "Normal"));
+    actions.push(
+      action(
+        `This platform cannot determine whether "${indicator}" has been observed in your environment -- search it in your own EDR/endpoint telemetry before deciding whether to escalate.`,
+        verdict.reasoning,
+        "threatHunter",
+        "Normal",
+      ),
+    );
   } else if (verdict.state === "Clean-Benign") {
     actions.push(action(`No blocking action needed for hash "${indicator}" based on current evidence.`, verdict.reasoning, "socAnalyst", "Low"));
   } else {
@@ -188,6 +216,47 @@ function genericActions(type, indicator, verdict) {
   };
 }
 
+// Deterministic, never-AI-authored checklist of what the analyst must check
+// in their OWN internal tools -- this platform has no EDR/SIEM/firewall/DNS/
+// proxy/email-security/network-telemetry integration anywhere (same fact
+// shouldICare.js's ENVIRONMENTAL_RELEVANCE_UNKNOWN is built from), so it can
+// never claim to have already performed any of these searches itself. Kept
+// separate from the role-based `actions` above (which mix external-
+// intelligence pivots with internal-tool recommendations) so the frontend
+// can render "what this platform can pivot to" and "what you must check in
+// your own tools" as two explicit, non-conflatable sections.
+function environmentalValidationChecklist(type, indicator) {
+  const quoted = `"${indicator}"`;
+  if (type === "sha256" || type === "sha1" || type === "md5") {
+    return [`Search the exact hash ${quoted} in your EDR/endpoint telemetry.`, "Check sandbox history for this hash if it was previously submitted internally.", "Review email security/gateway logs in case this file arrived as an attachment."];
+  }
+  if (type === "ip") {
+    return [`Search ${quoted} in your firewall/proxy logs (both inbound and outbound).`, `Search ${quoted} in your SIEM/network telemetry.`, `Check DNS logs for any resolution activity involving ${quoted}.`];
+  }
+  if (type === "domain" || type === "url") {
+    return [`Search ${quoted} in your DNS/proxy logs.`, `Search your email security logs for ${quoted} in phishing or spam attempts.`, `Search your SIEM for any outbound connection to ${quoted}.`];
+  }
+  if (type === "email") {
+    return [`Search your email security/gateway logs for messages involving ${quoted}.`, "Check whether any user account has interacted with this sender/address."];
+  }
+  if (type === "fileName" || type === "processName") {
+    return [`Search your EDR/endpoint telemetry for ${quoted}.`, "Check whether this matches any known-legitimate software in your environment before treating a match as suspicious."];
+  }
+  if (type === "registryKey") {
+    return [`Search your EDR/endpoint telemetry for this registry key on any host.`];
+  }
+  if (type === "userAgent") {
+    return [`Search your web/proxy logs for requests using this user agent string.`];
+  }
+  if (type === "cve") {
+    return ["Confirm whether any asset in your environment actually runs the affected product/version (this platform has no asset-inventory integration)."];
+  }
+  if (type === "name" || type === "ransomwareGroup") {
+    return ["Search your SIEM/EDR for any of the specific IOCs (hashes/domains/IPs) surfaced in Continue Investigation above -- this platform cannot tell you whether they've been observed in your environment."];
+  }
+  return [];
+}
+
 /**
  * @param {{ type: string, indicator: string, verdict: import("../../src/types/threat-intel.js").VerdictResult, moduleData?: Record<string, unknown>, cveExploitationState?: import("../../src/types/threat-intel.js").CveExploitationAssessment | null, graph?: import("../../src/types/threat-intel.js").GraphNodeResult | null }} args
  * @returns {import("../../src/types/threat-intel.js").ActionabilityGuidance}
@@ -203,5 +272,5 @@ export function buildActionabilityGuidance({ type, indicator, verdict, moduleDat
   else result = genericActions(type, indicator, verdict);
 
   const huntingQueries = graph?.node?.metadata?.huntingQueries ?? [];
-  return { entityType: type, actions: result.actions, huntingQueries, notApplicable: result.notApplicable };
+  return { entityType: type, actions: result.actions, huntingQueries, notApplicable: result.notApplicable, environmentalValidationChecklist: environmentalValidationChecklist(type, indicator) };
 }

@@ -424,8 +424,14 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
               {family === "artifact" && <ArtifactIntelligenceSection note={result.moduleData.note as string} crossReference={result.relatedIntelligence!} />}
             </Section>
 
-            {/* 6. What To Investigate Next -- merges ShouldICarePanel's next-step guidance with the correlation engine's own next-steps list. */}
-            <WhatToInvestigateNextPanel shouldICare={shouldICare} shouldICarePending={shouldICarePending} correlationSummary={correlationSummary} correlationSummaryPending={correlationSummaryPending} />
+            {/* 6. What To Investigate Next -- merges ShouldICarePanel's next-step guidance with the correlation engine's own next-steps list (Section 1), plus the deterministic environmental-validation checklist (Section 2) -- this platform has no internal telemetry integration, so those two kinds of "next step" must never be conflated. */}
+            <WhatToInvestigateNextPanel
+              shouldICare={shouldICare}
+              shouldICarePending={shouldICarePending}
+              correlationSummary={correlationSummary}
+              correlationSummaryPending={correlationSummaryPending}
+              environmentalValidationChecklist={recommendedActions?.environmentalValidationChecklist ?? []}
+            />
 
             {/* 7. Recommendations -- the AI Investigation Summary's own recommendations list. */}
             <RecommendationsPanel recommendations={graphInsights?.recommendations ?? null} pending={graphInsightsPending} model={graphInsights?.model} />
