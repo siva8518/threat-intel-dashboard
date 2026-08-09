@@ -73,9 +73,13 @@ export const AI_ROUTER_CONFIG = {
     apiKey: process.env.CEREBRAS_API_KEY,
     // Cerebras's own inference hardware trades some context length for very
     // low latency -- verify against https://inference-docs.cerebras.ai/models
-    // before relying on a larger window than this.
-    model: process.env.CEREBRAS_MODEL || "llama-3.3-70b",
-    fastModel: process.env.CEREBRAS_FAST_MODEL || "llama3.1-8b",
+    // before relying on a larger window than this. The old llama-3.3-70b /
+    // llama3.1-8b defaults were retired from Cerebras's catalog (confirmed
+    // live via GET /v1/models -- only gpt-oss-120b, gemma-4-31b, and
+    // zai-glm-4.7 are served now); gpt-oss-120b is the largest/best-quality
+    // of the three, gemma-4-31b the smallest/fastest.
+    model: process.env.CEREBRAS_MODEL || "gpt-oss-120b",
+    fastModel: process.env.CEREBRAS_FAST_MODEL || "gemma-4-31b",
     contextWindow: Number(process.env.CEREBRAS_CONTEXT_WINDOW) || 8_192,
   },
   // OpenRouter is a MODEL ROUTER, not a single model -- OPENROUTER_MODEL
