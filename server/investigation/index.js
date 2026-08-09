@@ -109,7 +109,12 @@ async function computeGraphResult(type, normalized, moduleData) {
   if (!target) return null;
   try {
     if (AUTO_EXPAND_GRAPH_TYPES.has(type)) return await getExpandedGraph(target.type, target.key);
-    return await getGraphNode(target.type, target.key);
+    // Hash searches: pass the live-detected malware family (if any) through
+    // to the graph so it can pivot into that family's full tracked profile
+    // -- see investigationGraph.js#gatherCrossReferenceOnly. Every other
+    // type ignores an empty context object.
+    const context = isHashType(type) ? { malwareFamily: moduleData?.malwareFamily ?? null, malwareFamilySource: moduleData?.malwareFamilySource ?? null } : {};
+    return await getGraphNode(target.type, target.key, context);
   } catch {
     return null; // graph computation failing (e.g. a live DNS/RIPEstat call throwing) should never fail the whole investigation
   }
@@ -273,7 +278,14 @@ export async function investigate(rawValue) {
     return assemble(normalized, "url", data, crossReferenceIndicator(normalized), graph);
   }
   if (isHashType(type)) {
-    const [data, graph] = await Promise.all([hashModule.gather(normalized, type), computeGraphResult(type, normalized, {})]);
+    // Genuinely sequential (like ransomwareGroup/name below) -- the graph
+    // needs to know which malware family VirusTotal/Hybrid Analysis just
+    // classified this hash as (moduleData.malwareFamily), so it can pivot
+    // into that family's full tracked profile instead of only checking
+    // whether this EXACT hash string already sits in an entity's own iocs
+    // list (see investigationGraph.js#gatherCrossReferenceOnly).
+    const data = await hashModule.gather(normalized, type);
+    const graph = await computeGraphResult(type, normalized, data);
     return assemble(normalized, type, data, crossReferenceIndicator(normalized), graph);
   }
   if (type === "ransomwareGroup") {

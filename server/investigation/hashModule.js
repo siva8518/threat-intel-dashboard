@@ -64,6 +64,10 @@ export async function gather(value, hashKind) {
     : { available: false, reason: "No matching Hybrid Analysis sandbox report found for this hash." };
 
   const malwareFamily = ha?.malwareFamily || vt?.threatLabel || null;
+  // Which source actually produced the classification -- threaded through to
+  // investigationGraph.js so a live-detected-family graph edge can cite the
+  // real source instead of a vague "VirusTotal / Hybrid Analysis" guess.
+  const malwareFamilySource = ha?.malwareFamily ? "Hybrid Analysis" : vt?.threatLabel ? "VirusTotal" : null;
 
   return {
     lookupResults: results,
@@ -73,6 +77,7 @@ export async function gather(value, hashKind) {
     fileInfo,
     detection,
     malwareFamily,
+    malwareFamilySource,
     behavior,
     registryHistory: cymru ? { detectionPercent: cymru.detectionPercent ?? null, lastSeen: cymru.lastSeen ?? null } : null,
   };

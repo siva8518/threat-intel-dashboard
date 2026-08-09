@@ -20,7 +20,8 @@
 import { aiRouter } from "../ai/aiRouter.js";
 import { AI_TASK } from "../ai/aiTasks.js";
 import { hashForCacheKey } from "../ai/aiResponseCache.js";
-import { checkProseGrounding, checkCveExploitationClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim } from "./groundClaims.js";
+import { checkProseGrounding, checkCveExploitationClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim, checkMultiSourceCorroborationClaim } from "./groundClaims.js";
+import { evidenceSignals } from "./verdictEngine.js";
 
 function norm(v) {
   return (v ?? "").toString().trim().toLowerCase();
@@ -189,12 +190,14 @@ export async function generateCorrelationSummary(result) {
   const hasCampaignData = dossier ? dossier.campaignCount > 0 : true;
   const hasDirectCveAssociation = dossier ? dossier.associatedCves.some((c) => c.confidenceLabel === "DIRECT") : true;
   const hasVictimTargetingData = dossier ? dossier.victimsTargeting.totalVictims > 0 : true;
+  const independentDirectMaliciousSourceCount = evidenceSignals(overview.verdict.evidence).independentDirectSources;
   const ground = (text) => {
     let out = checkProseGrounding(text, allowedNames).text;
     out = checkCveExploitationClaim(out, cveExploitationState).text;
     out = checkCampaignInvolvementClaim(out, hasCampaignData).text;
     out = checkCveExploitationByActorClaim(out, hasDirectCveAssociation).text;
     out = checkVictimTargetingClaim(out, hasVictimTargetingData).text;
+    out = checkMultiSourceCorroborationClaim(out, independentDirectMaliciousSourceCount).text;
     return out;
   };
 

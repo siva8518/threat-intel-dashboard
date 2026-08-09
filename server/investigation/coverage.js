@@ -95,7 +95,7 @@ export function buildSearchCoverage(type, moduleData, crossRef, graph) {
         "Relationship graph (correlated entities this platform has already linked)",
         true,
         edges.length,
-        edges.length > 0 ? `${edges.length} real relationship(s) discovered.` : "No relationship discovered for this entity yet.",
+        edges.length > 0 ? `${edges.length} real relationship(s) discovered.` : "No verified relationship was found after searching the available intelligence sources and this platform's historical dataset.",
       ),
     );
 

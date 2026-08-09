@@ -25,7 +25,7 @@ function iocActions(type, indicator, verdict, moduleData) {
     actions.push(action(`Block ${label} "${indicator}" at the perimeter firewall/proxy (egress and ingress) and add it to the SIEM watchlist.`, verdict.reasoning, "socAnalyst", verdict.recommendedPriority));
     actions.push(action(`Hunt for prior connections to "${indicator}" across the last 90 days${recencyNote}.`, "This platform's own evidence indicates active malicious use -- retroactive hunting finds any already-occurred exposure.", "threatHunter", verdict.recommendedPriority));
   } else if (verdict.blockRecommendation === "Monitor — Do Not Block") {
-    actions.push(action(`Add "${indicator}" to a monitoring watchlist rather than an outright block -- ${verdict.blockRecommendationReasoning.charAt(0).toLowerCase()}${verdict.blockRecommendationReasoning.slice(1)}`, verdict.reasoning, "socAnalyst", "Normal"));
+    actions.push(action(`Add "${indicator}" to a monitoring watchlist rather than an outright block. ${verdict.blockRecommendationReasoning}`, verdict.reasoning, "socAnalyst", "Normal"));
   } else if (verdict.state === "Clean-Benign") {
     actions.push(action(`No blocking action needed for "${indicator}" based on current evidence.`, verdict.reasoning, "socAnalyst", "Low"));
   } else {
@@ -34,15 +34,83 @@ function iocActions(type, indicator, verdict, moduleData) {
   return { actions, notApplicable: ["vulnerabilityManagement"] };
 }
 
-function hashActions(indicator, verdict, moduleData) {
+// Real detection rules only ever come from graph.node.metadata.detectionRules
+// (server/investigation/investigationGraph.js#detectionAndHuntingForFamilies,
+// itself sourced from server/correlate.js#detectionRulesFor -- an actual
+// index of ingested SigmaHQ/YARA-Rules content). moduleData.malwareFamily
+// being truthy means a live AV/sandbox lookup NAMED a family -- it says
+// nothing about whether this platform has a real public rule for it. The
+// literal fix for the reported "recommends deploying a YARA/Sigma rule even
+// when the platform explicitly says none was found" bug: this used to fire
+// on malwareFamily alone.
+function hashActions(indicator, verdict, moduleData, graph) {
   const actions = [];
   const malwareFamily = moduleData?.malwareFamily ?? null;
+  const detectionRules = graph?.node?.metadata?.detectionRules ?? [];
+  const hasRealDetectionRule = detectionRules.length > 0;
+  const familyEdge = (graph?.edges ?? []).find((e) => e.targetType === "malware" && e.relationship === "classified as malware family");
+  const familyIsTracked = Boolean(familyEdge);
+
   if (verdict.blockRecommendation === "Block") {
     actions.push(action(`Add hash "${indicator}" to the EDR block-list.`, verdict.reasoning, "socAnalyst", verdict.recommendedPriority));
-    actions.push(action(`Retro-hunt for file writes/executions of "${indicator}" across all endpoints.`, "Confirmed/likely-malicious file -- retroactive hunting finds any already-occurred execution.", "threatHunter", verdict.recommendedPriority));
-    if (malwareFamily) actions.push(action(`Deploy the matched YARA/Sigma detection rule(s) for "${malwareFamily}" (see Detection & Hunting).`, `Sandbox/engine analysis matched this file to the "${malwareFamily}" family.`, "detectionEngineer", "High"));
+    actions.push(
+      action(
+        `Search EDR telemetry for "${indicator}" across the last 90 days -- identify every endpoint where the file was written or executed, the parent process, the user/account involved, and any outbound network connections made after execution.`,
+        "Confirmed/likely-malicious file -- retroactive hunting finds any already-occurred execution and its blast radius, not just presence.",
+        "socAnalyst",
+        verdict.recommendedPriority,
+      ),
+    );
+    actions.push(
+      action(
+        `Quarantine any endpoint where execution of "${indicator}" is confirmed, per policy.`,
+        "Isolation should follow CONFIRMED execution, not mere presence of the file on disk.",
+        "socAnalyst",
+        verdict.recommendedPriority,
+      ),
+    );
+    actions.push(
+      action(
+        `Retro-hunt for "${indicator}"${malwareFamily ? ` and other samples/filenames associated with the "${malwareFamily}" family` : ""} across all endpoints and historical telemetry, and check for lateral spread or persistence mechanisms if any host is confirmed.`,
+        "Confirmed/likely-malicious file -- retroactive hunting finds any already-occurred exposure beyond the single host where it was first seen.",
+        "threatHunter",
+        verdict.recommendedPriority,
+      ),
+    );
+    if (malwareFamily) {
+      actions.push(
+        action(
+          `Identify this malware family's known campaigns, threat actors, and infrastructure reuse in the Relationships graph below, and monitor for newly observed related indicators.`,
+          `A live lookup classified this file as "${malwareFamily}"${familyIsTracked ? `, matched to this platform's own tracked "${familyEdge.targetLabel}" family record` : " -- this platform has no tracked entity record for that exact family name yet"}.`,
+          "threatIntel",
+          "High",
+        ),
+      );
+    }
+    if (hasRealDetectionRule) {
+      actions.push(
+        action(
+          `Deploy the ${detectionRules.length} matched detection rule(s) for "${malwareFamily}" (see Detection & Hunting below).`,
+          `This platform has ${detectionRules.length} real, ingested public detection rule(s) indexed for this family.`,
+          "detectionEngineer",
+          "High",
+        ),
+      );
+    } else {
+      actions.push(
+        action(
+          "No existing public detection rule was identified. Detection Engineering should consider creating a custom detection based on the confirmed file hash, malware family, filename, behavioral characteristics, or observed network indicators.",
+          malwareFamily
+            ? `A live lookup named the "${malwareFamily}" family, but this platform found no matching SigmaHQ/YARA-Rules content for it.`
+            : "No malware family classification and no matching detection-rule content were found for this hash.",
+          "detectionEngineer",
+          "Normal",
+        ),
+      );
+    }
   } else if (verdict.blockRecommendation === "Monitor — Do Not Block") {
-    actions.push(action(`Add hash "${indicator}" to a monitoring watchlist rather than an outright block -- ${verdict.blockRecommendationReasoning.charAt(0).toLowerCase()}${verdict.blockRecommendationReasoning.slice(1)}`, verdict.reasoning, "socAnalyst", "Normal"));
+    actions.push(action(`Add hash "${indicator}" to a monitoring watchlist rather than an outright block. ${verdict.blockRecommendationReasoning}`, verdict.reasoning, "socAnalyst", "Normal"));
+    actions.push(action(`Search EDR telemetry for "${indicator}" to determine whether it has been observed in your environment before deciding whether to escalate.`, verdict.reasoning, "threatHunter", "Normal"));
   } else if (verdict.state === "Clean-Benign") {
     actions.push(action(`No blocking action needed for hash "${indicator}" based on current evidence.`, verdict.reasoning, "socAnalyst", "Low"));
   } else {
@@ -128,7 +196,7 @@ export function buildActionabilityGuidance({ type, indicator, verdict, moduleDat
   let result;
   if (type === "cve") result = cveActions(indicator, verdict, moduleData, cveExploitationState);
   else if (type === "ip" || type === "domain" || type === "url") result = iocActions(type, indicator, verdict, moduleData);
-  else if (type === "sha256" || type === "sha1" || type === "md5") result = hashActions(indicator, verdict, moduleData);
+  else if (type === "sha256" || type === "sha1" || type === "md5") result = hashActions(indicator, verdict, moduleData, graph);
   else if (type === "name") result = nameActions(indicator, verdict, moduleData);
   else if (type === "ransomwareGroup") result = ransomwareGroupActions(indicator, verdict, moduleData);
   else if (type === "email" || type === "fileName" || type === "processName" || type === "registryKey" || type === "userAgent") result = artifactActions(type, indicator, verdict, moduleData);

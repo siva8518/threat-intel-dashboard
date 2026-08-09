@@ -252,10 +252,15 @@ function computeSeverityLevel(entityType, evidence, context) {
 // vote-counted); every other entity type shares the same evidence-pattern
 // ladder below. ---
 
-function computeVerdictState(entityType, evidence, cveExploitationState, context) {
-  if (evidence.hasConflict) return "Conflicting Intelligence";
-  if (entityType === "cve") return CVE_STATE_MAP[cveExploitationState?.state] ?? "Insufficient Evidence";
-
+// Computed once and shared between computeVerdictState and
+// buildAnalystDecisionReasoning below so the reasoning text can never
+// describe a different evidence pattern than the one that actually decided
+// the state -- this is the fix for the reported "AI says multiple
+// independent, corroborated sources confirm malicious activity" bug, which
+// traced to a STATIC reasoning string keyed only by decision name, shown
+// regardless of whether one source or several actually agreed.
+/** Exported for reuse by shouldICare.js/correlationSummary.js's own AI-prose grounding pass (see groundClaims.js#checkMultiSourceCorroborationClaim) -- same signal breakdown that decides the verdict, never recomputed a second way. */
+export function evidenceSignals(evidence) {
   const bearing = evidenceBearingItems(evidence);
   const directMalicious = bearing.filter((i) => i.category === "direct" && (i.polarity === "malicious" || i.polarity === "suspicious"));
   const corroboratingMalicious = bearing.filter((i) => i.category === "corroborating" && (i.polarity === "malicious" || i.polarity === "suspicious"));
@@ -263,7 +268,30 @@ function computeVerdictState(entityType, evidence, cveExploitationState, context
   const negativeOnly = bearing.length > 0 && bearing.every((i) => i.category === "negative" || i.polarity === "benign");
   const allNeutral = bearing.length > 0 && bearing.every((i) => i.polarity === "neutral");
   const strongSingle = bearing.some((i) => i.weight >= 0.85);
-  const independentDirectSources = new Set(directMalicious.map((i) => i.source)).size;
+  const strongestDirect = directMalicious.reduce((max, i) => (i.weight > (max?.weight ?? -1) ? i : max), null);
+  const independentDirectSourceNames = Array.from(new Set(directMalicious.map((i) => i.source)));
+  const noFindingSourceNames = (evidence.cards ?? []).filter((c) => c.level === "UNKNOWN").map((c) => c.source);
+
+  return {
+    bearing,
+    directMalicious,
+    corroboratingMalicious,
+    indirectOrAttributionMalicious,
+    negativeOnly,
+    allNeutral,
+    strongSingle,
+    strongestDirect,
+    independentDirectSourceNames,
+    independentDirectSources: independentDirectSourceNames.length,
+    noFindingSourceNames,
+  };
+}
+
+function computeVerdictState(entityType, evidence, cveExploitationState, signals) {
+  if (evidence.hasConflict) return "Conflicting Intelligence";
+  if (entityType === "cve") return CVE_STATE_MAP[cveExploitationState?.state] ?? "Insufficient Evidence";
+
+  const { bearing, directMalicious, corroboratingMalicious, indirectOrAttributionMalicious, negativeOnly, allNeutral, strongSingle, independentDirectSources } = signals;
 
   if ((strongSingle && directMalicious.length > 0) || independentDirectSources >= 2) return "Confirmed Malicious";
   if (directMalicious.length >= 1 || corroboratingMalicious.length >= 2) return "Malicious";
@@ -341,15 +369,62 @@ export function hasKnownAttribution(evidence) {
   return evidence.items.some((i) => i.category === "attribution" || i.rawField === "matchedMalwareFamilies");
 }
 
-const ANALYST_DECISION_REASONING = {
-  Block: "Multiple independent, corroborated sources (or one very strong signal) confirm malicious activity, with a real attribution or no shared-infrastructure caveat to weigh against it.",
-  "Investigate Immediately": "Strong, corroborated evidence of malicious activity exists for an entity type blocking doesn't apply to (or as a network/file IOC with a real attribution overriding shared-infrastructure caution) -- treat as urgent.",
-  "Investigate If Observed Internally": "Evidence is suspicious, conflicting, or reputation-only on shared/cloud/VPN infrastructure with no confirmed malware/actor/campaign attribution -- not strong enough alone to act on directly.",
-  Monitor: "Evidence is inconclusive -- monitor for additional signal before acting.",
-  Watchlist: "A tracked entity with no currently-active malicious signal -- keep on a watchlist, not an immediate action.",
-  "Do Not Block": "No sufficient malicious evidence in this platform's current data to justify action.",
-  "No Action Required": "Insufficient evidence exists to support any action.",
-};
+function namedSources(names) {
+  if (names.length === 0) return "no source";
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
+/**
+ * The literal fix for the reported "AI says multiple independent,
+ * corroborated sources confirm malicious activity" hallucination -- this
+ * used to be a STATIC string per decision name (e.g. every "Block" verdict
+ * showed the same "Multiple independent, corroborated sources..." sentence
+ * regardless of whether one source or several actually agreed). Every
+ * sentence below is built from the real, already-computed evidenceSignals()
+ * breakdown -- it can name exactly which source(s) provided the signal, and
+ * explicitly says "X is the only source" when that's what happened, never
+ * "multiple sources" unless independentDirectSources is actually >= 2.
+ */
+function buildAnalystDecisionReasoning(state, decision, evidence, signals) {
+  const { independentDirectSourceNames, independentDirectSources, strongestDirect, corroboratingMalicious, indirectOrAttributionMalicious, noFindingSourceNames } = signals;
+  const sharedInfra = hasSharedInfrastructureSignal(evidence);
+  const attributed = hasKnownAttribution(evidence);
+  const noFindingNote = noFindingSourceNames.length > 0 ? ` ${namedSources(noFindingSourceNames)} returned no notable finding.` : "";
+
+  if (decision === "Block" || decision === "Investigate Immediately") {
+    let base;
+    if (independentDirectSources >= 2) {
+      base = `${independentDirectSources} independent sources (${independentDirectSourceNames.join(", ")}) directly confirm malicious activity.`;
+    } else if (independentDirectSources === 1 && strongestDirect) {
+      base = `${strongestDirect.source} is the only source currently providing a malicious signal: ${strongestDirect.claim}.`;
+    } else if (corroboratingMalicious.length > 0) {
+      base = `${corroboratingMalicious.length} corroborating (not first-party direct) source(s) support this read: ${namedSources([...new Set(corroboratingMalicious.map((i) => i.source))])}.`;
+    } else {
+      base = "The available evidence supports this state.";
+    }
+    const attributionNote = attributed ? " A real attribution (malware family/actor/campaign) exists, which is why this is actionable regardless of any shared-infrastructure context." : "";
+    return `${base}${noFindingNote}${attributionNote}`;
+  }
+  if (decision === "Investigate If Observed Internally") {
+    if (evidence.hasConflict) return evidence.conflictDescription;
+    if (sharedInfra && !attributed) return `This indicator sits on shared/cloud/VPN infrastructure with no confirmed malware/actor/campaign attribution -- reputation signal alone is not strong enough to block without more context.${noFindingNote}`;
+    const names = Array.from(new Set([...corroboratingMalicious, ...indirectOrAttributionMalicious].map((i) => i.source)));
+    if (names.length > 0) return `${namedSources(names)} provide${names.length === 1 ? "s" : ""} a suspicious, not yet strongly-corroborated signal.${noFindingNote}`;
+    return `Evidence is suspicious or conflicting -- not strong enough alone to act on directly.${noFindingNote}`;
+  }
+  if (decision === "Monitor") return `No source provided a strong or corroborated malicious signal.${noFindingNote} Monitor for additional signal before acting.`;
+  if (decision === "Watchlist") return "This is a tracked entity in this platform's data, but no source currently reports an active malicious signal for it -- keep on a watchlist, not an immediate action.";
+  if (decision === "Do Not Block") {
+    if (state === "Clean-Benign") {
+      const names = Array.from(new Set(evidence.items.filter((i) => i.category === "negative").map((i) => i.source)));
+      if (names.length > 0) return `${namedSources(names)} report${names.length === 1 ? "s" : ""} an explicit clean/benign signal, and no source reports malicious/suspicious activity.`;
+    }
+    return "No sufficient malicious evidence in this platform's current data to justify action.";
+  }
+  return `No evidence-bearing source was found or configured for this indicator.${noFindingNote}`; // No Action Required / Insufficient Evidence
+}
 
 /**
  * The type-agnostic analyst action -- computed from verdict state plus two
@@ -405,13 +480,14 @@ function computeBlockRecommendation(entityType, analystDecision, analystDecision
 export function computeVerdict({ entityType, evidence, cveExploitationState = null, context = {} }) {
   const confidenceFactors = computeConfidenceFactors(evidence);
   const confidence = deriveConfidenceLevel(confidenceFactors, evidence);
-  const state = computeVerdictState(entityType, evidence, cveExploitationState, context);
+  const signals = evidenceSignals(evidence);
+  const state = computeVerdictState(entityType, evidence, cveExploitationState, signals);
   const severityFactors = computeSeverityFactors(entityType, evidence, cveExploitationState, context);
   const severity = computeSeverityLevel(entityType, evidence, context);
   const label = buildLabel(entityType, state, cveExploitationState, context);
   const reasoning = buildReasoning(state, evidence, cveExploitationState);
   const analystDecision = computeAnalystDecision(entityType, state, evidence);
-  const analystDecisionReasoning = ANALYST_DECISION_REASONING[analystDecision];
+  const analystDecisionReasoning = buildAnalystDecisionReasoning(state, analystDecision, evidence, signals);
   const { blockRecommendation, blockRecommendationReasoning } = computeBlockRecommendation(entityType, analystDecision, analystDecisionReasoning);
 
   return {

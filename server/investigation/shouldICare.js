@@ -34,8 +34,8 @@
 import { aiRouter } from "../ai/aiRouter.js";
 import { AI_TASK } from "../ai/aiTasks.js";
 import { hashForCacheKey } from "../ai/aiResponseCache.js";
-import { hasSharedInfrastructureSignal, hasKnownAttribution } from "./verdictEngine.js";
-import { checkProseGrounding, checkCveExploitationClaim, checkUnsupportedClaims, checkMaliciousIntentClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim } from "./groundClaims.js";
+import { hasSharedInfrastructureSignal, hasKnownAttribution, evidenceSignals } from "./verdictEngine.js";
+import { checkProseGrounding, checkCveExploitationClaim, checkUnsupportedClaims, checkMaliciousIntentClaim, checkCampaignInvolvementClaim, checkCveExploitationByActorClaim, checkVictimTargetingClaim, checkMultiSourceCorroborationClaim } from "./groundClaims.js";
 
 // No SIEM/EDR/network-telemetry integration exists anywhere in this
 // platform (confirmed -- see server/investigation/ipModule.js's own
@@ -87,6 +87,7 @@ const SYSTEM_PROMPT =
   "- Every claim must trace to a specific evidence item, relationship, or field you were given. Never invent a count, a relationship, or a claim not present in the data.\n" +
   "- If hasConflict is true, your combinedAssessment MUST explain what conflicts and why (e.g. one source flags malicious while another reports clean/benign) -- never just say \"conflicting intelligence\" and stop.\n" +
   "- If independentSourceCount is meaningfully lower than sourceCount, note that some of the apparent agreement may be the same underlying report counted more than once -- do not describe repeated/redistributed feeds as independent confirmation.\n" +
+  "- NEVER write \"multiple sources\", \"multiple independent sources\", or \"corroborated by multiple sources\" unless at least 2 DISTINCT source names appear together in evidenceByCategory.direct or evidenceByCategory.corroborating. If exactly one source (e.g. only VirusTotal) provided the malicious/suspicious signal and every other queried source shows no finding, say exactly that -- e.g. \"VirusTotal is the only source currently providing a malicious signal ... ; no other configured source corroborated this finding.\" This is a hard rule, not a style preference -- a programmatic check runs after your response and will strip any unsupported multi-source claim.\n" +
   "- Shared/cloud/CDN/VPN/datacenter infrastructure ownership is NEVER evidence of malicious activity -- if infrastructureContext is present, acknowledge it explicitly as a reason for caution, not as something to ignore.\n" +
   "- likelyMaliciousIntent: if hasIntentEvidence is false, you MUST write exactly this sentence and nothing else: \"Not established from available intelligence -- insufficient evidence to determine intent.\" Do NOT infer intent from VirusTotal/AbuseIPDB detection counts, cloud/ASN/hosting-provider membership, domain-naming patterns, multi-domain resolution, or \"this ASN has malicious activity elsewhere\" -- none of those establish intent. If hasIntentEvidence is true, describe the SPECIFIC type of malicious activity the real evidence supports (e.g. \"credential-harvesting infrastructure\", \"SSH brute-force scanning\", \"malware C2 for the X family\") -- never a generic \"this is malicious.\"\n" +
   "- Never claim this indicator is confirmed C2, belongs to a named threat actor, or is part of a named ransomware campaign unless hasAttribution is true in the data you were given.\n" +
@@ -214,6 +215,7 @@ export async function generateShouldICare(result) {
   const hasCampaignData = dossier ? dossier.campaignCount > 0 : true;
   const hasDirectCveAssociation = dossier ? dossier.associatedCves.some((c) => c.confidenceLabel === "DIRECT") : true;
   const hasVictimTargetingData = dossier ? dossier.victimsTargeting.totalVictims > 0 : true;
+  const independentDirectMaliciousSourceCount = evidenceSignals(evidence).independentDirectSources;
   const ground = (text) => {
     let out = checkProseGrounding(text, allowedNames).text;
     out = checkCveExploitationClaim(out, overview.cveExploitationState).text;
@@ -221,6 +223,7 @@ export async function generateShouldICare(result) {
     out = checkCampaignInvolvementClaim(out, hasCampaignData).text;
     out = checkCveExploitationByActorClaim(out, hasDirectCveAssociation).text;
     out = checkVictimTargetingClaim(out, hasVictimTargetingData).text;
+    out = checkMultiSourceCorroborationClaim(out, independentDirectMaliciousSourceCount).text;
     return out;
   };
 

@@ -142,6 +142,30 @@ export function checkUnsupportedClaims(text, groundingContext) {
   return { text, flagged: false };
 }
 
+const MULTI_SOURCE_CORROBORATION_LANGUAGE = /\bmultiple\b[^.]{0,40}\b(source|sources|engines?|vendors?|feeds?)\b[^.]{0,40}\b(confirm|agree|corroborat|independent)|\b(several|numerous|many)\b[^.]{0,30}\bindependent\b[^.]{0,30}\bsources?\b|\bcorroborated by (multiple|several|numerous|many) (source|sources|vendors?)/i;
+
+/**
+ * Fail-closed guard for the specific, reported hallucination pattern this
+ * platform's own verdict engine already fixed at the source (see
+ * server/investigation/verdictEngine.js#buildAnalystDecisionReasoning's own
+ * comment) -- kept here too as defense-in-depth for the AI-authored prose
+ * layers (shouldICare.js/correlationSummary.js), which paraphrase the
+ * verdict rather than quote it verbatim and could still independently claim
+ * "multiple sources" on their own. `independentDirectMaliciousSourceCount`
+ * is the real, code-computed count of independent DIRECT malicious/
+ * suspicious sources (server/investigation/verdictEngine.js#evidenceSignals'
+ * own tally) -- text claiming multi-source corroboration is only left
+ * standing when that count is genuinely >= 2.
+ */
+export function checkMultiSourceCorroborationClaim(text, independentDirectMaliciousSourceCount) {
+  if (!text || typeof text !== "string") return { text, flagged: false };
+  if (independentDirectMaliciousSourceCount >= 2 || !MULTI_SOURCE_CORROBORATION_LANGUAGE.test(text)) return { text, flagged: false };
+  return {
+    text: "Not established by available evidence: this platform's data does not support a claim of multi-source corroboration for this indicator -- at most one independent direct source currently provides a malicious/suspicious signal.",
+    flagged: true,
+  };
+}
+
 const SAFE_DEFAULT_INTENT_PHRASE = /not established|insufficient evidence|cannot (currently )?be determined/i;
 
 /**

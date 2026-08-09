@@ -129,6 +129,7 @@ const RELATIONSHIP_SEMANTICS = {
   "covers malware": semantics("cross-reference", { guardrailNote: "May be a direct citation or an unresolved name mention not yet matched to a canonical entity -- see this edge's own reasoning/confidence for which." }),
   "covers campaign": semantics("cross-reference", { guardrailNote: "May be a direct citation or an unresolved name mention not yet matched to a canonical entity -- see this edge's own reasoning/confidence for which." }),
   "linked malware family": semantics("cross-reference", { guardrailNote: "Inferred by matching a shared indicator against this platform's own malware-family records -- not a first-party citation." }),
+  "classified as malware family": semantics("attribution", { impliesAttribution: true, guardrailNote: "A live sandbox/multi-engine detection classified this exact file into this family -- a real, first-party classification, but the family-name match itself is a best-effort text match against this platform's own tracked entity names, not a guaranteed-exact vendor taxonomy alignment." }),
   "attributed actor": semantics("attribution", { impliesAttribution: true, guardrailNote: "Inferred transitively (indicator → malware family → actor known to use that family) -- does not by itself confirm this specific actor controls this specific indicator." }),
   "seen in campaign": semantics("cross-reference", { impliesAttribution: true, guardrailNote: "Inferred transitively via a shared malware family -- not a first-party citation of this specific indicator." }),
   "seen exploiting this CVE": semantics("cross-reference", { guardrailNote: "Inferred transitively via a shared malware family, not a first-party CVE-to-indicator citation." }),
@@ -792,10 +793,45 @@ function gatherAsn(key) {
 
 // --- Cross-reference-only types: url, hash, email, fileName, processName, registryKey, userAgent ---
 
-function gatherCrossReferenceOnly(type, key) {
+// Noise tokens a raw AV/sandbox threat label routinely carries around the
+// actual family name (e.g. "trojan.mirai/gafgyt", "Ransom:Win32/LockBit!MTB")
+// -- stripped before attempting to match a token against this platform's own
+// tracked malware entity names/aliases. Deliberately conservative: this never
+// invents a family, it only tries harder to recognize a REAL tracked family
+// name buried inside a compound label the file-hash lookup already returned.
+const THREAT_LABEL_NOISE_TOKENS = new Set([
+  "trojan", "worm", "virus", "ransom", "ransomware", "backdoor", "downloader", "dropper", "generic", "malware",
+  "win32", "win64", "msil", "linux", "android", "macos", "elf", "agent", "gen", "variant", "heur", "heuristic",
+  "suspicious", "unwanted", "adware", "pua", "pup", "riskware", "hacktool", "exploit", "a", "b", "c", "gen2",
+]);
+
+/**
+ * Best-effort match from a raw, often-compound AV/sandbox threat label (e.g.
+ * VirusTotal's threatLabel or Hybrid Analysis's malwareFamily field) to a
+ * REAL malware entity this platform already tracks -- splits the label into
+ * candidate tokens, drops generic noise tokens, and tries each remaining
+ * token (longest first, so a more specific token wins over a shorter
+ * coincidental substring) for an EXACT name/alias match via
+ * findByNameOrAlias. Returns null (never a fabricated/fuzzy guess) when
+ * nothing exact matches.
+ */
+function matchMalwareFamilyFromLabel(label) {
+  if (!label) return null;
+  const tokens = label
+    .split(/[^a-z0-9]+/i)
+    .map((t) => t.toLowerCase())
+    .filter((t) => t.length >= 3 && !THREAT_LABEL_NOISE_TOKENS.has(t))
+    .sort((a, b) => b.length - a.length);
+  for (const token of tokens) {
+    const match = findByNameOrAlias(getMalwareEntities(), token);
+    if (match) return match;
+  }
+  return null;
+}
+
+function gatherCrossReferenceOnly(type, key, context = {}) {
   const value = key.trim();
   const crossRef = crossReferenceIndicator(value);
-  const found = crossRef.matchedMalwareFamilies.length > 0 || crossRef.matchingAiReports.length > 0;
 
   const edges = [
     ...crossRef.matchedMalwareFamilies.map((name) => edge("malware", name, name, "linked malware family", "Cross-reference: shared indicator in malware.iocs / articleIocs")),
@@ -804,13 +840,66 @@ function gatherCrossReferenceOnly(type, key) {
     ...crossRef.matchingAiReports.map((r) => edge("report", r.id, r.articleTitle, "covered in report", "Direct: indicator present in report.iocs", { firstSeen: r.publishedDate, lastSeen: r.publishedDate })),
   ];
 
+  // File hashes only: VirusTotal/Hybrid Analysis often classify a hash into
+  // a NAMED malware family via a live sandbox/multi-engine detection even
+  // when this exact hash was never previously ingested into this platform's
+  // own IOC data (crossReferenceIndicator above only ever matches a LITERAL
+  // string already in malware.iocs/articleIocs, so a never-before-seen hash
+  // silently reported zero relationships even when its own live lookup had
+  // JUST classified it). When a real, exact-matching tracked entity is
+  // found for the classified family, that family's FULL tracked profile
+  // (actors that use it, campaigns it's deployed in, other IOCs/samples,
+  // victims, ATT&CK techniques) is pulled in via gatherMalware() and merged
+  // -- the concrete fix for "the platform says the malware family is known
+  // but never investigates it further."
+  let matchedFamilyEntity = null;
+  let liveFamilyLabelUnmatched = null;
+  if (type === "hash" && context.malwareFamily) {
+    matchedFamilyEntity = matchMalwareFamilyFromLabel(context.malwareFamily);
+    if (matchedFamilyEntity) {
+      if (!crossRef.matchedMalwareFamilies.some((n) => norm(n) === norm(matchedFamilyEntity.name))) {
+        edges.push(
+          edge(
+            "malware",
+            matchedFamilyEntity.name,
+            matchedFamilyEntity.name,
+            "classified as malware family",
+            `Live: ${context.malwareFamilySource ?? "file-hash lookup"} classified this file as "${context.malwareFamily}", matched to this platform's tracked "${matchedFamilyEntity.name}" family`,
+          ),
+        );
+      }
+      // Reuses gatherMalware()'s own edge-building rather than duplicating
+      // it -- these edges describe what the FAMILY connects to (actors,
+      // campaigns, other samples/infrastructure, victims), which is exactly
+      // what "investigate this hash's malware family" means for one sample
+      // of it.
+      const familyResult = gatherMalware(matchedFamilyEntity.name);
+      edges.push(...familyResult.edges);
+    } else {
+      // A real classification exists, but no exact-matching tracked entity
+      // -- disclosed as metadata (never silently dropped) so the analyst
+      // sees the platform genuinely tried this pivot and what it found.
+      liveFamilyLabelUnmatched = { label: context.malwareFamily, source: context.malwareFamilySource ?? "file-hash lookup" };
+    }
+  }
+
+  const found = crossRef.matchedMalwareFamilies.length > 0 || crossRef.matchingAiReports.length > 0 || Boolean(matchedFamilyEntity);
+  const allFamilyNames = [...crossRef.matchedMalwareFamilies, ...(matchedFamilyEntity ? [matchedFamilyEntity.name] : [])];
+
   return {
-    node: { type, id: value, label: value, summary: null, found, metadata: detectionAndHuntingForFamilies(crossRef.matchedMalwareFamilies) },
+    node: {
+      type,
+      id: value,
+      label: value,
+      summary: null,
+      found,
+      metadata: { ...detectionAndHuntingForFamilies(allFamilyNames), liveMalwareFamilyLabel: context.malwareFamily ?? null, liveFamilyLabelUnmatched },
+    },
     edges: dedupeEdges(edges),
     unavailableRelationships: [
       {
         relationshipType: "reputation",
-        reason: `No external reputation or correlation source treats a ${type} as a globally-queryable indicator (confirmed: this app's Triage Console has the same gap). The only real signal here is whether this exact value already appears in this app's own ingested IOC/report data.`,
+        reason: `No external reputation or correlation source treats a ${type} as a globally-queryable indicator (confirmed: this app's Triage Console has the same gap). The only real signal here is whether this exact value already appears in this app's own ingested IOC/report data${type === "hash" ? ", plus (for file hashes only) whether a live sandbox/multi-engine classification matches a tracked malware family" : ""}.`,
       },
     ],
   };
@@ -946,7 +1035,13 @@ function gatherReport(key) {
 
 // --- Orchestrator ---------------------------------------------------------------
 
-export async function getGraphNode(nodeType, key) {
+/**
+ * `context` carries per-search live-lookup facts the graph itself has no
+ * other way to know (currently just a hash search's own VirusTotal/Hybrid
+ * Analysis malware-family classification, see gatherCrossReferenceOnly) --
+ * ignored by every node type that doesn't use it.
+ */
+export async function getGraphNode(nodeType, key, context = {}) {
   if (!GRAPH_NODE_TYPES.includes(nodeType) && nodeType !== "asn") throw new Error(`Unknown graph node type "${nodeType}"`);
   if (!key || !key.trim()) throw new Error("key is required");
 
@@ -976,7 +1071,7 @@ export async function getGraphNode(nodeType, key) {
     case "report":
       return gatherReport(key);
     default:
-      if (CROSS_REF_ONLY_TYPES.has(nodeType)) return gatherCrossReferenceOnly(nodeType, key);
+      if (CROSS_REF_ONLY_TYPES.has(nodeType)) return gatherCrossReferenceOnly(nodeType, key, context);
       throw new Error(`Unknown graph node type "${nodeType}"`);
   }
 }
