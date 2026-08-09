@@ -25,8 +25,11 @@ interface ThreatFeedTableProps {
   initialDateRange?: DateRange;
 }
 
+const IOC_TYPES: IocType[] = ["ip", "domain", "hash", "url", "unknown"];
+
 export function ThreatFeedTable({ initialDateRange }: ThreatFeedTableProps = {}) {
   const { iocs, isLoading, isError, error } = useThreatFeed();
+  const [typeFilter, setTypeFilter] = useState<"ALL" | IocType>("ALL");
   const [sourceFilter, setSourceFilter] = useState("ALL");
   const [familyFilter, setFamilyFilter] = useState("");
   const [dateRange, setDateRange] = useState<DateRange>(initialDateRange ?? EMPTY_DATE_RANGE);
@@ -36,15 +39,17 @@ export function ThreatFeedTable({ initialDateRange }: ThreatFeedTableProps = {})
   }, [initialDateRange]);
 
   const availableSources = useMemo(() => Array.from(new Set(iocs.flatMap((i) => i.sources))).sort(), [iocs]);
+  const availableTypes = useMemo(() => IOC_TYPES.filter((t) => iocs.some((i) => i.indicatorType === t)), [iocs]);
 
   const filtered = useMemo(() => {
     return iocs.filter((ioc) => {
+      if (typeFilter !== "ALL" && ioc.indicatorType !== typeFilter) return false;
       if (sourceFilter !== "ALL" && !ioc.sources.includes(sourceFilter)) return false;
       if (familyFilter && !ioc.malwareFamily.toLowerCase().includes(familyFilter.toLowerCase())) return false;
       if (!isWithinDateRange(ioc.firstSeen, dateRange)) return false;
       return true;
     });
-  }, [iocs, sourceFilter, familyFilter, dateRange]);
+  }, [iocs, typeFilter, sourceFilter, familyFilter, dateRange]);
 
   return (
     <Card>
@@ -62,6 +67,14 @@ export function ThreatFeedTable({ initialDateRange }: ThreatFeedTableProps = {})
             onChange={(e) => setFamilyFilter(e.target.value)}
             className="w-full sm:w-48"
           />
+          <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as "ALL" | IocType)}>
+            <option value="ALL">All types</option>
+            {availableTypes.map((t) => (
+              <option key={t} value={t}>
+                {TYPE_LABEL[t]}
+              </option>
+            ))}
+          </Select>
           <Select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
             <option value="ALL">All sources</option>
             {availableSources.map((s) => (
