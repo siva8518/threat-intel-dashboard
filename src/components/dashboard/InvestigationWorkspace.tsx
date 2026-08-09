@@ -15,7 +15,6 @@ import { ArtifactIntelligenceSection } from "./investigation/ArtifactSections";
 import { AiSummaryPanel, DetectionOpportunitiesPanel, OperationalGuidancePanel } from "./investigation/AiReportSection";
 import { RecommendedActionsPanel } from "./investigation/RecommendedActionsPanel";
 import { RealDetectionsHuntingPanel } from "./investigation/RealDetectionsHuntingPanel";
-import { AiGraphInsightsPanel } from "./investigation/AiGraphInsightsPanel";
 import { ShouldICarePanel } from "./investigation/ShouldICarePanel";
 import { SearchCoveragePanel } from "./investigation/SearchCoveragePanel";
 import { EvidencePanel } from "./investigation/EvidencePanel";
@@ -250,15 +249,17 @@ function QuickActions({ result }: { result: InvestigationResult }) {
  * (server/investigation/shouldICare.js's Overall Assessment / Combined
  * Intelligence Assessment / Likely Malicious Intent / Environmental
  * Relevance -- NOT Next Action, which now lives only in (6) below).
- * (4) Investigation Graph. (5) Investigation Summary -- one umbrella
- * section wrapping the AI Investigation Summary (graph insights) and
- * Indicator-Specific Intelligence, so the deeper synthesis and the raw
- * per-type lookup detail live together instead of scattered across the page.
- * (6) What To Investigate Next -- merges ShouldICarePanel's next-step
- * guidance with the correlation engine's own next-steps list into one place,
- * since both were answering the same question. (7) Recommendations -- the AI
- * Investigation
- * Summary's own recommendations list, pulled out to its own section. Then:
+ * (4) Investigation Graph. (5) Investigation Summary -- the per-type
+ * Indicator-Specific Intelligence detail under a plain heading; no AI
+ * narrative lives here (the auto-generated graph-insights read was removed
+ * as redundant with Should I Care above and Recommendations/the manual AI
+ * Investigation Summary below). (6) What To Investigate Next -- merges
+ * ShouldICarePanel's next-step guidance with the correlation engine's own
+ * next-steps list into one place, since both were answering the same
+ * question. (7) Recommendations -- the graph-insights engine's own
+ * recommendations list, pulled out to its own section (still fetched
+ * automatically even though its parent narrative is no longer displayed).
+ * Then:
  * AI/vendor reports -> Recommended Actions (SOC/Detection
  * Engineering/Threat Intelligence/Incident Response) -> real Detections &
  * Hunting -> deeper opt-in AI Investigation Summary (the manual "Generate AI
@@ -279,7 +280,6 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
     recommendedActions,
     graphInsights,
     graphInsightsPending,
-    graphInsightsError,
     correlationSummary,
     correlationSummaryPending,
     shouldICare,
@@ -394,42 +394,34 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
               />
             )}
 
-            {/* 5. Investigation Summary -- AI Investigation Summary + Indicator-Specific Intelligence, grouped under one umbrella instead of scattered as separate cards. */}
+            {/* 5. Investigation Summary -- the per-type Indicator-Specific Intelligence detail, under one plain heading (no AI narrative here -- see Should I Care above and Recommendations/AI Investigation Summary below for the AI-generated reads). */}
             <Section title="Investigation Summary">
-              <div className="space-y-5">
-                <AiGraphInsightsPanel insights={graphInsights} pending={graphInsightsPending} error={graphInsightsError} onFocusEntity={runInvestigation} />
-
-                <Section title="Indicator-Specific Intelligence">
-                  {family === "network" && result.type === "ip" && (
-                    <IpIntelligenceSection data={result.moduleData as unknown as Parameters<typeof IpIntelligenceSection>[0]["data"]} onPivotToIndicator={runInvestigation} />
-                  )}
-                  {family === "network" && result.type === "domain" && <DomainIntelligenceSection data={result.moduleData as unknown as Parameters<typeof DomainIntelligenceSection>[0]["data"]} />}
-                  {family === "network" && result.type === "url" && <UrlIntelligenceSection data={result.moduleData as unknown as Parameters<typeof UrlIntelligenceSection>[0]["data"]} />}
-                  {family === "hash" && <HashIntelligenceSection data={result.moduleData as unknown as Parameters<typeof HashIntelligenceSection>[0]["data"]} />}
-                  {family === "cve" &&
-                    (result.moduleData.found ? (
-                      <CveIntelligenceSection
-                        cve={result.moduleData.cve as CveRecord}
-                        profile={result.moduleData.profile as CveProfile | null}
-                        onViewProfile={() => selectCve(result.moduleData.cve as CveRecord)}
-                      />
-                    ) : (
-                      <EmptyState message={`${result.indicator} not found in NVD or CIRCL.`} />
-                    ))}
-                  {family === "entity" && (
-                    <EntityIntelligenceSection
-                      data={result.moduleData as unknown as Parameters<typeof EntityIntelligenceSection>[0]["data"]}
-                      onOpenMalware={openMalware}
-                      onOpenActor={onOpenActor}
-                      onOpenCampaign={onOpenCampaign}
-                      onPivotToIndicator={runInvestigation}
-                    />
-                  )}
-                  {family === "artifact" && (
-                    <ArtifactIntelligenceSection note={result.moduleData.note as string} crossReference={result.relatedIntelligence!} />
-                  )}
-                </Section>
-              </div>
+              {family === "network" && result.type === "ip" && (
+                <IpIntelligenceSection data={result.moduleData as unknown as Parameters<typeof IpIntelligenceSection>[0]["data"]} onPivotToIndicator={runInvestigation} />
+              )}
+              {family === "network" && result.type === "domain" && <DomainIntelligenceSection data={result.moduleData as unknown as Parameters<typeof DomainIntelligenceSection>[0]["data"]} />}
+              {family === "network" && result.type === "url" && <UrlIntelligenceSection data={result.moduleData as unknown as Parameters<typeof UrlIntelligenceSection>[0]["data"]} />}
+              {family === "hash" && <HashIntelligenceSection data={result.moduleData as unknown as Parameters<typeof HashIntelligenceSection>[0]["data"]} />}
+              {family === "cve" &&
+                (result.moduleData.found ? (
+                  <CveIntelligenceSection
+                    cve={result.moduleData.cve as CveRecord}
+                    profile={result.moduleData.profile as CveProfile | null}
+                    onViewProfile={() => selectCve(result.moduleData.cve as CveRecord)}
+                  />
+                ) : (
+                  <EmptyState message={`${result.indicator} not found in NVD or CIRCL.`} />
+                ))}
+              {family === "entity" && (
+                <EntityIntelligenceSection
+                  data={result.moduleData as unknown as Parameters<typeof EntityIntelligenceSection>[0]["data"]}
+                  onOpenMalware={openMalware}
+                  onOpenActor={onOpenActor}
+                  onOpenCampaign={onOpenCampaign}
+                  onPivotToIndicator={runInvestigation}
+                />
+              )}
+              {family === "artifact" && <ArtifactIntelligenceSection note={result.moduleData.note as string} crossReference={result.relatedIntelligence!} />}
             </Section>
 
             {/* 6. What To Investigate Next -- merges ShouldICarePanel's next-step guidance with the correlation engine's own next-steps list. */}
