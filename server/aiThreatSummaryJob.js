@@ -12,15 +12,16 @@
 // limited slots -- widening eligibility doesn't mean giving up on quality
 // prioritization, just removing the hard exclusion.
 //
-// Also drains one non-news platform source through the SAME pipeline --
-// ransomware victim disclosures (ransomwareCandidates()) -- so "AI
-// Summarization covers everything this platform tracks" doesn't stop at RSS
-// news. It has no real article prose, so it's turned into a genuine (never
-// fabricated) title/summary built only from that record's own real fields,
-// then run through generateThreatSummary() unchanged -- the existing "say
-// Not Reported rather than guess" grounding discipline naturally produces a
-// correspondingly thin report for these rather than needing a second report
-// schema.
+// Ransomware leak-site victim disclosures (previously synthesized into a
+// fake "article" via a now-removed ransomwareCandidates() helper and drained
+// through this same pipeline) were removed from the candidate pool per the
+// same reasoning as the GitHub-repo removal below: a leak-site listing has
+// no real article prose behind it, just "X group added Y victim," so it
+// produced a mostly-empty 25+ section report that still occupied a scarce
+// batch slot -- diluting coverage of the real ~198-source news pool this
+// feature is meant to summarize. Ransomware Data still tracks every victim
+// disclosure on its own dedicated tab; this job now only ever reads from the
+// news pool.
 //
 // GitHub-discovered exploit repos (githubRepoCandidates(), previously also
 // drained here) were removed from the candidate pool: confirmed live these
@@ -226,48 +227,11 @@ class NewsCacheNotReadyError extends Error {}
 // (a non-empty batch) has actually been attempted.
 class NoEligibleCandidatesError extends Error {}
 
-function slugify(text) {
-  return (text ?? "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-
-// Ransomware victim disclosures and GitHub-discovered exploit repos have no
-// narrative article text of their own -- unlike every other candidate here,
-// they're structured records (a group/victim/date, or a repo's own
-// metadata), not prose a report can extract technical detail from. Rather
-// than build a second, thinner report schema for them, this synthesizes a
-// real (never fabricated -- every field below comes straight from the
-// record itself) title/summary from their own data and feeds them through
-// the exact same generateThreatSummary() pipeline as a news article. The
-// existing "say Not Reported rather than guess" grounding discipline
-// naturally produces a correspondingly thin report for these -- most
-// narrative sections legitimately empty, but severity/CVE/reference fields
-// still real -- without any schema or prompt change.
-function ransomwareCandidates(campaigns) {
-  return (campaigns ?? [])
-    .filter((c) => c.group && c.victim && c.discoveredDate)
-    .map((c) => ({
-      title: `${c.group} lists new ransomware victim: ${c.victim}`,
-      summary:
-        `Ransomware group "${c.group}" added "${c.victim}" to its leak site` +
-        (c.sector && c.sector !== "Unknown" ? `, sector: ${c.sector}` : "") +
-        (c.country && c.country !== "Unknown" ? `, country: ${c.country}` : "") +
-        `. Discovered ${c.discoveredDate}.`,
-      // A real per-victim/group leak-site URL when known (fetchArticleText()
-      // in aiThreatSummary.js will genuinely try to fetch it, same as any
-      // news link) -- a stable synthetic identifier otherwise, purely for
-      // isArticleProcessed() dedup, never shown as if it were a real source.
-      link: c.sourceUrl || `ransomware-victim://${slugify(c.group)}/${slugify(c.victim)}`,
-      source: `${c.group} (Ransomware Leak Site)`,
-      publishedDate: c.discoveredDate,
-    }));
-}
-
 async function runCycle() {
   if (!cache.getEntry("news").data) throw new NewsCacheNotReadyError("News cache has not synced yet");
 
   const newsItems = cache.getEntry("news").data?.items ?? [];
-  const allCandidateSources = [...newsItems, ...ransomwareCandidates(getRansomwareCampaigns())];
-  const candidates = allCandidateSources.filter((item) => isRecent(item.publishedDate) && !isArticleProcessed(item.link));
+  const candidates = newsItems.filter((item) => isRecent(item.publishedDate) && !isArticleProcessed(item.link));
   if (candidates.length === 0) throw new NoEligibleCandidatesError("No eligible candidates in this check");
 
   const attackData = cache.getEntry("attack").data;

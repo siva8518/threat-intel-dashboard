@@ -3,10 +3,15 @@
 // referenced entities, ranked findings, real industry data), not just the
 // searched entity's own direct graph edges the way AiGraphInsightsPanel
 // does. The narrative fields are model-authored; every list below
-// (industries/reused infrastructure/ATT&CK techniques/victims/actors/
-// campaigns/malware) is real, deterministically-tallied data, never
-// model-authored -- see correlationSummary.js's own header comment.
-import { AlertOctagon, Building2, Crosshair, Globe2, Sparkles, Target } from "lucide-react";
+// (industries/reused infrastructure/ATT&CK techniques/actors/campaigns/
+// malware) is real, deterministically-tallied data, never model-authored --
+// see correlationSummary.js's own header comment. `summary.victimsTargeted`
+// is deliberately NOT re-rendered as its own chip list here -- it's the
+// same data EntitySections.tsx's "Victims / Targeting" section already
+// shows in full; it still flows into this panel's narrative prose and
+// grounding allowlist (see correlationSummary.js), just not as a second chip
+// list on this page.
+import { AlertOctagon, Crosshair, Globe2, Sparkles, Target } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Section } from "../reportPrimitives";
@@ -83,7 +88,6 @@ export function CorrelationSummaryPanel({ summary, pending, error, onFocusEntity
           {entityList("Related Threat Actors", <Target className="h-3.5 w-3.5" />, summary.relatedActors)}
           {entityList("Overlapping Campaigns", <Crosshair className="h-3.5 w-3.5" />, summary.relatedCampaigns)}
           {entityList("Overlapping Malware", <AlertOctagon className="h-3.5 w-3.5" />, summary.relatedMalware)}
-          {entityList("Victims Targeted", <Building2 className="h-3.5 w-3.5" />, summary.victimsTargeted)}
         </div>
 
         {summary.industriesAffected.length > 0 && (

@@ -13,7 +13,7 @@ import { useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Section } from "../reportPrimitives";
-import { groupByTactic } from "@/investigation/attackTactics";
+import { AttackTechniquesByTactic } from "./AttackTechniquesByTactic";
 import type {
   MalwareIntelligenceEntity,
   ThreatActorIntelligenceEntity,
@@ -167,19 +167,9 @@ function RecentActivitySection({ activity }: { activity: RecentActivity }) {
             </p>
           )}
           {activity.recentVictims.length > 0 && (
-            <div>
-              <p className="mb-1 text-xs font-semibold text-foreground">Recently Disclosed Victims</p>
-              <ul className="space-y-0.5 text-xs text-muted">
-                {activity.recentVictims.map((v, i) => (
-                  <li key={i}>
-                    {v.victim}
-                    {v.sector ? ` — ${v.sector}` : ""}
-                    {v.country ? ` (${v.country})` : ""}
-                    {v.discoveredDate ? `, ${new Date(v.discoveredDate).toLocaleDateString()}` : ""}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <p className="text-xs text-muted">
+              {activity.recentVictims.length} victim{activity.recentVictims.length === 1 ? "" : "s"} disclosed in this window — see Victims / Targeting below for the full list.
+            </p>
           )}
           {activity.sourceArticles.length > 0 && (
             <div>
@@ -350,24 +340,9 @@ function IocInventorySection({ buckets, onPivotToIndicator }: { buckets: IocInve
 // an analyst can scan by "how was this achieved" rather than hunting through
 // 30-50 ungrouped T-codes.
 function AttackTechniquesSection({ techniques }: { techniques: EntityDossier["attackTechniques"] }) {
-  const groups = groupByTactic(techniques);
   return (
     <Section title="MITRE ATT&amp;CK Activity">
-      <div className="space-y-3">
-        {groups.map((g) => (
-          <div key={g.tactic}>
-            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{g.label}</p>
-            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-              {g.items.map((t) => (
-                <div key={t.id} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2 text-xs">
-                  <span className="font-mono font-semibold text-foreground">{t.id}</span> <span className="text-foreground">{t.name}</span>
-                  <p className="mt-0.5 text-muted">{t.observedVia}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      <AttackTechniquesByTactic techniques={techniques} />
     </Section>
   );
 }
