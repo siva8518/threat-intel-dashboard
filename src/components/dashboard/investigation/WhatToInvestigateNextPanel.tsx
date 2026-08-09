@@ -1,10 +1,12 @@
 // Standalone "What To Investigate Next" section -- merges the two "here's
 // your next step" fields this page produces (ShouldICarePanel's removed
-// "Next Action" and CorrelationSummaryPanel's removed "What To Investigate
-// Next" list) into ONE place instead of two differently-labeled boxes making
-// the same kind of recommendation. Neither source panel renders its own
-// version of this content anymore -- see ShouldICarePanel.tsx and
-// CorrelationSummaryPanel.tsx's own comments.
+// "Next Action" and the correlation engine's own next-steps list, formerly
+// rendered by the now-removed AI Correlation Summary panel) into ONE place
+// instead of two differently-labeled boxes making the same kind of
+// recommendation. The correlation summary is still fetched (see
+// useInvestigationWorkspace.ts) purely to feed nextSteps here -- its other
+// fields (whatIsThis/relationshipNarrative/etc.) are no longer displayed
+// anywhere.
 import { Sparkles } from "lucide-react";
 import { Section } from "../reportPrimitives";
 import type { ShouldICareAssessment, CorrelationSummary } from "@/types/threat-intel";

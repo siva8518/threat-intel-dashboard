@@ -16,7 +16,6 @@ import { AiSummaryPanel, DetectionOpportunitiesPanel, OperationalGuidancePanel }
 import { RecommendedActionsPanel } from "./investigation/RecommendedActionsPanel";
 import { RealDetectionsHuntingPanel } from "./investigation/RealDetectionsHuntingPanel";
 import { AiGraphInsightsPanel } from "./investigation/AiGraphInsightsPanel";
-import { CorrelationSummaryPanel } from "./investigation/CorrelationSummaryPanel";
 import { ShouldICarePanel } from "./investigation/ShouldICarePanel";
 import { SearchCoveragePanel } from "./investigation/SearchCoveragePanel";
 import { EvidencePanel } from "./investigation/EvidencePanel";
@@ -252,13 +251,13 @@ function QuickActions({ result }: { result: InvestigationResult }) {
  * Intelligence Assessment / Likely Malicious Intent / Environmental
  * Relevance -- NOT Next Action, which now lives only in (6) below).
  * (4) Investigation Graph. (5) Investigation Summary -- one umbrella
- * section wrapping the AI Investigation Summary (graph insights), AI
- * Correlation Summary (incl. Infrastructure Reuse), and Indicator-Specific
- * Intelligence, so the deeper synthesis and the raw per-type lookup detail
- * live together instead of scattered across the page. (6) What To
- * Investigate Next -- merges ShouldICarePanel's next-step guidance with
- * CorrelationSummaryPanel's next-steps list into one place, since both were
- * answering the same question. (7) Recommendations -- the AI Investigation
+ * section wrapping the AI Investigation Summary (graph insights) and
+ * Indicator-Specific Intelligence, so the deeper synthesis and the raw
+ * per-type lookup detail live together instead of scattered across the page.
+ * (6) What To Investigate Next -- merges ShouldICarePanel's next-step
+ * guidance with the correlation engine's own next-steps list into one place,
+ * since both were answering the same question. (7) Recommendations -- the AI
+ * Investigation
  * Summary's own recommendations list, pulled out to its own section. Then:
  * AI/vendor reports -> Recommended Actions (SOC/Detection
  * Engineering/Threat Intelligence/Incident Response) -> real Detections &
@@ -283,7 +282,6 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
     graphInsightsError,
     correlationSummary,
     correlationSummaryPending,
-    correlationSummaryError,
     shouldICare,
     shouldICarePending,
     shouldICareError,
@@ -396,12 +394,10 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
               />
             )}
 
-            {/* 5. Investigation Summary -- AI Investigation Summary + AI Correlation Summary + Indicator-Specific Intelligence, grouped under one umbrella instead of scattered as separate cards. */}
+            {/* 5. Investigation Summary -- AI Investigation Summary + Indicator-Specific Intelligence, grouped under one umbrella instead of scattered as separate cards. */}
             <Section title="Investigation Summary">
               <div className="space-y-5">
                 <AiGraphInsightsPanel insights={graphInsights} pending={graphInsightsPending} error={graphInsightsError} onFocusEntity={runInvestigation} />
-
-                <CorrelationSummaryPanel summary={correlationSummary} pending={correlationSummaryPending} error={correlationSummaryError} onFocusEntity={runInvestigation} />
 
                 <Section title="Indicator-Specific Intelligence">
                   {family === "network" && result.type === "ip" && (
@@ -436,7 +432,7 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
               </div>
             </Section>
 
-            {/* 6. What To Investigate Next -- merges ShouldICarePanel's next-step guidance with CorrelationSummaryPanel's next-steps list. */}
+            {/* 6. What To Investigate Next -- merges ShouldICarePanel's next-step guidance with the correlation engine's own next-steps list. */}
             <WhatToInvestigateNextPanel shouldICare={shouldICare} shouldICarePending={shouldICarePending} correlationSummary={correlationSummary} correlationSummaryPending={correlationSummaryPending} />
 
             {/* 7. Recommendations -- the AI Investigation Summary's own recommendations list. */}
