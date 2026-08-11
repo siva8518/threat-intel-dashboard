@@ -322,15 +322,33 @@ export async function investigate(query: string): Promise<InvestigationResult> {
   return fetchJson(`/api/investigate?query=${encodeURIComponent(query)}`, { source: "Intelligence Investigation Console" });
 }
 
-/** On-demand only -- fired by the "Generate AI Report" button, never automatically on search. Longer timeout since this is a real LLM call, same reasoning as draftDetectionBacklogArtifacts above. */
-export async function generateInvestigationAiReport(query: string): Promise<AiInvestigationReport> {
-  return fetchJson("/api/investigate/ai-report", {
+/**
+ * On-demand only -- fired by the "Generate AI Report" button, never
+ * automatically on search. Submit+poll rather than one long synchronous
+ * call: DigitalOcean App Platform's own edge/load-balancer enforces a
+ * request timeout shorter than this generation can legitimately take (a
+ * single successful multi-thousand-token Anthropic completion alone
+ * measured ~39s), so a synchronous call reliably 502/504'd in production
+ * even when the app itself was working fine. This returns instantly with a
+ * jobId; poll fetchInvestigationAiReportStatus until it resolves.
+ */
+export async function startInvestigationAiReport(query: string): Promise<{ jobId: string; status: "pending" }> {
+  return fetchJson("/api/investigate/ai-report/start", {
     source: "Intelligence Investigation Console",
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
-    timeoutMs: 90_000,
   });
+}
+
+export interface AiInvestigationReportJob {
+  status: "pending" | "complete" | "failed";
+  report?: AiInvestigationReport;
+  error?: string;
+}
+
+export async function fetchInvestigationAiReportStatus(jobId: string): Promise<AiInvestigationReportJob> {
+  return fetchJson(`/api/investigate/ai-report/status?jobId=${encodeURIComponent(jobId)}`, { source: "Intelligence Investigation Console" });
 }
 
 /** One node of the Investigation Graph -- see server/investigation/investigationGraph.js. Pure correlation, no AI call, cheap to re-run on every expand click. */

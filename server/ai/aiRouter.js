@@ -88,7 +88,15 @@ function resolveProviderOrder() {
 
 const PROVIDERS = resolveProviderOrder().map((key) => PROVIDER_DEFS.find((d) => d.key === key));
 
-const RETRIES_PER_PROVIDER = 1; // "retry each provider once" -- 2 total attempts per provider before failing over, only for retryable reasons (see isRetryableReason)
+// 0 -- fail over to the NEXT provider immediately on a retryable error
+// rather than retrying the same one. A same-provider retry only ever adds
+// latency (up to REQUEST_TIMEOUT_MS again) betting on the same provider
+// recovering; failing over spends that time on a provider that might
+// already be healthy instead. Matters a lot for any caller sitting behind a
+// hard platform request timeout (e.g. DigitalOcean App Platform's own edge
+// timeout, well under a minute) -- one retried timeout used to be enough by
+// itself to blow that budget before failover even started.
+const RETRIES_PER_PROVIDER = 0;
 const RETRY_BASE_DELAY_MS = 1000;
 
 // Only genuinely transient reasons get a same-provider retry. A rate limit

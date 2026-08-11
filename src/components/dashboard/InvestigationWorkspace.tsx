@@ -22,7 +22,7 @@ import { RecommendationsPanel } from "./investigation/RecommendationsPanel";
 import { SandboxAnalysisPanel } from "./investigation/SandboxAnalysisPanel";
 import { InvestigationGraph } from "./InvestigationGraph";
 import { useSelection } from "@/context/SelectionContext";
-import { useGenerateInvestigationAiReport } from "@/hooks/useInvestigate";
+import { useSubmitInvestigationAiReport, useInvestigationAiReportJob } from "@/hooks/useInvestigate";
 import { useInvestigationWorkspace } from "@/hooks/useInvestigationWorkspace";
 import { sectionFamilyFor, INDICATOR_TYPE_LABEL } from "@/investigation/moduleConfig";
 import { virusTotalLookupUrl } from "@/lib/vtLookup";
@@ -348,7 +348,9 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
   const { selectCve, selectMalware } = useSelection();
 
   const workspace = useInvestigationWorkspace();
-  const aiReportM = useGenerateInvestigationAiReport();
+  const [aiReportJobId, setAiReportJobId] = useState<string | null>(null);
+  const aiReportSubmitM = useSubmitInvestigationAiReport();
+  const aiReportJob = useInvestigationAiReportJob(aiReportJobId);
   const {
     investigateM,
     result,
@@ -375,7 +377,8 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
     setInput(query);
     setSubmittedQuery(query);
     workspace.runInvestigation(query);
-    aiReportM.reset();
+    aiReportSubmitM.reset();
+    setAiReportJobId(null);
   }
 
   function openMalware(entity: MalwareIntelligenceEntity, detectionRules: DetectionRuleRef[]) {
@@ -525,12 +528,12 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
             <RealDetectionsHuntingPanel graphNode={graphNode} />
 
             <AiSummaryPanel
-              report={aiReportM.data}
-              isPending={aiReportM.isPending}
-              error={aiReportM.isError ? (aiReportM.error as Error).message : null}
-              onGenerate={() => aiReportM.mutate(submittedQuery)}
+              report={aiReportJob.data?.status === "complete" ? aiReportJob.data.report : undefined}
+              isPending={aiReportSubmitM.isPending || aiReportJob.data?.status === "pending"}
+              error={aiReportSubmitM.isError ? (aiReportSubmitM.error as Error).message : aiReportJob.data?.status === "failed" ? (aiReportJob.data.error ?? "AI report generation failed") : null}
+              onGenerate={() => aiReportSubmitM.mutate(submittedQuery, { onSuccess: (data) => setAiReportJobId(data.jobId) })}
             />
-            <AiInvestigationActionsPanel report={aiReportM.data} />
+            <AiInvestigationActionsPanel report={aiReportJob.data?.status === "complete" ? aiReportJob.data.report : undefined} />
 
             {Array.isArray(result.moduleData.lookupResults) && (
               <NotConfiguredNotice notConfigured={result.notConfigured} rateLimited={result.rateLimited} skipped={result.skipped} />

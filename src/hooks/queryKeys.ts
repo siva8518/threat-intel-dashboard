@@ -24,6 +24,7 @@ export const queryKeys = {
   aiUsage: ["ai-usage"] as const,
   iocSearch: (type: string, value: string) => ["ioc-search", type, value] as const,
   sandboxStatus: (type: string, value: string) => ["sandbox-status", type, value] as const,
+  aiReportJobStatus: (jobId: string) => ["ai-report-job-status", jobId] as const,
   githubIntelList: (paramsKey: string) => ["github-intel", paramsKey] as const,
   githubIntelStats: (days: number | null = null) => ["github-intel", "stats", days] as const,
   githubRepoDetail: (fullName: string) => ["github-intel", fullName] as const,

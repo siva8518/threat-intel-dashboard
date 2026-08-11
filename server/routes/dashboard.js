@@ -9,7 +9,7 @@ import { ransomwareCampaigns as getRansomwareCampaigns } from "../ransomwareCamp
 import { lookupCve as lookupCveCircl } from "../lookups/circl.js";
 import { fetchFallbackCves } from "../lookups/cveFallback.js";
 import { investigate } from "../investigation/index.js";
-import { generateInvestigationAiReport } from "../investigationAi.js";
+import { startAiReportJob, getAiReportJob } from "../investigation/aiReportJobs.js";
 import { AllProvidersFailedError, getProviderHealthSnapshot } from "../ai/aiRouter.js";
 import { getAiUsageRollup } from "../ai/aiRequestLog.js";
 import { listThreatActors, searchThreatActors, buildThreatActorProfile } from "../actorProfile.js";
@@ -991,18 +991,23 @@ router.get("/investigate", async (req, res) => {
   }
 });
 
-router.post("/investigate/ai-report", async (req, res) => {
+// Submit+poll rather than one long synchronous call -- see
+// server/investigation/aiReportJobs.js's header comment for why (DigitalOcean
+// App Platform's own edge timeout is shorter than this generation can
+// legitimately take).
+router.post("/investigate/ai-report/start", async (req, res) => {
   const { query } = req.body ?? {};
   if (!query || !query.trim()) return res.status(400).json({ error: "query is required" });
+  const jobId = startAiReportJob(query.trim());
+  res.json({ jobId, status: "pending" });
+});
 
-  try {
-    const investigation = await investigate(query);
-    const report = await generateInvestigationAiReport(investigation);
-    res.json(report);
-  } catch (error) {
-    if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
-    res.status(502).json({ error: error.message });
-  }
+router.get("/investigate/ai-report/status", async (req, res) => {
+  const { jobId } = req.query;
+  if (!jobId || !jobId.trim()) return res.status(400).json({ error: "jobId query param is required" });
+  const job = getAiReportJob(jobId);
+  if (!job) return res.status(404).json({ error: "Job not found -- it may have already completed and expired, or never existed" });
+  res.json(job);
 });
 
 // --- Investigation Graph -- see server/investigation/investigationGraph.js ---

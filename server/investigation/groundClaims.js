@@ -71,14 +71,27 @@ function allKnownEntityNames() {
  * campaign name NOT in this search's own `allowedNames`. Appends a visible
  * caveat rather than trusting the prose or dropping the whole paragraph
  * over one unverifiable name.
+ *
+ * `sourceCitedText` (optional) is a blob of this search's own raw,
+ * deterministic source data (e.g. a VirusTotal threatLabel, an OTX pulse
+ * name) already surfaced elsewhere in the same report -- a name found there
+ * is the model citing evidence the user can already see, not inventing a
+ * relationship, so it's exempted from the caveat even if this platform's
+ * own actor/malware/campaign correlation didn't separately link it. Without
+ * this, a hash whose own VirusTotal/OTX data literally says "wannacry"
+ * still got flagged as an unverified mention of the platform's tracked
+ * WannaCry entity on every single field that repeated it, producing a wall
+ * of identical, misleading caveats on a fact the evidence already supports.
  */
-export function checkProseGrounding(text, allowedNames) {
+export function checkProseGrounding(text, allowedNames, sourceCitedText) {
   if (!text || typeof text !== "string") return { text, flagged: false };
   const allowedSet = new Set(allowedNames.map(norm));
   const lower = text.toLowerCase();
+  const citedLower = typeof sourceCitedText === "string" ? sourceCitedText.toLowerCase() : "";
   const suspects = allKnownEntityNames().filter((name) => {
     const n = norm(name);
     if (n.length < 4 || allowedSet.has(n)) return false;
+    if (citedLower && citedLower.includes(n)) return false;
     return lower.includes(n);
   });
   if (suspects.length === 0) return { text, flagged: false };

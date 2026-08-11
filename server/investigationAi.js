@@ -246,13 +246,21 @@ export async function generateInvestigationAiReport(investigation) {
   const allowedNames = [context.indicator, ...(context.activeCampaigns ?? []), ...(context.associatedThreatActors ?? []), ...(context.relatedIntelligence?.matchedMalwareFamilies ?? [])];
   const groundingContext = { hasAttribution: context.hasKnownAttribution, hasEnvironmentalTelemetry: false };
 
+  // Raw text of this search's own deterministic source data (VirusTotal
+  // threatLabel, OTX pulse names/tags, etc.) -- already surfaced verbatim in
+  // the sourceIntelligence section of this same report, so a name found
+  // here isn't the model inventing a relationship, it's citing evidence the
+  // user can already see. Exempts those from checkProseGrounding's caveat
+  // (see that function's own comment for why this was needed).
+  const sourceCitedText = JSON.stringify(context.sourceIntelligence ?? []) + JSON.stringify(context.confirmedFacts ?? []);
+
   // Full grounding pipeline -- every model-authored prose field goes through
   // the same ordered chain: real-entity grounding -> CVE-exploitation gate ->
   // attack-chain-stage gate -> the small set of especially consequential
   // absolute-claim rules (C2/attribution/ransomware-membership/environment)
   // -> IOC-attribution cross-check where an indicator-level record exists.
   function ground(text) {
-    let t = checkProseGrounding(text, allowedNames).text;
+    let t = checkProseGrounding(text, allowedNames, sourceCitedText).text;
     t = checkCveExploitationClaim(t, context.cveExploitationState).text;
     t = checkAttackChainStageClaim(t, context.hasBehavioralEvidence).text;
     t = checkUnsupportedClaims(t, groundingContext).text;
