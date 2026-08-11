@@ -388,6 +388,39 @@ function ransomwareGroupEvidence(moduleData) {
   return items;
 }
 
+// A completed sandbox report (server/sandboxIntelligence.js) is deliberately
+// evaluated with the exact same tiered weight/category logic as
+// hybridAnalysisRule above -- the direct fix for "the sandbox should NOT
+// simply add another Malicious/Benign score": it is just one more weighted
+// evidence item verdictEngine.js combines with every other source, never an
+// override. Named "Hybrid Analysis Sandbox" (not "Hybrid Analysis") so it
+// never collides with hashModule.js's separate hash-overview lookup source
+// -- a hash can in principle carry both (an overview classification AND a
+// full submitted sandbox report) as two distinct, individually-citable
+// pieces of evidence.
+function sandboxEvidence(sandboxRecord) {
+  // "completed" (a freshly-submitted analysis) and "existing_available" (a
+  // pre-existing report found via a check-only lookup, e.g. a hash overview
+  // hit) both carry a real, equally-trustworthy report -- only the route
+  // that produced it differs.
+  if ((sandboxRecord?.status !== "completed" && sandboxRecord?.status !== "existing_available") || !sandboxRecord.report) return [];
+  const r = sandboxRecord.report;
+  const items = [];
+  const score = r.threatScore ?? 0;
+  const source = `${r.provider} Sandbox`;
+  if (score >= 70 || r.verdict === "malicious") {
+    items.push(item({ category: "direct", source, claim: `Sandbox threat score ${score}/100${r.verdictLabel ? ` (${r.verdictLabel})` : ""}`, polarity: "malicious", weight: 0.85, rawField: "threatScore", lastSeen: r.analyzedAt }));
+  } else if (score >= 30 || r.verdict === "suspicious") {
+    items.push(item({ category: "corroborating", source, claim: `Sandbox threat score ${score}/100${r.verdictLabel ? ` (${r.verdictLabel})` : ""}`, polarity: "suspicious", weight: 0.45, rawField: "threatScore", lastSeen: r.analyzedAt }));
+  } else if (r.verdict === "clean" || score === 0) {
+    items.push(item({ category: "negative", source, claim: `Sandbox reported ${r.verdictLabel ?? "no threat"} (score ${score}/100)`, polarity: "benign", weight: 0.4, rawField: "threatScore", lastSeen: r.analyzedAt }));
+  }
+  if (r.malwareFamily) {
+    items.push(item({ category: "attribution", source, claim: `Sandbox matched malware family "${r.malwareFamily}"`, polarity: "malicious", weight: 0.5, rawField: "malwareFamily", lastSeen: r.analyzedAt }));
+  }
+  return items;
+}
+
 // --- Per-source Evidence Card roster -- Stage 1b. Distinct from the
 // category-grouped `items` above: one card per QUERIED source, always,
 // including an explicit "No finding" card for a source that returned a
@@ -406,6 +439,7 @@ const EVIDENCE_TYPE_LABEL = {
   OTX: "Threat Intelligence / Community Reporting",
   Pulsedive: "Reputation / Risk Score",
   "Hybrid Analysis": "Behavioral / Sandbox Analysis",
+  "Hybrid Analysis Sandbox": "Behavioral / Sandbox Analysis (Submitted Analysis)",
   "Team Cymru MHR": "Malware Association",
   "Team Cymru": "Infrastructure Context",
   RIPEstat: "Infrastructure Context",
@@ -539,7 +573,7 @@ function detectConflict(items) {
  * @param {{ type: string, lookupResults?: Array<Record<string, unknown>>, crossRef?: ReturnType<import("./crossReference.js").crossReferenceIndicator> | null, moduleData?: Record<string, unknown>, cveExploitationState?: import("../../src/types/threat-intel.js").CveExploitationAssessment | null }} args
  * @returns {import("../../src/types/threat-intel.js").EvidenceReconciliation}
  */
-export function buildEvidence({ type, lookupResults, crossRef, moduleData, cveExploitationState }) {
+export function buildEvidence({ type, lookupResults, crossRef, moduleData, cveExploitationState, sandboxRecord = null }) {
   const items = [];
 
   for (const r of lookupResults ?? []) {
@@ -548,6 +582,7 @@ export function buildEvidence({ type, lookupResults, crossRef, moduleData, cveEx
   }
 
   items.push(...crossReferenceEvidence(crossRef));
+  items.push(...sandboxEvidence(sandboxRecord));
 
   if (type === "cve") items.push(...cveEvidence(moduleData, cveExploitationState));
   if (type === "name") items.push(...nameEntityEvidence(moduleData));

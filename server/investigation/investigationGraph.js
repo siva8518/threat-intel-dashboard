@@ -38,6 +38,27 @@ import { checkRipestatThrottled } from "./ipModule.js";
 import { checkIndicator as checkCrtsh } from "../lookups/crtsh.js";
 import { checkIndicator as checkRdap } from "../lookups/rdap.js";
 import { detectionRulesFor, detectionRulesForCve, techniqueIdsForFamily, ATTACK_TACTICS_ORDER } from "../correlate.js";
+import { getSandboxRecord, findSandboxReportsObservingIp, findSandboxReportsObservingDomain } from "../sandboxIntelligence.js";
+
+// Real behavioral relationships extracted from a COMPLETED sandbox report --
+// the concrete answer to "the investigation graph should be able to
+// represent these relationships" (domain -> contacted IP -> dropped payload
+// -> its own hash -> observed technique). Reads the local sandbox store
+// only (server/sandboxIntelligence.js) -- never triggers a live submission
+// from inside graph building, same "graph building never causes a
+// side-effecting action" discipline every other gatherer here already
+// follows.
+function sandboxEdgesFor(record) {
+  if (record?.status !== "completed" || !record.report) return [];
+  const r = record.report;
+  const basis = `Live: ${r.provider} sandbox analysis (job ${record.jobId})`;
+  const edges = [];
+  for (const c of r.networkConnections) edges.push(edge("ip", c.ip, c.ip, "contacted during sandbox execution", basis, { lastSeen: r.analyzedAt }));
+  for (const d of r.dnsQueries) edges.push(edge("domain", d.domain, d.domain, "resolved during sandbox execution", basis, { lastSeen: r.analyzedAt }));
+  for (const f of r.filesDropped) if (f.sha256) edges.push(edge("hash", f.sha256, f.name ?? f.sha256, "dropped by sandboxed sample", basis, { lastSeen: r.analyzedAt }));
+  for (const m of r.mitreAttackTechniques) if (m.id) edges.push(edge("attackTechnique", m.id, m.name ?? m.id, "observed technique in sandbox execution", basis, { lastSeen: r.analyzedAt }));
+  return edges;
+}
 import { buildEntityHuntingQueries } from "../huntingLibrary.js";
 import { norm, findByNameOrAlias } from "./entityLookup.js";
 import { resolveCanonicalAlias } from "./knownAliasGroups.js";
@@ -699,6 +720,19 @@ async function gatherIpOrDomain(type, key) {
     else if (ioc.indicatorType === "hash") edges.push(edge("hash", ioc.indicator, ioc.indicator, "related sample", "Cross-reference: shared malware family", { firstSeen: ioc.firstSeen }));
   }
 
+  // Real behavioral relationships from a completed sandbox report -- see
+  // sandboxEdgesFor's own header comment.
+  if (type === "domain") {
+    edges.push(...sandboxEdgesFor(getSandboxRecord("domain", value)));
+    for (const hit of findSandboxReportsObservingDomain(value)) {
+      edges.push(edge(hit.indicatorType, hit.indicatorValue, hit.indicatorValue, "observed resolving this domain during sandbox execution", `Live: ${hit.provider} sandbox analysis (job ${hit.jobId})`));
+    }
+  } else {
+    for (const hit of findSandboxReportsObservingIp(value)) {
+      edges.push(edge(hit.indicatorType, hit.indicatorValue, hit.indicatorValue, "observed contacting this IP during sandbox execution", `Live: ${hit.provider} sandbox analysis (job ${hit.jobId})`));
+    }
+  }
+
   let dnsAsn = null;
   const domainMetadata = {};
   try {
@@ -840,6 +874,11 @@ function gatherCrossReferenceOnly(type, key, context = {}) {
     ...crossRef.matchingAiReports.map((r) => edge("report", r.id, r.articleTitle, "covered in report", "Direct: indicator present in report.iocs", { firstSeen: r.publishedDate, lastSeen: r.publishedDate })),
   ];
 
+  // Real behavioral relationships from a completed sandbox report (url/hash
+  // only -- email/fileName/processName/registryKey/userAgent have no
+  // sandbox integration) -- see sandboxEdgesFor's own header comment.
+  if (type === "url" || type === "hash") edges.push(...sandboxEdgesFor(getSandboxRecord(type, value)));
+
   // File hashes only: VirusTotal/Hybrid Analysis often classify a hash into
   // a NAMED malware family via a live sandbox/multi-engine detection even
   // when this exact hash was never previously ingested into this platform's
@@ -883,7 +922,12 @@ function gatherCrossReferenceOnly(type, key, context = {}) {
     }
   }
 
-  const found = crossRef.matchedMalwareFamilies.length > 0 || crossRef.matchingAiReports.length > 0 || Boolean(matchedFamilyEntity);
+  // server/iocIntelligence.js's canonical record (Phase D of the IOC
+  // pipeline overhaul) -- the concrete fix for "an indicator this platform
+  // extracted from an article, but never matched to any malware entity, had
+  // nowhere to surface as a real graph node." `found` now also fires purely
+  // off real source citations, with zero entity association required.
+  const found = crossRef.matchedMalwareFamilies.length > 0 || crossRef.matchingAiReports.length > 0 || Boolean(matchedFamilyEntity) || Boolean(crossRef.canonicalRecord);
   const allFamilyNames = [...crossRef.matchedMalwareFamilies, ...(matchedFamilyEntity ? [matchedFamilyEntity.name] : [])];
 
   return {
@@ -893,7 +937,12 @@ function gatherCrossReferenceOnly(type, key, context = {}) {
       label: value,
       summary: null,
       found,
-      metadata: { ...detectionAndHuntingForFamilies(allFamilyNames), liveMalwareFamilyLabel: context.malwareFamily ?? null, liveFamilyLabelUnmatched },
+      metadata: {
+        ...detectionAndHuntingForFamilies(allFamilyNames),
+        liveMalwareFamilyLabel: context.malwareFamily ?? null,
+        liveFamilyLabelUnmatched,
+        canonicalIocRecord: crossRef.canonicalRecord,
+      },
     },
     edges: dedupeEdges(edges),
     unavailableRelationships: [

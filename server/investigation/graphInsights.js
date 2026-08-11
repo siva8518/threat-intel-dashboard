@@ -16,7 +16,7 @@ import { aiRouter } from "../ai/aiRouter.js";
 import { AI_TASK } from "../ai/aiTasks.js";
 import { getReportById } from "../aiThreatSummaryStore.js";
 import { crossReferenceIndicator } from "./crossReference.js";
-import { groundName, groundEntityList, checkProseGrounding } from "./groundClaims.js";
+import { groundName, groundEntityList, checkProseGrounding, checkIocAttributionClaim } from "./groundClaims.js";
 
 const INFRA_TYPES = new Set(["ip", "domain", "url", "hash"]);
 const MAX_INFRA_CHECKED = 20;
@@ -135,8 +135,19 @@ export async function generateGraphInsights({ node, edges, unavailableRelationsh
     "entity",
   );
 
-  const summary = checkProseGrounding(safeString(parsed.summary) ?? "No synthesis available.", allowedNames);
-  const likelyAttackChain = checkProseGrounding(safeString(parsed.likelyAttackChain) ?? "", allowedNames);
+  let summary = checkProseGrounding(safeString(parsed.summary) ?? "No synthesis available.", allowedNames);
+  let likelyAttackChain = checkProseGrounding(safeString(parsed.likelyAttackChain) ?? "", allowedNames);
+
+  // IOC-specific pass (server/iocIntelligence.js, Phase D wires this record
+  // onto node.metadata for ip/domain/url/hash nodes) -- checkProseGrounding
+  // above only catches a name that's a stranger to the WHOLE graph; this
+  // catches the narrower case of a name that IS a real edge on this graph
+  // but isn't actually one of THIS indicator's own verified associations.
+  const canonicalIocRecord = node.metadata?.canonicalIocRecord ?? null;
+  if (canonicalIocRecord) {
+    summary = checkIocAttributionClaim(summary.text, canonicalIocRecord);
+    likelyAttackChain = checkIocAttributionClaim(likelyAttackChain.text, canonicalIocRecord);
+  }
 
   return {
     summary: summary.text,

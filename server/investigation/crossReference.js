@@ -13,6 +13,7 @@ import { getAllEntities as getMalwareEntities } from "../malwareIntelligence.js"
 import { getAllEntities as getActorEntities } from "../threatActorIntelligence.js";
 import { getAllEntities as getCampaignEntities } from "../campaignIntelligence.js";
 import { getAllReports as getAiReports } from "../aiThreatSummaryStore.js";
+import { findIndicatorByValue } from "../iocIntelligence.js";
 
 function norm(v) {
   return (v ?? "").toString().trim().toLowerCase();
@@ -75,6 +76,18 @@ export function crossReferenceIndicator(value) {
     for (const m of report.malware ?? []) matchedFamilies.add(m.family);
   }
 
+  // Canonical IOC store (server/iocIntelligence.js) -- ADDITIVE, not a
+  // replacement for the malwareIntelligence-sourced match above: an
+  // indicator that never made it into any malware entity's iocs/articleIocs
+  // (the exact gap this store exists to close -- an article naming an actor
+  // or campaign but no confidently-identified malware family) can still
+  // resolve here, with its own real source citations, even when every other
+  // source above comes back empty.
+  const canonicalRecord = findIndicatorByValue(target);
+  if (canonicalRecord) {
+    for (const f of canonicalRecord.aggregatedAssociations?.malwareFamilies ?? []) matchedFamilies.add(f);
+  }
+
   const familyList = Array.from(matchedFamilies);
   const familyListLower = familyList.map(norm);
 
@@ -85,11 +98,13 @@ export function crossReferenceIndicator(value) {
   for (const report of matchingAiReports) {
     for (const a of report.threatActors ?? []) associatedThreatActors.add(a.group);
   }
+  for (const a of canonicalRecord?.aggregatedAssociations?.actors ?? []) associatedThreatActors.add(a);
 
   const activeCampaigns = new Set();
   for (const campaign of campaignEntities) {
     if ((campaign.associatedMalware ?? []).some((m) => familyListLower.includes(norm(m)))) activeCampaigns.add(campaign.name);
   }
+  for (const c of canonicalRecord?.aggregatedAssociations?.campaigns ?? []) activeCampaigns.add(c);
 
   return {
     matchedMalwareFamilies: familyList,
@@ -104,6 +119,20 @@ export function crossReferenceIndicator(value) {
     })),
     relatedIocs: relatedIocs.slice(0, 20),
     siblingIndicators,
+    // Full per-source citation trail for this exact indicator value, if the
+    // canonical store has ever seen it -- null (not omitted) when it hasn't,
+    // so callers can distinguish "never seen" from "seen, zero associations."
+    canonicalRecord: canonicalRecord
+      ? {
+          classification: canonicalRecord.classification,
+          classificationReason: canonicalRecord.classificationReason,
+          confidence: canonicalRecord.confidence,
+          sightingCount: canonicalRecord.sightingCount,
+          firstSeen: canonicalRecord.firstSeen,
+          lastSeen: canonicalRecord.lastSeen,
+          sources: canonicalRecord.sources,
+        }
+      : null,
   };
 }
 

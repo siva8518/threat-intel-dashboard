@@ -543,14 +543,249 @@ export interface ActionabilityAction {
   priority: "Immediate" | "High" | "Normal" | "Low";
 }
 
+/** One numbered stage of an environmental validation runbook (e.g. "1. Endpoint / EDR — Confirm execution") -- `decision` is the branching guidance for what each possible finding implies, omitted for stages with nothing to branch on (e.g. Sandbox Analysis). */
+export interface EnvironmentalValidationStep {
+  title: string;
+  items: string[];
+  decision?: string[];
+}
+
+/** One row of the closing "what finding implies what priority" table. */
+export interface EnvironmentalValidationDecisionRow {
+  finding: string;
+  priority: string;
+}
+
+/** One IOC-type-scoped telemetry source (e.g. "Firewall" for an IP, "Sandbox" for a URL) -- `available` is always false today since this platform has no internal telemetry integration of any kind; kept as a real field (not hardcoded in the UI) so a future real integration only has to flip this value. See server/investigation/actionability.js#telemetryCoverageFor. */
+export interface TelemetryCoverageEntry {
+  source: string;
+  available: boolean;
+  note: string;
+}
+
+/** Two genuinely different real observation windows (external reputation vs. this platform's own historical ingestion), plus an explicit note that an internal-environment window cannot be computed at all -- never conflated into one date range. See server/investigation/actionability.js#buildObservationWindow. */
+export interface ObservationWindow {
+  externalFirstSeen: string | null;
+  externalLastSeen: string | null;
+  externalWindowNote: string;
+  historicalFirstSeen: string | null;
+  historicalLastSeen: string | null;
+  historicalSightingCount: number | null;
+  historicalWindowNote: string;
+  internalWindowNote: string;
+}
+
+/** The synthesized "what happened / how serious / how confident / what next" read -- derived from the same verdict this search already computed, never a second independently-invented judgment. See server/investigation/actionability.js#deriveAnalystVerdict. */
+export interface AnalystVerdict {
+  exposure: "None" | "Suspected" | "Confirmed";
+  exposureNote: string;
+  impact: "Low" | "Medium" | "High" | "Critical";
+  confidence: "Low" | "Medium" | "High";
+  priority: "Monitor" | "Investigate" | "High" | "Critical" | "Critical / Incident Response";
+  whatHappened: string;
+  howSerious: string;
+  howConfident: string;
+  recommendedActions: string[];
+}
+
+/** Deterministic, never-AI-authored runbook of what the analyst must check in their OWN EDR/SIEM/firewall/DNS/proxy/email-security -- this platform has no internal telemetry integration and never claims to have already performed these searches. See server/investigation/actionability.js#environmentalValidationPlan. */
+export interface EnvironmentalValidationPlan {
+  purpose: string;
+  platformLimitation: string;
+  steps: EnvironmentalValidationStep[];
+  scopeExposure: string[];
+  decisionMatrix: EnvironmentalValidationDecisionRow[];
+  /** IOC-type-scoped telemetry sources (Improvement 1) -- e.g. Firewall/Proxy/NetFlow/EDR/SIEM/DNS/VPN/Cloud network logs for an IP, DNS/Proxy/Web Gateway/Email/HTTP-HTTPS/Endpoint/SIEM for a domain. Never the same list across types. */
+  telemetryCoverage: TelemetryCoverageEntry[];
+  observationWindow: ObservationWindow;
+  analystVerdict: AnalystVerdict;
+}
+
+/** One stage of the "how the platform reasoned about this" chain -- Threat Intelligence -> Conflicting Signals -> Environmental Evidence -> Analyst Decision, never collapsed into a single flattened "malicious + benign = monitor" line. */
+export interface ConflictReasoningStage {
+  stage: "Threat Intelligence" | "Conflicting Signals" | "Environmental Evidence" | "Analyst Decision";
+  summary: string;
+}
+
+/**
+ * SOC-analyst-facing guidance for the specific case where reputation
+ * sources disagree (e.g. VirusTotal reports malicious while a MISP warning
+ * list match suggests common/reference infrastructure) -- only populated
+ * when verdict.state === "Conflicting Intelligence". Every field is derived
+ * from the same real evidence items every other section on this page reads;
+ * see server/investigation/actionability.js#conflictingIntelligenceGuidance.
+ */
+export interface ConflictingIntelligenceGuidance {
+  assessment: string;
+  threatIntelligenceSummary: string;
+  conflictingSignalNote: string;
+  reasoningChain: ConflictReasoningStage[];
+  recommendedActions: string[];
+  analystDecision: EnvironmentalValidationDecisionRow[];
+  /** Clarifies that a benign/reference-list match (e.g. MISP's "commonly used domains") is context, not a clean verdict -- the literal fix for the reported "don't average toward monitor" gap. */
+  keyIntelligenceNote: string;
+}
+
+// --- Sandbox Analysis (Hybrid Analysis / Falcon Sandbox, provider-agnostic) ---
+// See server/sandbox/index.js (provider registry), server/sandboxIntelligence.js
+// (canonical status/dedup store), server/sandboxApplicability.js (IOC-type-aware
+// submit-or-not decision), server/investigation/actionability.js#sandboxInvestigationSteps.
+
+export type SandboxStatus = "not_analyzed" | "existing_available" | "submitted" | "in_progress" | "completed" | "failed" | "rate_limited" | "unavailable";
+
+export interface SandboxNetworkConnection {
+  ip: string;
+  port: number | null;
+  protocol: string | null;
+}
+export interface SandboxDnsQuery {
+  domain: string;
+  recordType: string | null;
+}
+export interface SandboxHttpRequest {
+  url: string;
+  method: string | null;
+}
+export interface SandboxDroppedFile {
+  name: string | null;
+  sha256: string | null;
+  path: string | null;
+}
+export interface SandboxProcess {
+  name: string | null;
+  commandLine: string | null;
+  pid: number | null;
+  parentPid: number | null;
+}
+export interface SandboxMitreTechnique {
+  id: string;
+  name: string | null;
+  tactic: string | null;
+}
+
+/**
+ * Provider-agnostic normalized sandbox report -- every field here is
+ * populated by a provider's own normalize step (e.g.
+ * server/sandbox/providers/hybridAnalysisProvider.js) from whatever the raw
+ * API response actually contained; a field the response omitted stays null/
+ * empty rather than fabricated (same "reported honestly" discipline as
+ * hashModule.js's `behavior.detailedBehaviorAvailable`). Nothing downstream
+ * (evidence.js, investigationGraph.js, actionability.js, the UI) ever reads
+ * a provider-specific raw shape -- only this normalized one.
+ */
+export interface SandboxReport {
+  provider: string;
+  jobId: string;
+  sha256: string | null;
+  verdict: "malicious" | "suspicious" | "clean" | "unknown";
+  verdictLabel: string | null;
+  threatScore: number | null;
+  analyzedAt: string | null;
+  environment: string | null;
+  malwareFamily: string | null;
+  executionObserved: boolean;
+  networkConnections: SandboxNetworkConnection[];
+  dnsQueries: SandboxDnsQuery[];
+  httpRequests: SandboxHttpRequest[];
+  filesDropped: SandboxDroppedFile[];
+  processes: SandboxProcess[];
+  persistenceIndicators: string[];
+  mitreAttackTechniques: SandboxMitreTechnique[];
+  additionalIocs: { ips: string[]; domains: string[]; urls: string[]; hashes: string[] };
+  relatedSamples: string[];
+  reportUrl: string | null;
+  /** True when the provider's raw response was missing fields this normalizer expects -- surfaced so the UI can say "incomplete" rather than silently presenting a thin report as a full one. */
+  incomplete: boolean;
+}
+
+/**
+ * The canonical per-indicator sandbox record this platform tracks --
+ * distinguishes "we already have a report" from "we just submitted a new
+ * one" (status), and is the single source of truth `POST /sandbox/submit`
+ * checks before ever calling out to a provider, so the same indicator is
+ * never submitted twice. See server/sandboxIntelligence.js.
+ */
+export interface SandboxRecord {
+  indicatorType: string;
+  indicatorValue: string;
+  status: SandboxStatus;
+  provider: string | null;
+  jobId: string | null;
+  submittedAt: string | null;
+  completedAt: string | null;
+  report: SandboxReport | null;
+  error: string | null;
+}
+
+/**
+ * IOC-type-aware "should this even be sandboxed" decision, computed BEFORE
+ * any submission is offered -- e.g. a bare IP is never submitted directly
+ * (only checked against reports already on file for network-behavior
+ * overlap); a CVE is never sandboxed itself. See
+ * server/sandboxApplicability.js.
+ */
+export interface SandboxApplicability {
+  applicable: boolean;
+  recommendedAction: "submit" | "check_existing_only" | "analyze_related_urls" | "not_applicable";
+  reason: string;
+}
+
+/** Computed once per search (server/investigation/index.js#assemble()) and reused everywhere sandbox context is needed (evidence, actionability, the UI) -- never recomputed per-consumer. Null for indicator types sandbox analysis never applies to. */
+export interface InvestigationSandboxContext {
+  applicability: SandboxApplicability;
+  record: SandboxRecord;
+}
+
+/**
+ * One deterministic, evidence-conditioned recommendation derived from a
+ * COMPLETED sandbox report -- the direct fix for "Investigate the sandbox
+ * results" style filler. Every field maps to the 6 analyst questions this
+ * platform's sandbox integration must answer: what was observed, why it
+ * matters, what/where to search, what would escalate severity, what action
+ * follows. Only ever generated from real report fields (processes/network/
+ * dropped files/persistence/additional IOCs) -- never invented. See
+ * server/investigation/actionability.js#sandboxInvestigationSteps.
+ */
+export interface SandboxInvestigationStep {
+  observation: string;
+  whyItMatters: string;
+  investigation: string;
+  escalationCondition: string;
+  action: string;
+  priority: "Immediate" | "High" | "Normal" | "Low";
+}
+
+/**
+ * One deterministic, evidence-conditioned "what to investigate next" step
+ * for a CVE search -- replaces the old free-form AI "nextSteps" for CVEs,
+ * which had no real intelligence graph to reason over and fell back to
+ * generic filler (e.g. "pivot to other high-severity CVEs"). Every step here
+ * is only ever included when the underlying evidence it names actually
+ * exists (an exploitation-state finding, a real vendor/product, a real
+ * actor/malware/campaign graph edge, a real detection rule) -- never
+ * invented because it's "logically related". See
+ * server/investigation/actionability.js#cveInvestigationSteps.
+ */
+export interface CveInvestigationStep {
+  title: string;
+  detail: string;
+  priority: "Immediate" | "High" | "Normal" | "Low";
+}
+
 export interface ActionabilityGuidance {
   entityType: IndicatorType;
   actions: ActionabilityAction[];
   huntingQueries: Array<{ platform: string; query: string; source: string; sourceUrl: string }>;
   /** Roles this entity type genuinely has nothing actionable for -- an honest omission, not a silent gap. */
   notApplicable: string[];
-  /** Deterministic, never-AI-authored list of what the analyst must check in their OWN EDR/SIEM/firewall/DNS/proxy/email-security -- this platform has no internal telemetry integration and never claims to have already performed these searches. See server/investigation/actionability.js#environmentalValidationChecklist. */
-  environmentalValidationChecklist: string[];
+  /** null for entity types with no meaningful internal-tool validation (e.g. a bare artifact type with no external reputation source at all). */
+  environmentalValidation: EnvironmentalValidationPlan | null;
+  /** null unless this search's verdict.state is "Conflicting Intelligence". */
+  conflictingIntelligence: ConflictingIntelligenceGuidance | null;
+  /** null for every entity type except "cve" -- see CveInvestigationStep. */
+  cveInvestigationSteps: CveInvestigationStep[] | null;
+  /** null unless a COMPLETED sandbox report exists for this search's indicator -- see SandboxInvestigationStep. */
+  sandboxInvestigationSteps: SandboxInvestigationStep[] | null;
 }
 
 // --- Intelligence Investigation Console -- see server/investigation/index.js ---
@@ -600,6 +835,8 @@ export interface InvestigationRelatedIntelligence {
   activeCampaigns: string[];
   matchingAiReports: Array<{ id: string; articleTitle: string; articleLink: string; articleSource: string; publishedDate: string }>;
   relatedIocs: Array<{ indicator: string; indicatorType: string; malwareFamily: string; firstSeen: string | null }>;
+  /** Full per-source citation trail for this exact indicator value from the canonical IOC store (server/iocIntelligence.js) -- null when this store has never seen the value. See IocIntelligenceEntity below for the full record shape this is a subset of. */
+  canonicalRecord: Pick<IocIntelligenceEntity, "classification" | "classificationReason" | "confidence" | "sightingCount" | "firstSeen" | "lastSeen" | "sources"> | null;
 }
 
 /**
@@ -735,6 +972,8 @@ export interface InvestigationResult {
   rankedFindings: RankedFinding[];
   /** Concrete, entity-type-specific next steps derived from this search's verdict/evidence -- see server/investigation/actionability.js. */
   actionability: ActionabilityGuidance;
+  /** null for indicator types sandbox analysis never applies to (name/ransomwareGroup/country/asn/artifact types) -- see server/investigation/index.js#assemble(). */
+  sandbox: InvestigationSandboxContext | null;
 }
 
 export interface RankedFinding {
@@ -1311,6 +1550,57 @@ export interface MalwareIntelligenceEntity {
   lastSeen: string;
   mentionCount: number;
   articles: MalwareIntelligenceArticleRef[];
+}
+
+/** One per-source citation on a canonical IOC record -- see server/iocIntelligence.js. */
+export interface IocSourceCitation {
+  articleTitle: string | null;
+  articleLink: string | null;
+  articleSource: string | null;
+  publishedDate: string | null;
+  contextSnippet: string | null;
+  extractionMethod: string;
+}
+
+/**
+ * One canonical, deduped, source-agnostic indicator record -- unlike
+ * MalwareIntelligenceEntity's iocs/articleIocs, this does NOT require a
+ * successfully-identified malware family in the same article; every
+ * observable extracted from any processed article's full text has a home
+ * here. See server/iocIntelligence.js.
+ */
+export interface IocIntelligenceEntity {
+  id: string;
+  type: string;
+  category: string;
+  value: string;
+  classification: "malicious_observed" | "infrastructure_context" | "benign_reference" | "unknown";
+  classificationReason: string;
+  confidence: "High" | "Medium" | "Low";
+  extractionMethod: string;
+  firstSeen: string;
+  lastSeen: string;
+  sightingCount: number;
+  sources: IocSourceCitation[];
+  aggregatedAssociations: { malwareFamilies: string[]; actors: string[]; campaigns: string[]; industries: string[]; countries: string[] };
+  enrichment: { asn: string | number | null; asnHolder: string | null; isHyperscaler: boolean; enrichedAt: string } | null;
+}
+
+/** Per-source IOC extraction yield -- see server/iocExtractionMetrics.js. */
+export interface IocSourceCoverageRow {
+  source: string;
+  articlesProcessed: number;
+  candidates: number;
+  validated: number;
+  successRate: number | null;
+  newIocRate: number | null;
+  likelyParserFailure: boolean;
+}
+
+export interface IocSourceCoverageReport {
+  cumulative: { articlesProcessed: number; candidates: number; validated: number; duplicates: number; failures: number };
+  lastCycleAt: string | null;
+  bySource: IocSourceCoverageRow[];
 }
 
 /**

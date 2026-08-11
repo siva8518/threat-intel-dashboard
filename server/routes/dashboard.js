@@ -24,6 +24,8 @@ import { recordAndGetSourceHistory, computeReliability } from "../sourceReliabil
 import { recordAndGetPriorSnapshot } from "../malwareTrendHistory.js";
 import { recordAndGetScoreHistory } from "../threatScoreHistory.js";
 import { getAllEntities as getMalwareIntelligenceEntities } from "../malwareIntelligence.js";
+import { getAllEntities as getIocIntelligenceEntities, getEntityCount as getIocEntityCount } from "../iocIntelligence.js";
+import { getCoverageReport as getIocExtractionCoverage } from "../iocExtractionMetrics.js";
 import { getAllEntities as getThreatActorIntelligenceEntities, getAllEntitiesWindowed as getThreatActorIntelligenceEntitiesWindowed } from "../threatActorIntelligence.js";
 import { getAllEntities as getCampaignIntelligenceEntities } from "../campaignIntelligence.js";
 import { getNewsTechniqueCounts, getNewsTechniqueCountsWindowed } from "../attackTechniqueIntelligence.js";
@@ -52,6 +54,18 @@ import { getGraphNode, GRAPH_NODE_TYPES } from "../investigation/investigationGr
 import { generateGraphInsights } from "../investigation/graphInsights.js";
 import { generateCorrelationSummary } from "../investigation/correlationSummary.js";
 import { generateShouldICare } from "../investigation/shouldICare.js";
+import { getProvider as getSandboxProvider } from "../sandbox/index.js";
+import { assessSandboxApplicability } from "../sandboxApplicability.js";
+import {
+  getSandboxRecord,
+  hasActiveOrCompletedRecord,
+  recordSubmission,
+  recordInProgress,
+  recordCompleted,
+  recordFailed,
+  recordRateLimited,
+  recordExistingReport,
+} from "../sandboxIntelligence.js";
 
 export const router = Router();
 
@@ -305,8 +319,16 @@ router.get("/dashboard/exploits", (_req, res) => {
 });
 
 // --- Threat feed (deduped across all IOC sources incl. OTX) -------------
+// Cap raised from 200: threatFeedIocs() sorts descending by firstSeen before
+// this cap is applied, so a low cap silently discarded every older,
+// genuinely-historical entry from server/iocIntelligence.js (Phase F of the
+// IOC pipeline overhaul) before the frontend's date-range filter ever saw
+// them -- confirmed live, a 200 cap left only today's entries reachable.
+// 2000 comfortably covers the canonical store's current size with room to
+// grow; this route remains a feed, not the full canonical dataset (that's
+// GET /dashboard/ioc-intelligence).
 router.get("/dashboard/threat-feed", (_req, res) => {
-  res.json({ iocs: threatFeedIocs().slice(0, 200) });
+  res.json({ iocs: threatFeedIocs().slice(0, 2000) });
 });
 
 // --- Trending malware + ATT&CK techniques (derived from threat feed) ----
@@ -346,6 +368,24 @@ router.get("/dashboard/malware-trending/deltas", (_req, res) => {
 // live IOC-frequency snapshot with no memory and no article linkage.
 router.get("/dashboard/malware-intelligence", (_req, res) => {
   res.json({ entities: getMalwareIntelligenceEntities() });
+});
+
+// --- IOC Intelligence (canonical, deduped, source-agnostic indicator store, see server/iocIntelligence.js) ---
+// One record per unique indicator value, extracted from full article text
+// across every configured source -- unlike the entries above, an IOC here
+// does NOT require a successfully-identified malware family in the same
+// article; every record carries its own real per-source citation trail.
+router.get("/dashboard/ioc-intelligence", (_req, res) => {
+  res.json({ entities: getIocIntelligenceEntities(), totalCount: getIocEntityCount() });
+});
+
+// --- IOC Extraction Source Coverage (see server/iocExtractionMetrics.js) ---
+// Per-source yield diagnostics: a source that syncs cleanly but has
+// processed real articles while yielding zero IOC candidates is flagged as
+// a likely parser/extraction gap, not silently read as "this source has no
+// IOCs to report."
+router.get("/dashboard/ioc-source-coverage", (_req, res) => {
+  res.json(getIocExtractionCoverage());
 });
 
 // --- Tool Intelligence (canonical, deduped entity store, see server/toolIntelligence.js) ---
@@ -1041,4 +1081,100 @@ router.post("/dashboard/investigation/should-i-care", async (req, res) => {
     if (error instanceof AllProvidersFailedError) return res.status(503).json({ error: error.message });
     res.status(502).json({ error: error.message });
   }
+});
+
+// --- Sandbox Analysis -- see server/sandbox/index.js, server/sandboxIntelligence.js ---
+// Two genuinely different actions, kept as two routes rather than folded
+// into one: /submit is the ONLY route that ever triggers a live, quota-
+// consuming submission to a sandbox provider, and only ever fires on an
+// explicit analyst click ("Analyze in Sandbox") -- never automatically from
+// a search. /status is read-mostly: it returns the current local record,
+// polling the provider once (and persisting whatever it learns) only when a
+// job is genuinely in flight. Neither route re-runs the full /investigate
+// pipeline -- the analyst's page already has that.
+//
+// Server-side rate limiting is enforced here, not just hidden by the
+// frontend button -- Hybrid Analysis's free tier is aggressively rate-
+// limited, and this limiter is shared across every viewer of the dashboard,
+// same discipline as server/lib/lookupLimiter.js's throttleAndCache.
+let lastSandboxSubmissionAt = 0;
+const SANDBOX_SUBMISSION_MIN_INTERVAL_MS = 10_000;
+
+router.post("/dashboard/sandbox/submit", async (req, res) => {
+  const { type, value } = req.body ?? {};
+  if (!type || !value || !value.trim()) return res.status(400).json({ error: "type and value are required" });
+  if (type !== "url" && type !== "domain") return res.status(400).json({ error: `Sandbox submission only applies to URL/domain indicators (got "${type}") -- hashes are check-existing-only, IPs/CVEs/files are never submitted directly.` });
+
+  const applicability = assessSandboxApplicability(type, value, {});
+  if (!applicability.applicable || applicability.recommendedAction !== "submit") {
+    return res.status(400).json({ error: `Sandbox submission is not appropriate for this indicator right now: ${applicability.reason}` });
+  }
+
+  // Dedup -- the literal "do not submit the same IOC repeatedly" requirement.
+  // Returns whatever's already on file (completed, or a still-in-flight
+  // job) instead of ever submitting a second time.
+  if (hasActiveOrCompletedRecord(type, value)) {
+    return res.json(getSandboxRecord(type, value));
+  }
+
+  const elapsed = Date.now() - lastSandboxSubmissionAt;
+  if (elapsed < SANDBOX_SUBMISSION_MIN_INTERVAL_MS) {
+    const record = recordRateLimited(type, value, new Error(`Sandbox submission rate limit reached -- try again in ${Math.ceil((SANDBOX_SUBMISSION_MIN_INTERVAL_MS - elapsed) / 1000)}s`));
+    return res.status(429).json(record);
+  }
+
+  try {
+    lastSandboxSubmissionAt = Date.now();
+    const provider = getSandboxProvider();
+    // A bare domain (applicability's "submit the domain itself" fallback,
+    // when no known URL exists on it) needs a scheme before it's a
+    // submittable URL -- a genuine URL indicator is passed through as-is.
+    const targetUrl = type === "url" ? value : `http://${value}`;
+    const { jobId } = await provider.submitUrl(targetUrl);
+    const record = recordSubmission(type, value, { provider: provider.label, jobId });
+    res.json(record);
+  } catch (error) {
+    const record = error?.status === 429 ? recordRateLimited(type, value, error) : recordFailed(type, value, error);
+    res.status(error?.status === 429 ? 429 : 502).json(record);
+  }
+});
+
+router.get("/dashboard/sandbox/status", async (req, res) => {
+  const { type, value } = req.query;
+  if (!type || !value || !value.trim()) return res.status(400).json({ error: "type and value query params are required" });
+
+  let record = getSandboxRecord(type, value);
+
+  // Hash: check-existing-only, never submitted -- the first status check
+  // for a hash with no record yet is what actually performs that check
+  // (cheap, cached by hashModule.js's own throttleAndCache wrapping the
+  // same underlying lookup).
+  if (type === "hash" && record.status === "not_analyzed") {
+    try {
+      const provider = getSandboxProvider();
+      const report = await provider.checkExistingHash(value);
+      if (report) record = recordExistingReport(type, value, report, provider.label);
+    } catch (error) {
+      if (error?.status && error.status !== 401 && error.status !== 404) record = recordFailed(type, value, error);
+    }
+    return res.json(record);
+  }
+
+  // A submitted/in-flight job -- poll the provider once and persist
+  // whatever it currently says. A transient polling error leaves the last
+  // known state untouched rather than flipping a real in-flight job to
+  // "failed" on one bad request.
+  if ((record.status === "submitted" || record.status === "in_progress") && record.jobId) {
+    try {
+      const provider = getSandboxProvider();
+      const result = await provider.pollStatus(record.jobId);
+      if (result.status === "completed") record = recordCompleted(type, value, result.report);
+      else if (result.status === "failed") record = recordFailed(type, value, new Error(result.error ?? "Sandbox analysis failed"));
+      else record = recordInProgress(type, value);
+    } catch {
+      // leave record as last known state
+    }
+  }
+
+  res.json(record);
 });

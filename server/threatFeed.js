@@ -6,6 +6,7 @@
 import * as cache from "./cache.js";
 import { dedupeIocs } from "./correlate.js";
 import { getAllGithubRepos } from "./githubIntel/index.js";
+import { getAllEntities as getIocIntelligenceEntities } from "./iocIntelligence.js";
 
 const THREAT_FEED_IDS = [
   "urlhaus",
@@ -72,10 +73,50 @@ function githubRepoIocs() {
   return iocs;
 }
 
+const CANONICAL_TYPE_TO_IOC_TYPE = { ipv4: "ip", ipv6: "ip", domain: "domain", url: "url", sha256: "hash", sha1: "hash", md5: "hash" };
+
+/**
+ * Canonical, source-agnostic IOC store (server/iocIntelligence.js) -- unlike
+ * every list above, these records persist their real `firstSeen` across
+ * cache cycles instead of being replaced wholesale on every sync (see
+ * server/cache.js#setSuccess), so this is the only source in this feed that
+ * can actually be filtered to a date earlier than the current sync cycle.
+ * Confirmed live: every other list here is either a genuinely recent-only
+ * upstream API (ThreatFox's own query is `days: 3`) or gets re-capped to its
+ * newest 40 entries every cycle (capRecent above), so a date-range filter
+ * further back than a day or two always returned nothing before this was
+ * added -- not a UI bug, the data simply never existed anywhere else.
+ * Deliberately NOT run through capRecent -- capping here would silently
+ * reintroduce the exact "recent-only" gap this exists to fix. Only
+ * malicious_observed records are surfaced (infrastructure_context/
+ * benign_reference/unknown are real extractions but not threat indicators in
+ * their own right -- see server/iocClassification.js) and only the 4 bucket
+ * types this feed's UI understands (ip/domain/url/hash).
+ */
+function canonicalIocFeedEntries() {
+  const entries = [];
+  for (const record of getIocIntelligenceEntities()) {
+    if (record.classification !== "malicious_observed") continue;
+    const indicatorType = CANONICAL_TYPE_TO_IOC_TYPE[record.type];
+    if (!indicatorType) continue;
+    entries.push({
+      id: `ioc-intel-${record.id}`,
+      indicator: record.value,
+      indicatorType,
+      malwareFamily: record.aggregatedAssociations?.malwareFamilies?.[0] || "Unknown",
+      threatType: "Extracted Indicator",
+      firstSeen: record.firstSeen,
+      source: "IOC Extraction Pipeline",
+    });
+  }
+  return entries;
+}
+
 export function threatFeedIocs() {
   const lists = THREAT_FEED_IDS.map((id) => capRecent(cache.getEntry(id).data ?? []));
   const otxData = cache.getEntry("otx").data;
   if (otxData?.iocs) lists.push(capRecent(otxData.iocs));
   lists.push(capRecent(githubRepoIocs()));
+  lists.push(canonicalIocFeedEntries());
   return dedupeIocs(lists);
 }

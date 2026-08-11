@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -17,7 +17,6 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   Network,
-  Search,
   UserSearch,
   Crosshair,
   Bug,
@@ -37,10 +36,9 @@ import {
   ExternalLink,
   Sparkles,
   Factory,
+  Radar,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "./ErrorState";
@@ -50,7 +48,7 @@ import { InvestigationLeadsPanel } from "./investigation/InvestigationLeadsPanel
 import { AiGraphInsightsPanel } from "./investigation/AiGraphInsightsPanel";
 import { useInvestigationGraph, type PositionedGraphNode, type GraphEdgeWithSource } from "@/hooks/useInvestigationGraph";
 import { useGraphInsights } from "@/hooks/useInvestigate";
-import type { GraphNodeType, GraphConfidence, InvestigationResult } from "@/types/threat-intel";
+import type { GraphNodeType, GraphConfidence, InvestigationResult, GraphNodeResult } from "@/types/threat-intel";
 import type { AttackTechniqueSummary } from "@/investigation/attackTactics";
 import { AttackTechniquesByTactic } from "./investigation/AttackTechniquesByTactic";
 import { cn } from "@/lib/utils";
@@ -98,15 +96,6 @@ const NODE_TYPE_ICON: Record<GraphNodeType, typeof UserSearch> = {
   asn: Network,
   industry: Factory,
 };
-
-// Seed types an analyst can start a fresh graph from -- asn is deliberately
-// excluded (see server/investigation/investigationGraph.js header): it only
-// exists as a leaf reached by clicking an IP node's "shares ASN with" edge,
-// never as something to bulk-query on its own.
-const SEED_TYPES: GraphNodeType[] = [
-  "actor", "campaign", "malware", "cve", "victim", "ip", "domain", "url", "hash",
-  "email", "fileName", "processName", "registryKey", "userAgent", "attackTechnique", "country", "report",
-];
 
 const CONFIDENCE_STROKE: Record<GraphConfidence, string> = { High: "#3fb950", Medium: "#d29922", Low: "#8b949e" };
 
@@ -171,6 +160,19 @@ const NODE_TYPES = { entity: EntityNode };
 interface InvestigationGraphProps {
   initialType?: GraphNodeType | null;
   initialKey?: string | null;
+  /**
+   * The SAME context-aware GraphNodeResult already computed server-side for
+   * this search (server/investigation/index.js#computeGraphResult, folded
+   * into /investigate's own response) -- carries data a plain re-fetch of
+   * `/dashboard/investigation-graph` can never reconstruct, most notably a
+   * hash search's live malware-family classification context (see
+   * server/investigation/investigationGraph.js#gatherCrossReferenceOnly's
+   * `context.malwareFamily` param). Seeding from this (via graph.seed())
+   * instead of independently re-fetching (via graph.reset()) is what makes
+   * "hash classified but not yet a tracked entity" actually show up here
+   * instead of silently being replaced by a context-less duplicate fetch.
+   */
+  seedResult?: GraphNodeResult | null;
   /** Reused as-is from DashboardPage.tsx -- the same jump-off actions already wired for search-prefill/auto-run into the Triage Console / Campaign / Malware / AI Summarization tabs, and the pre-existing actor search prefill. */
   goToTriageInvestigate: (query: string) => void;
   goToCampaignSearch: (name: string) => void;
@@ -181,11 +183,9 @@ interface InvestigationGraphProps {
   overview?: InvestigationResult["overview"] | null;
 }
 
-function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampaignSearch, goToMalwareSearch, goToActorSearch, goToAiSummarySearch, overview }: InvestigationGraphProps) {
+function GraphCanvas({ initialType, initialKey, seedResult, goToTriageInvestigate, goToCampaignSearch, goToMalwareSearch, goToActorSearch, goToAiSummarySearch, overview }: InvestigationGraphProps) {
   const graph = useInvestigationGraph();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [formType, setFormType] = useState<GraphNodeType>("malware");
-  const [formValue, setFormValue] = useState("");
   const { setCenter } = useReactFlow();
   const fullGraphInsights = useGraphInsights();
   const [seedId, setSeedId] = useState<string | null>(null);
@@ -215,10 +215,15 @@ function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampa
       setSelectedId(id);
       setSeedId(id);
       fullGraphInsights.reset();
-      graph.reset(initialType, initialKey);
+      // Seed from the already-computed, context-aware result when we have
+      // it (always true when embedded in Investigation Workspace -- see
+      // seedResult's own doc comment) -- falls back to a plain re-fetch
+      // only in the hypothetical case this ever renders without one.
+      if (seedResult) graph.seed(initialType, initialKey, seedResult);
+      else graph.reset(initialType, initialKey);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialType, initialKey]);
+  }, [initialType, initialKey, seedResult]);
 
   useEffect(() => {
     setRfNodes((prev) => {
@@ -264,16 +269,6 @@ function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampa
   function onNodeClick(_: unknown, node: Node) {
     const gn = graph.nodes.get(node.id);
     if (gn) selectAndExpand(node.id, gn.type, gn.id);
-  }
-
-  function startNew(e: FormEvent) {
-    e.preventDefault();
-    if (!formValue.trim()) return;
-    const id = graph.nodeKey(formType, formValue.trim());
-    setSelectedId(id);
-    setSeedId(id);
-    fullGraphInsights.reset();
-    graph.reset(formType, formValue.trim());
   }
 
   /**
@@ -328,24 +323,10 @@ function GraphCanvas({ initialType, initialKey, goToTriageInvestigate, goToCampa
             </button>
           )}
         </div>
-        <form onSubmit={startNew} className="flex w-full flex-wrap items-center gap-2">
-          <Select value={formType} onChange={(e) => setFormType(e.target.value as GraphNodeType)} className="w-52">
-            {SEED_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {NODE_TYPE_LABEL[t]}
-              </option>
-            ))}
-          </Select>
-          <Input value={formValue} onChange={(e) => setFormValue(e.target.value)} placeholder="e.g. a malware family, actor name, CVE ID, IP, domain..." className="min-w-[240px] flex-1" />
-          <button type="submit" className="flex h-9 items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 text-sm text-primary hover:border-primary/50">
-            <Search className="h-3.5 w-3.5" />
-            Start
-          </button>
-        </form>
       </CardHeader>
       <CardContent>
         {graph.nodes.size === 0 ? (
-          <p className="py-12 text-center text-sm text-muted">Pick a starting entity above, or pivot in from another tab, to begin building the graph.</p>
+          <p className="py-12 text-center text-sm text-muted">Building the relationship graph for this search…</p>
         ) : (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_360px]">
             <div className="h-[560px] overflow-hidden rounded-xl border border-white/10 bg-black/20">
@@ -504,8 +485,28 @@ function NodeMetadata({ node }: { node: PositionedGraphNode }) {
   // currently selected.
   const attackTechniques = Array.isArray(meta.attackTechniques) ? (meta.attackTechniques as AttackTechniqueSummary[]) : [];
 
+  // A live AV/sandbox classification exists for this hash but didn't
+  // exact-match any tracked malware entity's name/alias (see server/
+  // investigation/investigationGraph.js#matchMalwareFamilyFromLabel) --
+  // AV vendor labels are notoriously inconsistent/misspelled across engines,
+  // so this is a REAL, common case, not an edge case. Surfaced honestly
+  // instead of the canvas silently showing an isolated node with no
+  // explanation: this is real evidence the platform found and chose not to
+  // fabricate into a graph edge, not an absence of evidence.
+  const unmatched = meta.liveFamilyLabelUnmatched as { label: string; source: string } | null | undefined;
+
   return (
     <>
+      {unmatched && (
+        <div className="rounded-lg border border-medium/25 bg-medium/[0.06] p-2.5 text-xs">
+          <p className="mb-1 flex items-center gap-1.5 font-semibold text-medium">
+            <Radar className="h-3.5 w-3.5" /> Live classification, not yet a tracked profile
+          </p>
+          <p className="text-foreground/90">
+            {unmatched.source} classified this as <span className="font-mono">"{unmatched.label}"</span> -- no tracked malware family in this platform's data exactly matches that name/alias, so no relationship edge is drawn. This is a real signal, not a dead end: search "{unmatched.label}" directly, or check Malware Intelligence for a close variant.
+          </p>
+        </div>
+      )}
       <KeyValueBlock title="Details" pairs={scalarPairs} />
       <FieldList title="Aliases" items={aliases} />
       {attackTechniques.length > 0 && (

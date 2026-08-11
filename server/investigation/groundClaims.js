@@ -263,3 +263,37 @@ export function checkVictimTargetingClaim(text, hasVictimTargetingData) {
     flagged: true,
   };
 }
+
+const IOC_ATTRIBUTION_LANGUAGE = /\b(associated with|linked to|attributed to|used by|belongs to|part of the infrastructure (for|of)|tied to|connected to)\b/i;
+
+/**
+ * Fail-closed guard for the IOC extraction pipeline overhaul's own "no
+ * hallucinated relationships" requirement -- an indicator's own canonical
+ * record (server/iocIntelligence.js) only ever carries a malware/actor/
+ * campaign association when a real, code-computed co-occurrence was found
+ * (see iocIntelligence.js#backfillMissingAssociations' own comment: never
+ * inferred, only ever confirmed by two independent passes already
+ * agreeing). If AI narrative names a real, platform-tracked entity in
+ * connection with THIS indicator that the canonical record doesn't actually
+ * list, that's exactly the fabricated-attribution pattern this guard exists
+ * to catch -- appends a caveat rather than trusting the prose, same
+ * best-effort-prose-scan shape as checkProseGrounding above, just scoped to
+ * one indicator's own verified associations instead of the whole search.
+ */
+export function checkIocAttributionClaim(text, iocRecord) {
+  if (!text || typeof text !== "string") return { text, flagged: false };
+  if (!IOC_ATTRIBUTION_LANGUAGE.test(text)) return { text, flagged: false };
+  const associations = iocRecord?.aggregatedAssociations;
+  const knownAssociated = new Set([...(associations?.malwareFamilies ?? []), ...(associations?.actors ?? []), ...(associations?.campaigns ?? [])].map(norm));
+  const lower = text.toLowerCase();
+  const suspects = allKnownEntityNames().filter((name) => {
+    const n = norm(name);
+    if (n.length < 4 || knownAssociated.has(n)) return false;
+    return lower.includes(n);
+  });
+  if (suspects.length === 0) return { text, flagged: false };
+  return {
+    text: `${text} [Caveat: this platform's canonical indicator record does not list ${suspects.slice(0, 3).join(", ")} among its verified associations -- treat any such attribution as unconfirmed.]`,
+    flagged: true,
+  };
+}

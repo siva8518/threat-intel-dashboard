@@ -14,6 +14,7 @@
 // a search for "LockBit" or "APT29" (a name-type search) -- previously these
 // were two disjoint, differently-impoverished code paths.
 import { getAllEntities as getMalwareEntities } from "../malwareIntelligence.js";
+import { getAllEntities as getIocEntities } from "../iocIntelligence.js";
 import { getAllEntities as getDarkWebEntities } from "../darkWebIntelligence.js";
 import { ransomwareCampaigns as getRansomwareCampaigns } from "../ransomwareCampaigns.js";
 import { getAllGithubRepos } from "../githubIntel/index.js";
@@ -43,6 +44,14 @@ function bucketForCampaign(entity) {
 }
 
 /** Flattens iocs+articleIocs across every matched malware entity into a per-type inventory with real counts -- the source data already exists on MalwareIntelligenceEntity, this is pure aggregation, no new ingestion. */
+// Maps server/iocIntelligence.js's fine-grained types (ipv4/ipv6/sha256/
+// sha1/md5/etc.) down to this function's 5 coarse UI bucket types -- the
+// canonical store deliberately keeps hash/IP variants distinct (useful for
+// its own records), but this inventory view predates that distinction and
+// every other consumer of it (frontend IOC export, etc.) expects the
+// existing 4/5-type IocType model, not a wider one.
+const CANONICAL_TYPE_TO_BUCKET = { ipv4: "ip", ipv6: "ip", domain: "domain", url: "url", sha256: "hash", sha1: "hash", md5: "hash", email: "email" };
+
 function aggregateIocInventory(malwareEntities) {
   const buckets = new Map(IOC_BUCKET_TYPES.map((t) => [t, new Map()]));
   for (const entity of malwareEntities) {
@@ -54,6 +63,27 @@ function aggregateIocInventory(malwareEntities) {
       map.set(key, { indicator: ioc.indicator, firstSeen: ioc.firstSeen ?? null, lastSeen: ioc.firstSeen ?? null, source: entity.name });
     }
   }
+
+  // Canonical-store records (server/iocIntelligence.js) whose OWN, real,
+  // code-computed aggregatedAssociations name one of this dossier's matched
+  // malware entities -- the closed gap: an indicator that never made it into
+  // a malware entity's iocs/articleIocs (e.g. it was extracted from an
+  // article that named an actor/campaign but no malware family) can still
+  // surface here as long as it genuinely co-occurred with this family in
+  // SOME article's text.
+  const malwareNamesLower = new Set(malwareEntities.map((m) => norm(m.name)));
+  if (malwareNamesLower.size > 0) {
+    for (const ioc of getIocEntities()) {
+      const bucket = CANONICAL_TYPE_TO_BUCKET[ioc.type];
+      if (!bucket) continue;
+      if (!(ioc.aggregatedAssociations?.malwareFamilies ?? []).some((f) => malwareNamesLower.has(norm(f)))) continue;
+      const map = buckets.get(bucket);
+      const key = norm(ioc.value);
+      if (map.has(key)) continue;
+      map.set(key, { indicator: ioc.value, firstSeen: ioc.firstSeen ?? null, lastSeen: ioc.lastSeen ?? null, source: "iocIntelligence" });
+    }
+  }
+
   return IOC_BUCKET_TYPES.map((type) => {
     const items = Array.from(buckets.get(type).values());
     return { indicatorType: type, count: items.length, items: items.slice(0, 50) };

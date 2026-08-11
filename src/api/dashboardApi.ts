@@ -35,8 +35,11 @@ import type {
   GraphInsights,
   CorrelationSummary,
   ShouldICareAssessment,
+  SandboxRecord,
   KevEntry,
   MalwareIntelligenceEntity,
+  IocIntelligenceEntity,
+  IocSourceCoverageReport,
   AiProviderHealth,
   AiUsageRollup,
   MalwareProfile,
@@ -119,6 +122,14 @@ export async function fetchTrendingMalware(): Promise<TrendingMalwareEntry[]> {
 
 export async function fetchMalwareIntelligence(): Promise<{ entities: MalwareIntelligenceEntity[] }> {
   return fetchJson("/api/dashboard/malware-intelligence", { source: "Dashboard API" });
+}
+
+export async function fetchIocIntelligence(): Promise<{ entities: IocIntelligenceEntity[]; totalCount: number }> {
+  return fetchJson("/api/dashboard/ioc-intelligence", { source: "Dashboard API" });
+}
+
+export async function fetchIocSourceCoverage(): Promise<IocSourceCoverageReport> {
+  return fetchJson("/api/dashboard/ioc-source-coverage", { source: "Dashboard API" });
 }
 
 export async function fetchToolIntelligence(): Promise<{ entities: ToolIntelligenceEntity[] }> {
@@ -363,6 +374,22 @@ export async function generateShouldICare(result: InvestigationResult): Promise<
     body: JSON.stringify(result),
     timeoutMs: 90_000,
   });
+}
+
+/** Explicit-only -- fired by the "Analyze in Sandbox" button, never automatically on search (this platform never auto-submits an IOC). Only valid for type "url"/"domain" -- see server/sandboxApplicability.js. */
+export async function submitSandboxAnalysis(type: string, value: string): Promise<SandboxRecord> {
+  return fetchJson("/api/dashboard/sandbox/submit", {
+    source: "Sandbox Analysis",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type, value }),
+    timeoutMs: 30_000,
+  });
+}
+
+/** Read-mostly -- returns the current sandbox record, polling the provider once if a job is genuinely in flight. Safe to call on every search (a hash's "existing report" check happens here, not on /investigate itself, keeping that endpoint's own timeout budget untouched). */
+export async function fetchSandboxStatus(type: string, value: string): Promise<SandboxRecord> {
+  return fetchJson(`/api/dashboard/sandbox/status?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`, { source: "Sandbox Analysis", timeoutMs: 20_000 });
 }
 
 // The full-profile (fetchThreatActorProfile) and list (fetchThreatActorList)

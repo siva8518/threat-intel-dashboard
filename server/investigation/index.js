@@ -34,6 +34,37 @@ import { buildEvidence } from "./evidence.js";
 import { assessCveExploitationState } from "./cveExploitState.js";
 import { computeVerdict } from "./verdictEngine.js";
 import { buildActionabilityGuidance } from "./actionability.js";
+import { assessSandboxApplicability } from "../sandboxApplicability.js";
+import { getSandboxRecord, findSandboxReportsObservingIp } from "../sandboxIntelligence.js";
+
+const SANDBOX_APPLICABLE_TYPES = new Set(["url", "domain", "hash", "ip", "cve"]);
+
+/** The sandbox store/graph/applicability layer all key hashes under the single generic "hash" bucket (matching investigationGraph.js's own generic hash node type, resolveGraphTarget()) rather than sha256/sha1/md5 -- Hybrid Analysis only ever supports sha256 anyway (see server/lookups/hybridAnalysis.js), so the finer distinction adds nothing here and would otherwise silently desync the store key the graph looks up from the key assemble() writes to. */
+function sandboxTypeFor(type) {
+  return isHashType(type) ? "hash" : type;
+}
+
+/** URLs from this platform's own cross-reference data whose HOSTNAME is literally this domain -- not just "related via a shared malware family" (crossRef.relatedIocs' own, looser standard), since recommending a sandbox target needs a real reason it belongs to this domain, not just thematic association. */
+function relatedUrlCandidatesForDomain(domain, crossRef) {
+  const candidates = [];
+  for (const ioc of crossRef?.relatedIocs ?? []) {
+    if (ioc.indicatorType !== "url") continue;
+    try {
+      if (new URL(ioc.indicator).hostname.toLowerCase() === domain.toLowerCase()) candidates.push(ioc.indicator);
+    } catch {
+      // not a parseable URL -- skip rather than guess
+    }
+  }
+  return candidates;
+}
+
+/** Computed once per search and reused by evidence.js/actionability.js/the response -- see src/types/threat-intel.ts#InvestigationSandboxContext. */
+function buildSandboxContext(type, indicator, crossRef) {
+  const sandboxType = sandboxTypeFor(type);
+  if (!SANDBOX_APPLICABLE_TYPES.has(sandboxType)) return null;
+  const context = sandboxType === "domain" ? { relatedUrlCandidates: relatedUrlCandidatesForDomain(indicator, crossRef) } : sandboxType === "ip" ? { observedInSandboxReports: findSandboxReportsObservingIp(indicator) } : {};
+  return { applicability: assessSandboxApplicability(sandboxType, indicator, context), record: getSandboxRecord(sandboxType, indicator) };
+}
 
 const ARTIFACT_TYPES = new Set(["email", "fileName", "processName", "registryKey", "userAgent"]);
 
@@ -194,10 +225,11 @@ function allLookupResults(type, moduleData) {
  */
 function assemble(indicator, type, moduleData, crossRef, graph, resolvedCanonicalName = null, cveExploitationState = null) {
   const { firstSeen, lastSeen } = firstLastSeenFor(type, moduleData);
+  const sandbox = buildSandboxContext(type, indicator, crossRef);
 
-  const evidence = buildEvidence({ type, lookupResults: allLookupResults(type, moduleData), crossRef, moduleData, cveExploitationState });
+  const evidence = buildEvidence({ type, lookupResults: allLookupResults(type, moduleData), crossRef, moduleData, cveExploitationState, sandboxRecord: sandbox?.record ?? null });
   const verdict = computeVerdict({ entityType: type, evidence, cveExploitationState, context: { moduleData, crossRef, graph } });
-  const actionability = buildActionabilityGuidance({ type, indicator, verdict, moduleData, cveExploitationState, graph });
+  const actionability = buildActionabilityGuidance({ type, indicator, verdict, moduleData, cveExploitationState, graph, crossRef, firstSeen, lastSeen, sandboxRecord: sandbox?.record ?? null });
 
   const overview = {
     indicator,
@@ -231,6 +263,7 @@ function assemble(indicator, type, moduleData, crossRef, graph, resolvedCanonica
           // ransomwareGroup search keeps both signals.
           matchingAiReports: mergeReports(crossRef.matchingAiReports, moduleData.dossier?.threatReports),
           relatedIocs: crossRef.relatedIocs,
+          canonicalRecord: crossRef.canonicalRecord ?? null,
         }
       : type === "name"
         ? {
@@ -239,6 +272,7 @@ function assemble(indicator, type, moduleData, crossRef, graph, resolvedCanonica
             activeCampaigns: (moduleData.campaigns ?? []).map((c) => c.name),
             matchingAiReports: moduleData.dossier?.threatReports ?? [],
             relatedIocs: [],
+            canonicalRecord: null,
           }
         : null,
     notConfigured: moduleData.notConfigured ?? [],
@@ -249,6 +283,7 @@ function assemble(indicator, type, moduleData, crossRef, graph, resolvedCanonica
     rankedFindings: rankFindings(graph, crossRef),
     resolvedCanonicalName,
     actionability,
+    sandbox,
   };
 }
 

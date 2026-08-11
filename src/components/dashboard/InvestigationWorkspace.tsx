@@ -20,6 +20,7 @@ import { SearchCoveragePanel } from "./investigation/SearchCoveragePanel";
 import { EvidencePanel } from "./investigation/EvidencePanel";
 import { WhatToInvestigateNextPanel } from "./investigation/WhatToInvestigateNextPanel";
 import { RecommendationsPanel } from "./investigation/RecommendationsPanel";
+import { SandboxAnalysisPanel } from "./investigation/SandboxAnalysisPanel";
 import { InvestigationGraph } from "./InvestigationGraph";
 import { useSelection } from "@/context/SelectionContext";
 import { useGenerateInvestigationAiReport } from "@/hooks/useInvestigate";
@@ -63,6 +64,21 @@ const COLOR_CLASSES: Record<"critical" | "high" | "medium" | "low" | "muted" | "
   muted: { border: "border-white/10", bg: "bg-white/[0.03]", text: "text-muted" },
 };
 
+// Severity/Risk Level/Recommended Priority/Confidence render several
+// different vocabularies (e.g. recommendedPriority's "Immediate"/"Normal"
+// vs. severity's "CRITICAL"/"MEDIUM"), but all reduce to the same
+// industry-standard critical/high/medium/low color scale -- matched by
+// keyword rather than exact value so every vocabulary lands on the same
+// colors instead of rendering as plain uncolored text.
+function severityTextColor(value: string): string {
+  const v = value.toLowerCase();
+  if (v.includes("critical") || v.includes("immediate")) return COLOR_CLASSES.critical.text;
+  if (v.includes("high")) return COLOR_CLASSES.high.text;
+  if (v.includes("medium") || v.includes("normal")) return COLOR_CLASSES.medium.text;
+  if (v.includes("low")) return COLOR_CLASSES.low.text;
+  return "text-foreground";
+}
+
 function VerdictBanner({ overview }: { overview: InvestigationResult["overview"] }) {
   const { verdict } = overview;
   const color = VERDICT_STATE_COLOR[verdict.state];
@@ -84,19 +100,19 @@ function VerdictBanner({ overview }: { overview: InvestigationResult["overview"]
         <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
           <div>
             <span className="text-muted">Severity: </span>
-            <span className="font-semibold text-foreground">{verdict.severity}</span>
+            <span className={cn("font-semibold", severityTextColor(verdict.severity))}>{verdict.severity}</span>
           </div>
           <div>
             <span className="text-muted">Risk Level: </span>
-            <span className="font-semibold text-foreground">{verdict.riskLevel}</span>
+            <span className={cn("font-semibold", severityTextColor(verdict.riskLevel))}>{verdict.riskLevel}</span>
           </div>
           <div>
             <span className="text-muted">Recommended Priority: </span>
-            <span className="font-semibold text-foreground">{verdict.recommendedPriority}</span>
+            <span className={cn("font-semibold", severityTextColor(verdict.recommendedPriority))}>{verdict.recommendedPriority}</span>
           </div>
           <div>
             <span className="text-muted">Confidence: </span>
-            <span className="font-semibold text-foreground">{verdict.confidence}</span>
+            <span className={cn("font-semibold", severityTextColor(verdict.confidence))}>{verdict.confidence}</span>
           </div>
           {verdict.blockRecommendation !== "Not Applicable" && (
             <div>
@@ -152,6 +168,65 @@ function RelatedAiReportsSection({ result }: { result: InvestigationResult }) {
               {r.articleTitle} <ExternalLink className="h-3 w-3" />
             </a>{" "}
             <span className="text-muted">— {r.articleSource}</span>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+const IOC_CLASSIFICATION_LABEL: Record<string, string> = {
+  malicious_observed: "Observed Malicious",
+  infrastructure_context: "Infrastructure Context",
+  benign_reference: "Benign Reference",
+  unknown: "Unclassified",
+};
+
+/**
+ * Full per-source citation trail for this exact indicator value, straight
+ * from the canonical IOC store (server/iocIntelligence.js) -- the concrete
+ * answer to "who reported this, in which article, on what date, saying
+ * what exactly" that requirement #13 of the IOC pipeline overhaul asks for.
+ * null canonicalRecord means this store has never independently observed
+ * the value (distinct from "observed with zero sources," which can't
+ * happen -- upsertIndicator always attaches at least one source).
+ */
+function SourceCitationsSection({ result }: { result: InvestigationResult }) {
+  const record = result.relatedIntelligence?.canonicalRecord;
+  if (!record || record.sources.length === 0) return null;
+  const otherCount = record.sightingCount - 1;
+  return (
+    <Section title="Source Citations">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+        <Badge variant={record.classification === "malicious_observed" ? "critical" : record.classification === "unknown" ? "muted" : "cyan"}>
+          {IOC_CLASSIFICATION_LABEL[record.classification] ?? record.classification}
+        </Badge>
+        <span className="text-muted">
+          {record.confidence} confidence &middot; first seen {new Date(record.firstSeen).toLocaleDateString()} &middot; last seen {new Date(record.lastSeen).toLocaleDateString()}
+        </span>
+      </div>
+      {otherCount > 0 && (
+        <p className="mb-2 text-xs text-muted">
+          {otherCount} other report{otherCount === 1 ? "" : "s"} also mention{otherCount === 1 ? "s" : ""} this indicator.
+        </p>
+      )}
+      <ul className="space-y-2.5">
+        {record.sources.map((s, i) => (
+          <li key={`${s.articleLink ?? i}-${i}`} className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-1">
+              {s.articleLink ? (
+                <a href={s.articleLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-primary hover:underline">
+                  {s.articleTitle ?? s.articleLink} <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : (
+                <span className="font-medium text-foreground">{s.articleTitle ?? "Unknown article"}</span>
+              )}
+              <span className="text-muted">{s.publishedDate ? new Date(s.publishedDate).toLocaleDateString() : ""}</span>
+            </div>
+            <p className="mt-1 text-muted">
+              {s.articleSource ?? "Unknown source"} &middot; {s.extractionMethod === "regex-fulltext" ? "full-text extraction" : s.extractionMethod === "backfill-from-report" ? "AI Summarization report" : "title/summary extraction"}
+            </p>
+            {s.contextSnippet && <p className="mt-1 rounded bg-black/20 p-1.5 font-mono text-[11px] text-foreground/80">&hellip;{s.contextSnippet}&hellip;</p>}
           </li>
         ))}
       </ul>
@@ -385,6 +460,7 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
               <InvestigationGraph
                 initialType={graphTarget.type}
                 initialKey={graphTarget.key}
+                seedResult={result.graph}
                 goToTriageInvestigate={runInvestigation}
                 goToCampaignSearch={goToCampaignSearch}
                 goToMalwareSearch={goToMalwareSearch}
@@ -430,7 +506,9 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
               shouldICarePending={shouldICarePending}
               correlationSummary={correlationSummary}
               correlationSummaryPending={correlationSummaryPending}
-              environmentalValidationChecklist={recommendedActions?.environmentalValidationChecklist ?? []}
+              environmentalValidation={recommendedActions?.environmentalValidation ?? null}
+              cveInvestigationSteps={recommendedActions?.cveInvestigationSteps ?? null}
+              sandboxInvestigationSteps={recommendedActions?.sandboxInvestigationSteps ?? null}
             />
 
             {/* 7. Recommendations -- the AI Investigation Summary's own recommendations list. */}
@@ -438,8 +516,11 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
 
             {/* 8. Then the rest: AI/vendor reports, different-team Recommended Actions, real Detections & Hunting, the deeper opt-in AI Investigation Summary narrative, and Quick Actions. */}
             <RelatedAiReportsSection result={result} />
+            <SourceCitationsSection result={result} />
 
             {recommendedActions && <RecommendedActionsPanel guidance={recommendedActions} />}
+
+            <SandboxAnalysisPanel sandbox={result?.sandbox ?? null} />
 
             <RealDetectionsHuntingPanel graphNode={graphNode} />
 

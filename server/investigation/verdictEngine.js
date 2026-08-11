@@ -345,7 +345,8 @@ function buildReasoning(state, evidence, cveExploitationState) {
 // for a CVE (you patch it, you don't "block" a vulnerability), an actor/
 // malware/campaign name, a ransomware group, or any of the other entity
 // types this framework covers.
-const BLOCKABLE_TYPES = new Set(["ip", "domain", "url", "sha256", "sha1", "md5"]);
+/** Exported for reuse by server/investigation/actionability.js's environmentalValidationPlan(), which needs the same blockable/non-blockable split when phrasing its recommended next actions. */
+export const BLOCKABLE_TYPES = new Set(["ip", "domain", "url", "sha256", "sha1", "md5"]);
 
 // Real ASN-holder/warning-list phrasing this platform's own connectors
 // already produce for major cloud/CDN/VPN/datacenter providers (see

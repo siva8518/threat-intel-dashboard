@@ -23,6 +23,7 @@ import { startRagIndexer } from "./rag/indexer.js";
 import { startCombinedExtractionJob } from "./combinedExtractionJob.js";
 import { startWatchlistScannerJob } from "./watchlistScanner.js";
 import { startAiThreatSummaryJob } from "./aiThreatSummaryJob.js";
+import { startIocExtractionJob } from "./iocExtractionJob.js";
 import { log } from "./lib/log.js";
 
 const app = express();
@@ -57,6 +58,7 @@ startRagIndexer();
 startCombinedExtractionJob();
 startWatchlistScannerJob();
 startAiThreatSummaryJob();
+startIocExtractionJob();
 
 app.listen(PORT, () => {
   log.info("server", `Threat Intel Dashboard backend listening on port ${PORT}`);

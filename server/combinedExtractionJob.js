@@ -19,7 +19,7 @@ import { splitFamilies, getCommonAttackToolNames } from "./correlationEngine.js"
 import { ransomwareCampaigns as getRansomwareCampaigns } from "./ransomwareCampaigns.js";
 import { getAllGithubRepos } from "./githubIntel/index.js";
 import { extractAllEntities } from "./combinedExtraction.js";
-import { extractIocs } from "./aiThreatSummary.js";
+import { extractEntities } from "./githubIntel/extractor.js";
 import { validateCandidates as validateMalwareCandidates } from "./malwareExtraction.js";
 import { validateCandidates as validateActorCandidates } from "./threatActorExtraction.js";
 import { validateCandidates as validateCampaignCandidates } from "./campaignExtraction.js";
@@ -27,6 +27,7 @@ import { resolveTechniques } from "./attackTechniqueExtraction.js";
 import { validateCandidates as validateDarkWebCandidates } from "./darkWebExtraction.js";
 import { validateCandidates as validateToolCandidates } from "./toolExtraction.js";
 import * as malwareIntel from "./malwareIntelligence.js";
+import * as iocIntel from "./iocIntelligence.js";
 import * as actorIntel from "./threatActorIntelligence.js";
 import * as campaignIntel from "./campaignIntelligence.js";
 import * as techniqueIntel from "./attackTechniqueIntelligence.js";
@@ -114,10 +115,13 @@ function buildExclusionSets(attackData) {
 function flattenArticleIocs(extracted) {
   const records = [];
   const push = (indicator, indicatorType) => records.push({ indicator, indicatorType });
-  for (const ip of extracted.ipAddresses ?? []) push(ip, "ip");
+  for (const ip of extracted.ipv4 ?? []) push(ip, "ip");
+  for (const ip of extracted.ipv6 ?? []) push(ip, "ip");
   for (const d of extracted.domains ?? []) push(d, "domain");
   for (const u of extracted.urls ?? []) push(u, "url");
-  for (const h of extracted.hashes ?? []) push(h, "hash");
+  for (const h of extracted.sha256 ?? []) push(h, "hash");
+  for (const h of extracted.sha1 ?? []) push(h, "hash");
+  for (const h of extracted.md5 ?? []) push(h, "hash");
   return records;
 }
 
@@ -218,6 +222,14 @@ async function runCycle() {
       const nonSelfCampaigns = campaigns.filter((name) => !selfTokens.has(name.toLowerCase()));
       const nonSelfTools = tools.filter((name) => !selfTokens.has(name.toLowerCase()));
 
+      // Regex-extracted (never AI-budget-gated -- see server/iocExtractionJob.js's
+      // own module comment) from title+summary once per article, shared by
+      // both the malware-scoped path below (unchanged, backward-compatible)
+      // and the canonical, source-agnostic IOC store, which -- unlike the
+      // malware-scoped path -- stores a candidate regardless of whether a
+      // malware family was ALSO independently named in the same article.
+      const extractedIocs = extractEntities(`${article.title}\n${article.summary ?? ""}`, {});
+
       const validMalware = validateMalwareCandidates(nonSelfMalware, { articleSource: article.source, knownActorNamesLower: actorNamesLower, knownToolNamesLower: toolNamesLower });
       // Real IOCs a vendor/researcher published directly in the article's
       // own text (title+summary -- this job doesn't fetch full article text,
@@ -225,7 +237,7 @@ async function runCycle() {
       // articles/cycle), attached to every malware family that article
       // mentions -- distinct from and in addition to the bulk-feed-derived
       // `iocs`/`iocSightings` below, which never look at article text at all.
-      const articleIocRecords = validMalware.length > 0 ? flattenArticleIocs(extractIocs(`${article.title}\n${article.summary ?? ""}`)) : [];
+      const articleIocRecords = validMalware.length > 0 ? flattenArticleIocs(extractedIocs) : [];
       for (const name of validMalware) {
         const { entity, isNew } = malwareIntel.upsertMention(name, article);
         if (isNew) newEntities += 1;
@@ -245,6 +257,28 @@ async function runCycle() {
         const { isNew } = campaignIntel.upsertMention(name, article);
         if (isNew) newEntities += 1;
         else updatedEntities += 1;
+      }
+
+      // Canonical IOC store gets every extracted candidate from this pass,
+      // not just the 4 types/malware-gated subset above -- this is the
+      // union half of the fix; server/iocExtractionJob.js's own full-text
+      // pass is the other half. Associations are real, same-pass validated
+      // names (never inferred), the strongest possible evidence since both
+      // the entity pass and the IOC pass ran against the identical text.
+      const canonicalCandidates = iocIntel.flattenExtractedCandidates(extractedIocs);
+      if (canonicalCandidates.length > 0) {
+        const statedAssociations = { malwareFamilies: validMalware, actors: validActors.map((a) => a.name), campaigns: validCampaigns };
+        for (const { type, value } of canonicalCandidates) {
+          iocIntel.upsertIndicator(type, value, {
+            articleTitle: article.title,
+            articleLink: article.link,
+            articleSource: article.source,
+            publishedDate: article.publishedDate,
+            contextSnippet: null, // title+summary is already short enough that the "context" is the whole text; a snippet adds no signal beyond what's already in articleTitle
+            extractionMethod: "regex-title-summary",
+            statedAssociations,
+          });
+        }
       }
 
       const sourceText = `${article.title} ${article.summary ?? ""}`;
@@ -272,11 +306,12 @@ async function runCycle() {
         techniques.length - resolvedTechniques.length +
         darkweb.length - validDarkWeb.length +
         tools.length - validTools.length;
-    } catch (error) {
-      if (error instanceof AllProvidersFailedError) throw error; // stop the whole cycle -- every provider being down/rate-limited affects every remaining article the same way
-      log.error("combined-extraction", `failed to process "${article.title.slice(0, 60)}...": ${error.message}`);
-    } finally {
+
       markProcessedEverywhere(article.link);
+    } catch (error) {
+      if (error instanceof AllProvidersFailedError) throw error; // stop the whole cycle -- every provider being down/rate-limited affects every remaining article the same way; leave this article unmarked so a future cycle retries it once providers recover
+      log.error("combined-extraction", `failed to process "${article.title.slice(0, 60)}...": ${error.message}`);
+      markProcessedEverywhere(article.link); // non-provider failure (bad candidate data, etc.) -- still terminal for this article, so mark it done rather than retrying forever
     }
   }
 
@@ -286,6 +321,7 @@ async function runCycle() {
   techniqueIntel.saveAfterMentions();
   darkWebIntel.saveAfterMentions();
   toolIntel.saveAfterMentions();
+  iocIntel.saveAfterMentions();
 
   if (attackData) {
     const { counts, records } = buildIocFamilyData();
