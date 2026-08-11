@@ -30,7 +30,11 @@ import { ApiError, fetchJson } from "../../lib/http.js";
 import { checkIndicator as checkHashOverview } from "../../lookups/hybridAnalysis.js";
 import { withRetry } from "../../lib/retry.js";
 
-const BASE_URL = "https://www.hybrid-analysis.com/api/v2";
+// No "www." -- that subdomain does not serve this API (confirmed live: it
+// 404s locally and appears to 403 from some networks/WAF paths, e.g.
+// DigitalOcean's egress), while the bare apex domain works and is what
+// Hybrid Analysis's own docs document as the base URL.
+const BASE_URL = "https://hybrid-analysis.com/api/v2";
 // A public Falcon Sandbox Windows 10 64-bit environment -- the standard
 // default environment ID Hybrid Analysis documents for community/free-tier
 // URL submissions.
