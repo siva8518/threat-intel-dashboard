@@ -16,7 +16,7 @@
 // (deterministic, never-AI-authored runbook -- see
 // server/investigation/actionability.js#environmentalValidationPlan)
 // must never be presented as though this platform already performed both.
-import { Sparkles, Compass, ShieldQuestion, Radio, Clock3, FlaskConical } from "lucide-react";
+import { Sparkles, Compass, ShieldQuestion, Radio, Clock3, FlaskConical, AlertTriangle } from "lucide-react";
 import { Section } from "../reportPrimitives";
 import { Badge } from "@/components/ui/badge";
 import type { ShouldICareAssessment, CorrelationSummary, EnvironmentalValidationPlan, AnalystVerdict, CveInvestigationStep, SandboxInvestigationStep } from "@/types/threat-intel";
@@ -24,8 +24,10 @@ import type { ShouldICareAssessment, CorrelationSummary, EnvironmentalValidation
 interface WhatToInvestigateNextPanelProps {
   shouldICare: ShouldICareAssessment | null;
   shouldICarePending: boolean;
+  shouldICareError?: string | null;
   correlationSummary: CorrelationSummary | null;
   correlationSummaryPending: boolean;
+  correlationSummaryError?: string | null;
   environmentalValidation: EnvironmentalValidationPlan | null;
   /** CVE searches replace the free-form AI Section 1 entirely with this deterministic, evidence-conditioned list -- see server/investigation/actionability.js#cveInvestigationSteps. null for every other entity type. */
   cveInvestigationSteps: CveInvestigationStep[] | null;
@@ -69,8 +71,10 @@ function formatDate(iso: string | null): string {
 export function WhatToInvestigateNextPanel({
   shouldICare,
   shouldICarePending,
+  shouldICareError = null,
   correlationSummary,
   correlationSummaryPending,
+  correlationSummaryError = null,
   environmentalValidation,
   cveInvestigationSteps,
   sandboxInvestigationSteps,
@@ -90,9 +94,16 @@ export function WhatToInvestigateNextPanel({
   // resolved yet might still add more.
   const stillWaiting = !isCve && ((shouldICarePending && !shouldICare) || (correlationSummaryPending && !correlationSummary));
   const hasIntelligenceContent = isCve ? cveInvestigationSteps.length > 0 : Boolean(nextAction) || nextSteps.length > 0;
+  // A source that ended in an error (never resolved to real content) is NOT
+  // the same as "this platform genuinely has nothing further to add" -- the
+  // direct fix for a real reported bug where an all-AI-providers-failed
+  // error was silently swallowed and rendered as the misleading "No further
+  // intelligence pivots identified", indistinguishable from a real empty
+  // result. Only surfaced when there's no content at all to show instead.
+  const generationError = !isCve && !hasIntelligenceContent ? (shouldICareError ?? correlationSummaryError ?? null) : null;
 
   const hasSandboxContent = Boolean(sandboxInvestigationSteps?.length);
-  if (!hasIntelligenceContent && !environmentalValidation && !stillWaiting && !hasSandboxContent) return null;
+  if (!hasIntelligenceContent && !environmentalValidation && !stillWaiting && !hasSandboxContent && !generationError) return null;
 
   return (
     <Section title="What To Investigate Next">
@@ -128,7 +139,13 @@ export function WhatToInvestigateNextPanel({
                     ))}
                   </ul>
                 )}
-                {!hasIntelligenceContent && !stillWaiting && <p className="text-xs text-muted">No further intelligence pivots identified.</p>}
+                {!hasIntelligenceContent && !stillWaiting && !generationError && <p className="text-xs text-muted">No further intelligence pivots identified.</p>}
+                {generationError && (
+                  <p className="flex items-start gap-1.5 text-xs text-amber-400">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>AI-generated pivots unavailable right now ({generationError}) -- this is not the same as "nothing found"; try refreshing this search shortly.</span>
+                  </p>
+                )}
                 {stillWaiting && (
                   <p className="flex items-center gap-1.5 text-xs text-muted">
                     <Sparkles className="h-3.5 w-3.5 animate-pulse text-primary" /> Still generating additional investigative guidance…

@@ -361,6 +361,7 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
     graphInsightsPending,
     correlationSummary,
     correlationSummaryPending,
+    correlationSummaryError,
     shouldICare,
     shouldICarePending,
     shouldICareError,
@@ -509,8 +510,10 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
             <WhatToInvestigateNextPanel
               shouldICare={shouldICare}
               shouldICarePending={shouldICarePending}
+              shouldICareError={shouldICareError}
               correlationSummary={correlationSummary}
               correlationSummaryPending={correlationSummaryPending}
+              correlationSummaryError={correlationSummaryError}
               environmentalValidation={recommendedActions?.environmentalValidation ?? null}
               cveInvestigationSteps={recommendedActions?.cveInvestigationSteps ?? null}
               sandboxInvestigationSteps={recommendedActions?.sandboxInvestigationSteps ?? null}
