@@ -5,7 +5,7 @@
 // the one Groq generation useIndustryBriefing already makes per industry --
 // the six richer sections (campaigns, CVEs, IOC feed, reports, detection,
 // hunting) are all deterministic derivations already computed server-side.
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   Bug,
@@ -224,6 +224,12 @@ export function IndustryIntelligence() {
   const [selected, setSelected] = useState<IndustryName | null>(null);
   const briefing = useIndustryBriefing();
   const ranking = useEmergingThreatsRanking();
+  // Scrolled into view the moment a briefing is requested (not just once it
+  // resolves) so clicking "Generate Full Briefing" -- a multi-second,
+  // LLM-backed request with no other feedback at the click point -- doesn't
+  // read as a no-op while the loading skeleton is still off-screen below the
+  // heatmap and Latest News sections.
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   const heatmapRow = useMemo(
     () => ranking.data?.industryHeatmap.find((r) => r.industry === selected) ?? null,
@@ -233,6 +239,7 @@ export function IndustryIntelligence() {
   function selectIndustry(industry: IndustryName) {
     setSelected(industry);
     briefing.mutate(industry);
+    requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
   const data = briefing.data;
@@ -349,6 +356,7 @@ export function IndustryIntelligence() {
                 relevanceBasis: row.relevance === "Not Applicable" ? "NONE" : "EXPLICIT",
               }))}
               onGenerateBriefing={selectIndustry}
+              pendingIndustry={briefing.isPending ? selected : null}
             />
           )}
         </CardContent>
@@ -384,6 +392,7 @@ export function IndustryIntelligence() {
         </SectionCard>
       )}
 
+      <div ref={resultsRef}>
       {!selected ? (
         <Card>
           <CardContent>
@@ -683,6 +692,7 @@ export function IndustryIntelligence() {
           </SectionCard>
         </>
       )}
+      </div>
     </div>
   );
 }

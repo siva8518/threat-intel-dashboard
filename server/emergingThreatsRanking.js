@@ -274,7 +274,7 @@ export function computeAggregateIndustryHeatmap(taggedNewsItems, reports) {
 
   for (const item of taggedNewsItems) {
     if (now - new Date(item.publishedDate).getTime() > POOL_WINDOW_MS) continue;
-    const matchedIndustries = matchIndustries(item.title);
+    const matchedIndustries = matchIndustries(item.title, item.summary);
     if (matchedIndustries.length === 0) continue;
 
     const keywordRelevance = SEVERITY_TO_RELEVANCE[item.severity] ?? "Low";
