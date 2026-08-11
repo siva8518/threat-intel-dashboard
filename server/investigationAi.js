@@ -122,6 +122,89 @@ function hasBehavioralEvidence(moduleData, mitreAttackMapping) {
   return false;
 }
 
+/**
+ * Deterministic, code-generated hunting query for THIS search's own real
+ * indicator value -- never model-authored, so the field/table names and the
+ * IOC value itself are always exactly right (the direct fix for asking the
+ * model to invent correct-looking-but-unverifiable KQL syntax). Modeled on
+ * Microsoft Defender Advanced Hunting schema, the same convention this
+ * platform's other hunting-query content (server/huntingLibrary.js) already
+ * targets. Returns null for indicator types with no applicable query
+ * template (cve/name/ransomwareGroup/email/etc.) rather than fabricating one.
+ */
+function buildDetectionQuery(type, indicator) {
+  if (type === "sha256" || type === "sha1" || type === "md5") {
+    const field = { sha256: "SHA256", sha1: "SHA1", md5: "MD5" }[type];
+    return {
+      platform: "Microsoft Defender for Endpoint",
+      language: "KQL",
+      query:
+        `DeviceFileEvents\n` +
+        `| where ${field} == "${indicator}"\n` +
+        `| project\n` +
+        `    Timestamp,\n` +
+        `    DeviceName,\n` +
+        `    ActionType,\n` +
+        `    FileName,\n` +
+        `    FolderPath,\n` +
+        `    SHA256,\n` +
+        `    SHA1,\n` +
+        `    MD5,\n` +
+        `    InitiatingProcessFileName,\n` +
+        `    InitiatingProcessCommandLine,\n` +
+        `    InitiatingProcessAccountName\n` +
+        `| order by Timestamp desc`,
+    };
+  }
+  if (type === "ip") {
+    return {
+      platform: "Microsoft Defender for Endpoint",
+      language: "KQL",
+      query:
+        `DeviceNetworkEvents\n` +
+        `| where RemoteIP == "${indicator}"\n` +
+        `| project Timestamp, DeviceName, ActionType, RemoteIP, RemotePort, RemoteUrl, InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName\n` +
+        `| order by Timestamp desc`,
+    };
+  }
+  if (type === "domain") {
+    return {
+      platform: "Microsoft Defender for Endpoint",
+      language: "KQL",
+      query:
+        `DeviceNetworkEvents\n` +
+        `| where RemoteUrl has "${indicator}"\n` +
+        `| project Timestamp, DeviceName, ActionType, RemoteUrl, RemoteIP, InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName\n` +
+        `| order by Timestamp desc`,
+    };
+  }
+  if (type === "url") {
+    return {
+      platform: "Microsoft Defender for Endpoint",
+      language: "KQL",
+      query:
+        `DeviceNetworkEvents\n` +
+        `| where RemoteUrl == "${indicator}"\n` +
+        `| project Timestamp, DeviceName, ActionType, RemoteUrl, RemoteIP, InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName\n` +
+        `| order by Timestamp desc`,
+    };
+  }
+  return null;
+}
+
+// Generic, non-actionable conclusion language this platform never emits as
+// a standalone recommendation -- the direct fix for the reported "Monitor" /
+// "Suspicious" / "Requires Investigation" / "treat this as context" filler
+// items with no concrete data source, IOC, or escalation path attached. A
+// match means the model produced a vague conclusion instead of an
+// executable action; that item is dropped rather than shown half-formed.
+const GENERIC_ACTION_PATTERN =
+  /^(monitor( the environment)?|investigate further|requires? investigation|suspicious|be cautious|exercise caution|treat this as context|the final (soc )?decision should)\.?$/i;
+
+function isActionableItem(text) {
+  return typeof text === "string" && text.trim().length > 20 && !GENERIC_ACTION_PATTERN.test(text.trim());
+}
+
 function summarizeModuleData(type, moduleData) {
   if (type === "cve") {
     return {
@@ -194,12 +277,13 @@ function buildContext(investigation) {
     confirmedFacts: buildConfirmedFacts(verdict.evidence),
     sourceIntelligence: buildSourceIntelligence(moduleData),
     iocRecord: relatedIntelligence?.canonicalRecord ?? null,
+    detectionQuery: buildDetectionQuery(type, indicator),
   };
 }
 
 const SYSTEM_PROMPT =
   "You are a senior Threat Intelligence Analyst investigating a single indicator for a fellow analyst. " +
-  "You are given: the indicator and type; this platform's ALREADY-COMPUTED verdict, severity, and confidence (never re-derive these -- explain them, don't restate or contradict them); real, source-attributed confirmedFacts (already-verified evidence, cite these directly rather than re-describing the raw numbers yourself); a full sourceIntelligence breakdown per configured source (including sources that returned nothing); real evidence-count signals (independentDirectSourceCount, directMaliciousCount, corroboratingMaliciousCount, indirectOrAttributionCount, hasKnownAttribution, hasBehavioralEvidence); the real ATT&CK mapping this platform already computed (mitreAttackMapping); and related campaigns/actors/malware this platform has already correlated. " +
+  "You are given: the indicator and type; this platform's ALREADY-COMPUTED verdict, severity, and confidence (never re-derive these -- explain them, don't restate or contradict them); real, source-attributed confirmedFacts (already-verified evidence, cite these directly rather than re-describing the raw numbers yourself); a full sourceIntelligence breakdown per configured source (including sources that returned nothing); real evidence-count signals (independentDirectSourceCount, directMaliciousCount, corroboratingMaliciousCount, indirectOrAttributionCount, hasKnownAttribution, hasBehavioralEvidence); the real ATT&CK mapping this platform already computed (mitreAttackMapping); related campaigns/actors/malware this platform has already correlated; and, when applicable to this indicator type, a deterministic detectionQuery (platform/language/query) already built with this exact indicator value substituted in -- reference it in detectionEngineerActions rather than writing your own query syntax. " +
   "\n\nYOUR JOB is synthesis, not restatement: explain what the evidence collectively means, where sources agree or conflict, what can be reasonably assessed versus what remains genuinely unknown, and concrete next actions -- never invent a fact, entity, or relationship not present in what you were given.\n" +
   "\n\nCRITICAL ANTI-HALLUCINATION RULES (a programmatic check runs after your response, so follow these exactly):\n" +
   "1. Never invent a threat actor, campaign, malware family, or C2 infrastructure not already named in activeCampaigns/associatedThreatActors/relatedIntelligence.\n" +
@@ -210,20 +294,23 @@ const SYSTEM_PROMPT =
   '6. Never state a CVE is "actively exploited"/"confirmed exploited" unless cveExploitationState is confirmed_actively_exploited or exploitation_reported_unconfirmed.\n' +
   "7. Never convert a source tag/label into a confirmed behavioral fact -- a ransomware-family label means the sample is associated with that family's tooling, not that ransomware was deployed in an intrusion.\n" +
   '8. Every assessedConclusions entry must state an honest confidence: "High" only when independentDirectSourceCount >= 2 or hasKnownAttribution is true for that specific claim; "Medium" for a single strong direct source or corroborating pattern; "Low" for indirect/weak signal only; "Unknown" when the claim genuinely cannot be assessed from what you were given.\n' +
-  '9. Every recommendation in threatIntelActions/detectionEngineerActions/socInvestigationActions must be specific and executable -- name the actual indicator value, hash, or field (e.g. "Search EDR process telemetry for SHA256 <indicator> and its associated filenames over the last 30 days") -- never a generic instruction like "check system logs" or "review OTX pulses" with no specifics.\n' +
-  "10. Internal-tool actions (EDR/SIEM/firewall/DNS/proxy) must be phrased as conditional recommendations for the analyst's OWN tools (\"if observed in your EDR...\"), never as something this platform itself checked.\n" +
+  '9. Every recommendation in threatIntelActions/detectionEngineerActions/socInvestigationActions/securityEngineeringActions must follow this exact structure in one or two sentences: Action -> Data/Telemetry source -> the SPECIFIC IOC/TTP value from this context -> Expected result/what a hit or miss means -> Escalation/next step. Example: "Search the SHA256 <indicator> across DeviceFileEvents and process-execution telemetry. If observed on any endpoint, identify execution status, parent process, user, and command line. If execution occurred, correlate the host against related domains/IPs from this report and escalate for endpoint containment." Never a bare instruction like "check system logs" or "review OTX pulses" with no specifics, and never a standalone conclusion word with nothing executable attached (\"Monitor\", \"Suspicious\", \"Requires Investigation\", \"treat this as context\" are NOT actions -- a programmatic filter strips any item matching that shape, so write past it).\n' +
+  "10. Internal-tool actions (EDR/SIEM/firewall/DNS/proxy/email/web-gateway) must be phrased as conditional recommendations for the analyst's OWN tools (\"if observed in your EDR...\"), never as something this platform itself checked.\n" +
   '11. containmentRationale must explain the ALREADY-COMPUTED blockRecommendation you were given -- never propose a different containment action or invent urgency the evidence does not support.\n' +
+  '12. Never create a standalone "Assessment" or "Key Intelligence Note" section, and never reconcile a conflicting reputation/sandbox verdict into a generic risk statement (e.g. "Hybrid Analysis reports a conflicting clean/benign signal, treat this as context"). If sources conflict, name the conflict AND its resolution path directly inside the relevant team\'s action item (per rule 9\'s structure) instead.\n' +
+  "13. detectionEngineerActions is mandatory whenever the indicator itself is a usable IOC (hash/IP/domain/URL) -- it must explicitly reference the exact indicator value and, if a detectionQuery was provided in your context, tell the analyst to run/validate it; if none was provided, explain exactly what detection/hunting alternative applies instead (e.g. behavioral/Sigma coverage for a malware family, not a raw IOC match).\n" +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
   '"indicatorVerdictExplanation": string -- 1-2 sentences explaining WHY this indicator earned its given verdict/severity, citing specific confirmedFacts/sourceIntelligence -- do not restate the verdict label itself.\n' +
   '"executiveAssessment": string -- 2-4 sentences, the single most important synthesis of what this indicator represents and why it matters, grounded only in provided data.\n' +
   '"assessedConclusions": array of 3-6 {"claim": string, "confidence": "High"|"Medium"|"Low"|"Unknown", "reasoning": string} -- reasonable conclusions derived FROM the evidence (not bare facts, not wild speculation), each with an honest, evidence-derived confidence per rule 8 above.\n' +
   '"potentialAttackRole": string -- what role this indicator may play in an attack chain. Per rule 3: only name a specific stage if hasBehavioralEvidence is true; otherwise write it as an explicitly unresolved "potential role", e.g. "may represent a payload or later-stage component; its exact position in the attack chain is not established by the available intelligence."\n' +
-  '"correlationAssessment": string -- 2-4 sentences on how the sources corroborate or conflict: what multiple sources independently agree on, what only one source contributes, and what remains uncorroborated.\n' +
+  '"correlationAssessment": string -- 2-4 sentences on how the sources corroborate or conflict: what multiple sources independently agree on, what only one source contributes, and what remains uncorroborated. Per rule 12, if sources conflict, state the conflict plainly here as analysis (this field is narrative, not an action list) -- do not invent a separate assessment label for it.\n' +
   '"intelligenceGaps": string[] -- 2-6 specific things this platform\'s current intelligence does NOT establish about this indicator (e.g. "no evidence confirming execution in a customer environment", "no confirmed C2 infrastructure for this specific sample"). Never fill a gap with an assumption -- name it as a gap instead.\n' +
   '"recommendedNextPivot": string -- the SINGLE highest-value next investigation step, specific to this indicator (name the actual value/field to pivot on).\n' +
-  '"threatIntelActions": string[] -- 3-6 specific intelligence-pivot actions (related infrastructure, campaign relationships, OTX pulses, first/last-seen, TTPs, attribution gaps) -- per rule 9.\n' +
-  '"detectionEngineerActions": string[] -- 3-6 specific detection/telemetry actions (exact EDR/SIEM/Sigma/KQL/Splunk concepts for THIS indicator) -- per rules 9-10.\n' +
-  '"socInvestigationActions": string[] -- 3-6 specific SOC investigation actions (host/user/process/network checks) -- per rules 9-10. Do not recommend containment here; that is a separate field below.\n' +
+  '"threatIntelActions": string[] -- 3-6 items, per rule 9. Cover: validating the IOC across the sourceIntelligence sources given; related infrastructure/hashes/domains/IPs/filenames/certificates; whether this is part of an existing campaign; attribution if hasKnownAttribution supports it; affected industries if known; whether the threat is active or historical (firstSeen/lastSeen); updating this platform\'s own watchlist/intelligence records.\n' +
+  '"detectionEngineerActions": string[] -- 3-6 items, per rules 9-10 and mandatory per rule 13. Cover: the concrete detection/hunting query for this exact indicator (reference the provided detectionQuery when present); which EDR/SIEM/telemetry sources to search; what the detection should surface (host, first/last seen, filename/process/user/command-line/network activity, quarantine status where applicable); and whether this indicator should be added to an EDR blocklist, SIEM rule, TI watchlist, or SOAR workflow (only when blockRecommendation actually supports it -- do not default to "add to blocklist").\n' +
+  '"socInvestigationActions": string[] -- 3-6 items, per rules 9-10. Cover: what to investigate (host/user/process/network), what telemetry/log sources to check, parent/child process relationships, whether to search this exact IOC across the environment, what related domains/IPs/processes/files/users to also investigate, what evidence to collect, and the specific condition that would trigger escalation. Do not recommend containment here; that is containmentRationale below.\n' +
+  '"securityEngineeringActions": string[] -- 3-6 items, per rules 9-10. Preventive/control-layer actions tied to THIS indicator/TTP specifically (EDR prevention/blocking, email security, web proxy, DNS controls, firewall rules, application control, endpoint hardening) -- never generic security-hygiene advice disconnected from this indicator.\n' +
   '"containmentRationale": string -- explains the given blockRecommendation per rule 11. If blockRecommendation is "Not Applicable" or "Do Not Block", say so plainly rather than inventing a containment need.\n' +
   "No other text, no markdown formatting, no code fences.";
 
@@ -269,6 +356,13 @@ export async function generateInvestigationAiReport(investigation) {
   }
   function groundAction(text) {
     return checkInternalTelemetryClaim(ground(text)).text;
+  }
+  // Grounds every item in an action list, then drops any that are still just
+  // a generic, non-executable conclusion (see GENERIC_ACTION_PATTERN) even
+  // after grounding -- per rule 9/12, this platform never surfaces a bare
+  // "Monitor"/"Suspicious"/"Requires Investigation" line as a recommendation.
+  function groundActionList(items, max) {
+    return safeArray(items, max).map(groundAction).filter(isActionableItem);
   }
 
   const assessedConclusions = (Array.isArray(parsed.assessedConclusions) ? parsed.assessedConclusions : []).slice(0, 6).map((c) => ({
@@ -318,9 +412,11 @@ export async function generateInvestigationAiReport(investigation) {
     confidenceTable,
     intelligenceGaps: [...safeArray(parsed.intelligenceGaps, 6), ...sourceGaps].slice(0, 10),
     recommendedNextPivot: ground(safeString(parsed.recommendedNextPivot)),
-    threatIntelActions: safeArray(parsed.threatIntelActions, 6).map(groundAction),
-    detectionEngineerActions: safeArray(parsed.detectionEngineerActions, 6).map(groundAction),
-    socInvestigationActions: safeArray(parsed.socInvestigationActions, 6).map(groundAction),
+    threatIntelActions: groundActionList(parsed.threatIntelActions, 6),
+    detectionEngineerActions: groundActionList(parsed.detectionEngineerActions, 6),
+    socInvestigationActions: groundActionList(parsed.socInvestigationActions, 6),
+    securityEngineeringActions: groundActionList(parsed.securityEngineeringActions, 6),
+    detectionQuery: context.detectionQuery,
     blockRecommendation: context.blockRecommendation,
     containmentRationale: ground(safeString(parsed.containmentRationale)),
     model: result.model,

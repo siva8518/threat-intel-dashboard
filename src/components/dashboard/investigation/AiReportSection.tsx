@@ -253,42 +253,49 @@ export function AiSummaryPanel({ report, isPending, error, onGenerate }: AiRepor
   );
 }
 
+function ActionColumn({ title, actions }: { title: string; actions: string[] }) {
+  return (
+    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+      <p className="mb-1.5 text-xs font-semibold text-foreground">{title}</p>
+      {actions.length > 0 ? (
+        <ul className="list-disc space-y-1.5 pl-4 text-xs text-muted">
+          {actions.map((a, i) => (
+            <li key={i}>{a}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted">No specific action for this role on this indicator.</p>
+      )}
+    </div>
+  );
+}
+
 export function AiInvestigationActionsPanel({ report }: { report: AiInvestigationReport | undefined }) {
   if (!report) {
     return (
       <Section title="Investigation Actions">
-        <p className="text-xs text-muted">Generate an AI Report above to see specific, indicator-named actions for Threat Intelligence, Detection Engineering, and SOC investigation.</p>
+        <p className="text-xs text-muted">Generate an AI Report above to see specific, indicator-named actions for SOC, Detection Engineering, Threat Intelligence, and Security Engineering.</p>
       </Section>
     );
   }
   return (
     <Section title="Investigation Actions">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
-          <p className="mb-1.5 text-xs font-semibold text-foreground">Threat Intelligence Analyst</p>
-          <ul className="list-disc space-y-1 pl-4 text-xs text-muted">
-            {report.threatIntelActions.map((a, i) => (
-              <li key={i}>{a}</li>
-            ))}
-          </ul>
-        </div>
-        <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
-          <p className="mb-1.5 text-xs font-semibold text-foreground">Detection Engineer</p>
-          <ul className="list-disc space-y-1 pl-4 text-xs text-muted">
-            {report.detectionEngineerActions.map((a, i) => (
-              <li key={i}>{a}</li>
-            ))}
-          </ul>
-        </div>
-        <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
-          <p className="mb-1.5 text-xs font-semibold text-foreground">SOC Analyst</p>
-          <ul className="list-disc space-y-1 pl-4 text-xs text-muted">
-            {report.socInvestigationActions.map((a, i) => (
-              <li key={i}>{a}</li>
-            ))}
-          </ul>
-        </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <ActionColumn title="SOC Analyst" actions={report.socInvestigationActions} />
+        <ActionColumn title="Detection Engineering" actions={report.detectionEngineerActions} />
+        <ActionColumn title="Threat Intelligence Analyst" actions={report.threatIntelActions} />
+        <ActionColumn title="Security Engineering" actions={report.securityEngineeringActions} />
       </div>
+      {report.detectionQuery && (
+        <div className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+          <p className="mb-1.5 text-xs font-semibold text-foreground">
+            Detection Query -- {report.detectionQuery.platform} ({report.detectionQuery.language})
+          </p>
+          <pre className="overflow-x-auto rounded-md bg-black/40 p-2.5 text-[11px] leading-relaxed text-foreground/90">
+            <code>{report.detectionQuery.query}</code>
+          </pre>
+        </div>
+      )}
     </Section>
   );
 }

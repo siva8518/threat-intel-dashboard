@@ -601,31 +601,6 @@ export interface EnvironmentalValidationPlan {
   analystVerdict: AnalystVerdict;
 }
 
-/** One stage of the "how the platform reasoned about this" chain -- Threat Intelligence -> Conflicting Signals -> Environmental Evidence -> Analyst Decision, never collapsed into a single flattened "malicious + benign = monitor" line. */
-export interface ConflictReasoningStage {
-  stage: "Threat Intelligence" | "Conflicting Signals" | "Environmental Evidence" | "Analyst Decision";
-  summary: string;
-}
-
-/**
- * SOC-analyst-facing guidance for the specific case where reputation
- * sources disagree (e.g. VirusTotal reports malicious while a MISP warning
- * list match suggests common/reference infrastructure) -- only populated
- * when verdict.state === "Conflicting Intelligence". Every field is derived
- * from the same real evidence items every other section on this page reads;
- * see server/investigation/actionability.js#conflictingIntelligenceGuidance.
- */
-export interface ConflictingIntelligenceGuidance {
-  assessment: string;
-  threatIntelligenceSummary: string;
-  conflictingSignalNote: string;
-  reasoningChain: ConflictReasoningStage[];
-  recommendedActions: string[];
-  analystDecision: EnvironmentalValidationDecisionRow[];
-  /** Clarifies that a benign/reference-list match (e.g. MISP's "commonly used domains") is context, not a clean verdict -- the literal fix for the reported "don't average toward monitor" gap. */
-  keyIntelligenceNote: string;
-}
-
 // --- Sandbox Analysis (Hybrid Analysis / Falcon Sandbox, provider-agnostic) ---
 // See server/sandbox/index.js (provider registry), server/sandboxIntelligence.js
 // (canonical status/dedup store), server/sandboxApplicability.js (IOC-type-aware
@@ -780,8 +755,6 @@ export interface ActionabilityGuidance {
   notApplicable: string[];
   /** null for entity types with no meaningful internal-tool validation (e.g. a bare artifact type with no external reputation source at all). */
   environmentalValidation: EnvironmentalValidationPlan | null;
-  /** null unless this search's verdict.state is "Conflicting Intelligence". */
-  conflictingIntelligence: ConflictingIntelligenceGuidance | null;
   /** null for every entity type except "cve" -- see CveInvestigationStep. */
   cveInvestigationSteps: CveInvestigationStep[] | null;
   /** null unless a COMPLETED sandbox report exists for this search's indicator -- see SandboxInvestigationStep. */
@@ -1211,6 +1184,10 @@ export interface AiInvestigationReport {
   threatIntelActions: string[];
   detectionEngineerActions: string[];
   socInvestigationActions: string[];
+  /** Preventive/control-layer actions (EDR prevention, email/web/DNS/firewall controls, app control, endpoint hardening) -- distinct from detectionEngineerActions (detect) and socInvestigationActions (investigate). */
+  securityEngineeringActions: string[];
+  /** Deterministic, code-generated hunting query using this search's own real indicator value -- never model-authored, so the field/table names and the IOC value itself are always exactly right. Null for indicator types with no applicable query template. */
+  detectionQuery: { platform: string; language: string; query: string } | null;
   /** This platform's own deterministic block/containment decision (verdictEngine.js#computeBlockRecommendation) -- the model only explains it, never invents a different one. */
   blockRecommendation: BlockRecommendation;
   containmentRationale: string;

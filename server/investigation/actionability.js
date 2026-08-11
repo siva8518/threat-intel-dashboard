@@ -48,14 +48,7 @@ function iocActions(type, indicator, verdict, moduleData) {
       ),
     );
   } else if (verdict.state === "Conflicting Intelligence") {
-    actions.push(
-      action(
-        `Investigate "${indicator}" before deciding to block or dismiss -- reputation sources disagree, so neither an outright block nor a dismissal is justified on reputation alone. ${verdict.blockRecommendationReasoning}`,
-        verdict.reasoning,
-        "socAnalyst",
-        "Normal",
-      ),
-    );
+    actions.push(...conflictSocActions(type, indicator, verdict));
   } else if (verdict.blockRecommendation === "Monitor — Do Not Block") {
     actions.push(action(`Add "${indicator}" to a monitoring watchlist rather than an outright block. ${verdict.blockRecommendationReasoning}`, verdict.reasoning, "socAnalyst", "Normal"));
   } else if (verdict.state === "Clean-Benign") {
@@ -141,14 +134,7 @@ function hashActions(indicator, verdict, moduleData, graph) {
       );
     }
   } else if (verdict.state === "Conflicting Intelligence") {
-    actions.push(
-      action(
-        `Investigate hash "${indicator}" before deciding to block or dismiss -- reputation sources disagree, so neither an outright block nor a dismissal is justified on reputation alone. ${verdict.blockRecommendationReasoning}`,
-        verdict.reasoning,
-        "socAnalyst",
-        "Normal",
-      ),
-    );
+    actions.push(...conflictSocActions("hash", indicator, verdict));
     actions.push(
       action(
         `This platform cannot determine whether "${indicator}" has been observed in your environment -- search it in your own EDR/endpoint telemetry before deciding whether to escalate.`,
@@ -283,6 +269,7 @@ const TELEMETRY_SOURCES = {
   sha256: HASH_TELEMETRY,
   sha1: HASH_TELEMETRY,
   md5: HASH_TELEMETRY,
+  hash: HASH_TELEMETRY,
   email: ["Email gateway", "Identity", "Mailbox audit", "Authentication", "URL clicks", "Attachment telemetry"],
   fileName: ["EDR", "File creation", "Process execution", "Sandbox"],
   processName: ["EDR", "Process execution", "Sandbox"],
@@ -343,6 +330,7 @@ const TYPE_LABEL = {
   sha256: "file hash",
   sha1: "file hash",
   md5: "file hash",
+  hash: "file hash",
   email: "email address",
   fileName: "file name",
   processName: "process name",
@@ -703,41 +691,21 @@ function environmentalValidationPlan(type, indicator, moduleData, verdict, first
   };
 }
 
-// --- Task 2: Conflicting Intelligence guidance -- the specific SOC-analyst
-// reasoning chain for the reported "VirusTotal = malicious, MISP = benign,
-// therefore = monitor" flattening bug. verdictEngine.js already correctly
-// detects this exact pattern (evidence.js#detectConflict: a `negative`
-// polarity item from one source alongside a direct/corroborating malicious
-// item from another) and routes it to state = "Conflicting Intelligence",
-// which already caps confidence at "Low" (verdictEngine.js#deriveConfidenceLevel)
-// -- so the underlying math was never actually averaging toward a false
-// "clean" reading. What was missing is the SOC-facing NARRATIVE: a single
-// generic "add to watchlist" line collapsed a real disagreement between
-// sources into an unremarkable action, instead of walking the analyst
-// through Threat Intelligence -> Conflicting Signals -> Environmental
-// Evidence -> Analyst Decision the way a real SOC analyst reasons about it.
-// Every field below is built from verdict.evidence.items, the same real,
-// already-computed evidence every other section on this page reads --
-// never a second, independently-invented reading of the same data.
+// --- Conflicting-intelligence SOC actions -- the specific fix for the
+// reported "VirusTotal = malicious, MISP = benign, therefore = monitor"
+// flattening bug. verdictEngine.js already correctly detects this exact
+// pattern (evidence.js#detectConflict) and routes it to state =
+// "Conflicting Intelligence", which already caps confidence at "Low"
+// (verdictEngine.js#deriveConfidenceLevel) -- the math was never actually
+// averaging toward a false "clean" reading. What matters is that the
+// disagreement gets folded DIRECTLY into the SOC Analyst's own action list
+// (naming the specific sources and their specific claims) rather than
+// surfaced as a separate generic "Assessment"/"Key Intelligence Note"
+// section -- per explicit user requirement, this platform never reconciles
+// conflicting verdicts into a standalone summary line; the evidence belongs
+// in the actionable recommendation itself.
 // ---------------------------------------------------------------------
 
-function evidenceBearingForConflict(evidence) {
-  return (evidence?.items ?? []).filter((i) => i.category !== "contextual" && i.category !== "conflicting");
-}
-
-const CONFLICT_ANALYST_DECISION = [
-  { finding: "No internal sightings", priority: "Monitor" },
-  { finding: "Single access with no suspicious follow-on activity", priority: "Investigate / Monitor" },
-  { finding: "Repeated access or multiple users/hosts", priority: "High Priority Investigation" },
-  { finding: "Download or execution observed", priority: "High / Incident Response" },
-  { finding: "C2, credential theft, persistence, or lateral movement", priority: "Critical / Incident Response" },
-];
-
-/**
- * Only ever populated when verdict.state === "Conflicting Intelligence" --
- * scoped to BLOCKABLE_TYPES (ip/domain/url/hash), the entity types with a
- * real external reputation source that can actually disagree with another.
- */
 // `negative`-category evidence spans several distinct source shapes -- a MISP
 // Warning Lists match (a genuine reference/allowlist dataset) reads very
 // differently from VirusTotal/GreyNoise/Hybrid Analysis/urlscan.io actively
@@ -756,52 +724,40 @@ function negativeSignalFraming(source, typeLabel) {
   return framers[source] ?? `${source} reports a conflicting clean/benign signal`;
 }
 
-function conflictingIntelligenceGuidance(type, indicator, verdict) {
-  if (verdict.state !== "Conflicting Intelligence") return null;
-
+/**
+ * Concrete socAnalyst actions for verdict.state === "Conflicting
+ * Intelligence" -- names the exact disagreeing sources/claims and gives the
+ * exact telemetry to search, instead of a generic "investigate before
+ * deciding" line. Only called for BLOCKABLE_TYPES (ip/domain/url/hash), the
+ * entity types with a real external reputation source that can actually
+ * disagree with another.
+ */
+function conflictSocActions(type, indicator, verdict) {
   const typeLabel = TYPE_LABEL[type] ?? "indicator";
-  const bearing = evidenceBearingForConflict(verdict.evidence);
+  const bearing = (verdict.evidence?.items ?? []).filter((i) => i.category !== "contextual" && i.category !== "conflicting");
   const maliciousItems = bearing.filter((i) => (i.category === "direct" || i.category === "corroborating") && (i.polarity === "malicious" || i.polarity === "suspicious"));
   const negativeItems = bearing.filter((i) => i.category === "negative");
   const strongestMalicious = maliciousItems.reduce((max, i) => (i.weight > (max?.weight ?? -1) ? i : max), null);
-
-  const threatIntelligenceSummary = strongestMalicious
-    ? `${strongestMalicious.source} reports ${strongestMalicious.claim}, indicating a meaningful malicious reputation signal.`
-    : "A malicious/suspicious reputation signal exists from at least one source.";
-
-  const conflictingSignalNote =
-    negativeItems.length > 0
-      ? negativeItems.map((n) => `${n.source} reports ${n.claim}. This should be treated as context, not evidence that this specific ${typeLabel}'s activity is benign.`).join(" ")
-      : (verdict.evidence?.conflictDescription ?? "A conflicting clean/benign signal exists from another source.");
-
-  const reasoningChain = [
-    { stage: "Threat Intelligence", summary: threatIntelligenceSummary },
-    { stage: "Conflicting Signals", summary: verdict.evidence?.conflictDescription ?? conflictingSignalNote },
-    {
-      stage: "Environmental Evidence",
-      summary: "This platform has no internal telemetry integration -- whether your environment actually interacted with this indicator can only be established in your own tools (see Recommended SOC Actions below).",
-    },
-    { stage: "Analyst Decision", summary: "Investigate before deciding to block or dismiss -- reputation alone should not drive the final call in either direction." },
-  ];
-
   const sources = TELEMETRY_SOURCES[type] ?? [];
-  const sourceList = sources.length > 0 ? sources.join(", ") : "your internal telemetry";
-  const recommendedActions = [
-    `Search the ${typeLabel} across ${sourceList} for the last 30 days.`,
-    "Identify affected users and hosts, including first seen, last seen, access frequency, and originating process where available.",
-    `Determine how the ${typeLabel} was accessed -- phishing email, browser navigation, redirect, advertisement, application activity, or another source.`,
-    "Check for follow-on activity, including downloads, process execution, credential-related activity, or connections to additional suspicious domains/IPs.",
-    "If no internal activity is observed: retain the indicator in monitoring/watchlist status and continue monitoring for new sightings or reputation changes.",
-    "If suspicious activity or multiple affected hosts are identified: escalate for endpoint investigation and consider blocking across appropriate security controls.",
-    "If execution, credential theft, persistence, or C2 activity is confirmed: escalate as a security incident and begin containment.",
+  const sourceList = sources.length > 0 ? sources.slice(0, 4).join(", ") : "your internal telemetry";
+
+  const malignSummary = strongestMalicious ? `${strongestMalicious.source} reports ${strongestMalicious.claim}` : "at least one source reports a malicious/suspicious signal";
+  const cleanSummary = negativeItems.length > 0 ? Array.from(new Set(negativeItems.map((n) => negativeSignalFraming(n.source, typeLabel)))).join("; ") : "another source reports a conflicting clean/benign signal";
+
+  return [
+    action(
+      `Do not block or dismiss "${indicator}" on reputation alone -- ${malignSummary}, while ${cleanSummary}. Search ${sourceList} for this ${typeLabel} over the last 30 days to determine whether it was actually accessed/executed before making a containment decision.`,
+      `Reputation sources disagree (${verdict.evidence?.conflictDescription ?? "a direct malicious/suspicious signal conflicts with a negative/benign one"}), so this platform's confidence is capped at Low -- an internal telemetry finding is what should actually decide this, not an average of the two external readings.`,
+      "socAnalyst",
+      "Normal",
+    ),
+    action(
+      `If "${indicator}" is found in your telemetry, identify affected hosts/users, first/last seen, access frequency, delivery vector, and any follow-on activity (download, execution, credential access, or connections to additional suspicious domains/IPs).`,
+      "Escalate to High/Critical priority only if execution, credential theft, persistence, or C2 activity is actually confirmed -- not merely because the reputation sources disagree.",
+      "socAnalyst",
+      "Normal",
+    ),
   ];
-
-  const keyIntelligenceNote =
-    negativeItems.length > 0
-      ? `${Array.from(new Set(negativeItems.map((n) => negativeSignalFraming(n.source, typeLabel)))).join("; ")}. This should be treated as context, not a benign verdict. The malicious reputation signal and actual environmental behavior should drive the final SOC decision -- not an automatic average toward "monitor."`
-      : `A conflicting signal exists from another source. It should be treated as context, not a benign verdict.`;
-
-  return { assessment: "Suspicious — Requires Investigation", threatIntelligenceSummary, conflictingSignalNote, reasoningChain, recommendedActions, analystDecision: CONFLICT_ANALYST_DECISION, keyIntelligenceNote };
 }
 
 // Deterministic "What To Investigate Next" for a CVE search -- the direct
@@ -1096,7 +1052,6 @@ export function buildActionabilityGuidance({ type, indicator, verdict, moduleDat
     huntingQueries,
     notApplicable: result.notApplicable,
     environmentalValidation: environmentalValidationPlan(type, indicator, moduleData, verdict, firstSeen, lastSeen, canonicalRecord),
-    conflictingIntelligence: BLOCKABLE_TYPES.has(type) ? conflictingIntelligenceGuidance(type, indicator, verdict) : null,
     cveInvestigationSteps: type === "cve" ? cveInvestigationSteps(indicator, cveExploitationState, moduleData, graph) : null,
     sandboxInvestigationSteps: sandboxInvestigationSteps(indicator, sandboxRecord),
   };
