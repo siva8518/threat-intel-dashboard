@@ -17,12 +17,13 @@
 // omitting all of them behaves exactly as this router did before any of
 // this existed.
 //
-// Provider order defaults to Gemini -> Cerebras -> Groq -> OpenRouter ->
-// Mistral -> Hugging Face -> Cohere -> Together AI -> Cloudflare Workers AI
-// -> GitHub Models, overridable via the AI_PROVIDER_ORDER env var (comma-
-// separated provider keys, see DEFAULT_ORDER below for the exact keys).
+// Provider order defaults to Anthropic -> Gemini -> Cerebras -> Groq ->
+// OpenRouter -> Mistral -> Hugging Face -> Cohere -> Together AI ->
+// Cloudflare Workers AI -> GitHub Models, overridable via the
+// AI_PROVIDER_ORDER env var (comma-separated provider keys, see
+// DEFAULT_ORDER below for the exact keys).
 //
-// Adding an 11th provider is a two-file change: write one more
+// Adding a 12th provider is a two-file change: write one more
 // server/ai/providers/*.js implementing { label, model, isConfigured(),
 // summarize(prompt, opts), summarizeJson(prompt, opts) }, add its config to
 // server/ai/config.js, then add one entry to PROVIDER_DEFS below. Nothing
@@ -35,6 +36,7 @@ import { AI_TASK_DEFAULTS } from "./aiTasks.js";
 import * as providerHealth from "./providerHealth.js";
 import { recordAiRequest } from "./aiRequestLog.js";
 import { getCached, setCached } from "./aiResponseCache.js";
+import { anthropicProvider } from "./providers/anthropicProvider.js";
 import { geminiProvider } from "./providers/geminiProvider.js";
 import { cerebrasProvider } from "./providers/cerebrasProvider.js";
 import { mistralProvider } from "./providers/mistralProvider.js";
@@ -46,11 +48,15 @@ import { togetherProvider } from "./providers/togetherProvider.js";
 import { cloudflareProvider } from "./providers/cloudflareProvider.js";
 import { githubModelsProvider } from "./providers/githubModelsProvider.js";
 
-// Default priority order -- see the review this was built from: Gemini
-// primary (generous always-free tier, largest context window), then
-// fastest/most-generous free tiers first, general-purpose paid-adjacent
-// ones (Together, GitHub Models) last.
+// Default priority order -- Anthropic first: the one PAID key in this
+// list, so a working key there is tried before any of the free tiers below
+// it, all of which share real, low, easily-exhausted rate limits (see the
+// note on AI_ROUTER_CONFIG.anthropic in config.js). Gemini next (generous
+// always-free tier, largest free-tier context window), then fastest/most-
+// generous free tiers, general-purpose paid-adjacent ones (Together, GitHub
+// Models) last.
 const PROVIDER_DEFS = [
+  { key: "anthropic", provider: anthropicProvider, contextWindow: AI_ROUTER_CONFIG.anthropic.contextWindow },
   { key: "gemini", provider: geminiProvider, contextWindow: AI_ROUTER_CONFIG.gemini.contextWindow },
   { key: "cerebras", provider: cerebrasProvider, contextWindow: AI_ROUTER_CONFIG.cerebras.contextWindow },
   { key: "groq", provider: groqProvider, contextWindow: AI_ROUTER_CONFIG.groq.contextWindow },

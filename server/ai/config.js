@@ -25,6 +25,17 @@
 // routing hint, not a guarantee, and bump via env override if a provider
 // changes its served context length.
 export const AI_ROUTER_CONFIG = {
+  // The one PAID provider in this list -- every other entry below is a
+  // free/trial tier with real, low, shared-across-this-app rate limits that
+  // can (and did) all cool down at once under normal usage. Anthropic is
+  // listed first in aiRouter.js's PROVIDER_DEFS specifically so a working
+  // key here is tried BEFORE burning through the free tiers, not after.
+  anthropic: {
+    apiKey: process.env.ANTHROPIC_API_KEY,
+    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5",
+    fastModel: process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5-20251001",
+    contextWindow: Number(process.env.ANTHROPIC_CONTEXT_WINDOW) || 200_000,
+  },
   gemini: {
     apiKey: process.env.GEMINI_API_KEY,
     // Confirmed live that a pinned "gemini-2.5-flash" 404s for newer API
