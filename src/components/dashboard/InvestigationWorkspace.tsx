@@ -12,11 +12,10 @@ import { HashIntelligenceSection } from "./investigation/HashSections";
 import { CveIntelligenceSection } from "./investigation/CveSections";
 import { EntityIntelligenceSection } from "./investigation/EntitySections";
 import { ArtifactIntelligenceSection } from "./investigation/ArtifactSections";
-import { AiSummaryPanel, DetectionOpportunitiesPanel, OperationalGuidancePanel } from "./investigation/AiReportSection";
+import { AiSummaryPanel, AiInvestigationActionsPanel } from "./investigation/AiReportSection";
 import { RecommendedActionsPanel } from "./investigation/RecommendedActionsPanel";
 import { RealDetectionsHuntingPanel } from "./investigation/RealDetectionsHuntingPanel";
 import { ShouldICarePanel } from "./investigation/ShouldICarePanel";
-import { SearchCoveragePanel } from "./investigation/SearchCoveragePanel";
 import { EvidencePanel } from "./investigation/EvidencePanel";
 import { WhatToInvestigateNextPanel } from "./investigation/WhatToInvestigateNextPanel";
 import { RecommendationsPanel } from "./investigation/RecommendationsPanel";
@@ -319,12 +318,15 @@ function QuickActions({ result }: { result: InvestigationResult }) {
  * Page order: (1) Verdict (Conflicting Intelligence badge and conflict
  * pointer live here). (2) Intelligence Evidence (EvidencePanel.tsx's
  * per-source card grid, see server/investigation/evidence.js#buildEvidenceCards)
- * clubbed together with Search Coverage -- what every source found, and
- * what this platform even checked, side by side. (3) Should I Care?
- * (server/investigation/shouldICare.js's Overall Assessment / Combined
- * Intelligence Assessment / Likely Malicious Intent / Environmental
- * Relevance -- NOT Next Action, which now lives only in (6) below).
- * (4) Investigation Graph. (5) Investigation Summary -- the per-type
+ * -- what every source found. (3) Should I Care? (server/investigation/
+ * shouldICare.js's Overall Assessment / Environmental Relevance -- NOT Next
+ * Action, which now lives only in (6) below; the Combined Intelligence
+ * Assessment and Likely Malicious Intent prose blocks, and the standalone
+ * Search Coverage panel, were removed from this page per user request).
+ * (4) Investigation Graph, immediately followed by Sandbox Analysis (the
+ * behavioral-evidence read for this indicator, if applicable -- placed here
+ * rather than further down since it's a graph-adjacent evidence source, not
+ * a bottom-of-page extra). (5) Investigation Summary -- the per-type
  * Indicator-Specific Intelligence detail under a plain heading; no AI
  * narrative lives here (the auto-generated graph-insights read was removed
  * as redundant with Should I Care above and Recommendations/the manual AI
@@ -439,12 +441,10 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
             {/* 1. Conflicting Intelligence / verdict. */}
             <VerdictBanner overview={result.overview} />
 
-            {/* 2. Intelligence Evidence -- Source by Source, clubbed with Search Coverage: what every source found, and what this platform even checked, together. */}
+            {/* 2. Intelligence Evidence -- Source by Source: what every source found. */}
             <EvidencePanel evidence={result.overview.verdict.evidence} />
 
-            <SearchCoveragePanel coverage={result.coverage} />
-
-            {/* 3. Should I Care? (Overall Assessment / Combined Intelligence Assessment / Likely Malicious Intent / Environmental Relevance). */}
+            {/* 3. Should I Care? (Overall Assessment / Environmental Relevance). */}
             <ShouldICarePanel assessment={shouldICare} pending={shouldICarePending} error={shouldICareError} overview={result.overview} />
 
             {/*
@@ -469,6 +469,8 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
                 overview={result.overview}
               />
             )}
+
+            <SandboxAnalysisPanel sandbox={result?.sandbox ?? null} />
 
             {/* 5. Investigation Summary -- the per-type Indicator-Specific Intelligence detail, under one plain heading (no AI narrative here -- see Should I Care above and Recommendations/AI Investigation Summary below for the AI-generated reads). */}
             <Section title="Investigation Summary">
@@ -520,8 +522,6 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
 
             {recommendedActions && <RecommendedActionsPanel guidance={recommendedActions} />}
 
-            <SandboxAnalysisPanel sandbox={result?.sandbox ?? null} />
-
             <RealDetectionsHuntingPanel graphNode={graphNode} />
 
             <AiSummaryPanel
@@ -530,8 +530,7 @@ export function InvestigationWorkspace({ onOpenActor, onOpenCampaign, goToCampai
               error={aiReportM.isError ? (aiReportM.error as Error).message : null}
               onGenerate={() => aiReportM.mutate(submittedQuery)}
             />
-            <DetectionOpportunitiesPanel report={aiReportM.data} />
-            <OperationalGuidancePanel report={aiReportM.data} />
+            <AiInvestigationActionsPanel report={aiReportM.data} />
 
             {Array.isArray(result.moduleData.lookupResults) && (
               <NotConfiguredNotice notConfigured={result.notConfigured} rateLimited={result.rateLimited} skipped={result.skipped} />

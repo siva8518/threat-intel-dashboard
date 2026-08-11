@@ -1143,36 +1143,77 @@ export interface ShouldICareAssessment {
   generatedAt: string;
 }
 
-/** On-demand only -- see AiInvestigationOperationalGuidance/AiInvestigationDetectionOpportunities below, and server/investigationAi.js. Never generated automatically on search. */
-export interface AiInvestigationOperationalGuidance {
-  socAnalyst: string;
-  threatHunter: string;
-  threatIntel: string;
-  detectionEngineer: string;
-  incidentResponse: string;
-  vulnerabilityManagement: string;
+/** On-demand only -- "Generate AI Report" button, see server/investigationAi.js. Never generated automatically on search.
+ * Redesigned to behave like a senior Threat Intelligence Analyst: every field is either DETERMINISTIC (pulled straight
+ * from this platform's own verdict/evidence engines, never touched by the model -- verdictLabel/severity/confidence,
+ * confirmedFacts, sourceIntelligence, mitreAttackMapping, relatedIntelligence, blockRecommendation) or MODEL-AUTHORED
+ * SYNTHESIS that has been run through server/investigation/groundClaims.js's fail-closed guards (particularly
+ * checkAttackChainStageClaim, which blocks a specific attack-chain-stage claim -- "initial access", "ransomware
+ * deployment", etc. -- unless real behavioral evidence exists) before reaching this shape. */
+export interface AiInvestigationSourceIntelligenceField {
+  key: string;
+  value: unknown;
 }
 
-export interface AiInvestigationDetectionOpportunities {
-  sentinelKql: string[];
-  sigma: string[];
-  splunkSpl: string[];
-  elastic: string[];
-  yara: string[];
-  detectionGaps: string[];
-  huntingHypotheses: string[];
+export interface AiInvestigationSourceIntelligenceItem {
+  source: string;
+  status: "data_returned" | "no_data" | "not_configured" | "rate_limited" | "skipped";
+  verdict: string | null;
+  fields: AiInvestigationSourceIntelligenceField[];
+}
+
+export interface AiInvestigationConfirmedFact {
+  source: string;
+  fact: string;
+}
+
+export interface AiInvestigationAssessedConclusion {
+  claim: string;
+  confidence: "High" | "Medium" | "Low" | "Unknown";
+  reasoning: string;
+}
+
+export interface AiInvestigationConfidenceRow {
+  claim: string;
+  confidence: "High" | "Medium" | "Low" | "Unknown";
+  reasoning: string;
 }
 
 export interface AiInvestigationReport {
-  whatThisIs: string;
-  whyItMatters: string;
-  likelyAttackerObjective: string;
-  businessImpact: string;
-  confidenceReasoning: string;
-  recommendedInvestigationPath: string[];
-  immediateContainmentRecommendations: string[];
-  operationalGuidance: AiInvestigationOperationalGuidance;
-  detectionOpportunities: AiInvestigationDetectionOpportunities;
+  indicator: string;
+  verdictLabel: string;
+  verdictState: string;
+  severity: Severity;
+  confidence: string;
+  /** Why this indicator earned its (already-computed) verdict -- explanation, not restatement. */
+  indicatorVerdictExplanation: string;
+  executiveAssessment: string;
+  /** Observed Intelligence -- real, code-generated evidence claims (never model-authored, so never an invented fact). */
+  confirmedFacts: AiInvestigationConfirmedFact[];
+  /** Source Intelligence -- every configured source's contribution, built entirely from raw lookup results; a source that returned nothing is reported as exactly that. */
+  sourceIntelligence: AiInvestigationSourceIntelligenceItem[];
+  /** Threat Assessment: Assessed -- reasonable conclusions derived from the evidence, each with its own evidence-derived confidence. */
+  assessedConclusions: AiInvestigationAssessedConclusion[];
+  /** Only names a specific attack-chain stage when real behavioral evidence exists; otherwise an explicitly unresolved "potential role". */
+  potentialAttackRole: string;
+  correlationAssessment: string;
+  /** This platform's own real, evidence-backed MITRE ATT&CK mapping -- deterministic, never separately re-derived by the model. */
+  mitreAttackMapping: Array<{ id: string; name: string; tactic: string | null }>;
+  relatedIntelligence: {
+    activeCampaigns: string[];
+    associatedThreatActors: string[];
+    matchedMalwareFamilies: string[];
+  };
+  confidenceTable: AiInvestigationConfidenceRow[];
+  /** Threat Assessment: Unknown -- explicitly not filled with assumptions; includes real not-configured/skipped source gaps merged with the model's own assessed gaps. */
+  intelligenceGaps: string[];
+  recommendedNextPivot: string;
+  threatIntelActions: string[];
+  detectionEngineerActions: string[];
+  socInvestigationActions: string[];
+  /** This platform's own deterministic block/containment decision (verdictEngine.js#computeBlockRecommendation) -- the model only explains it, never invents a different one. */
+  blockRecommendation: BlockRecommendation;
+  containmentRationale: string;
   model: string;
   provider: string;
   generatedAt: string;

@@ -264,6 +264,32 @@ export function checkVictimTargetingClaim(text, hasVictimTargetingData) {
   };
 }
 
+const ATTACK_CHAIN_STAGE_LANGUAGE =
+  /\b(initial access|lateral movement|persistence mechanism|establishes? persistence|credential (theft|access|harvesting)|data exfiltration|exfiltrat(e|ed|ing|ion)|data encryption|encrypts? (the |victim )?(files|data|system)|ransomware deployment|deploys? ransomware|command[- ]and[- ]control channel|c2 channel|used for initial access|used to (exfiltrate|encrypt|deploy))\b/i;
+
+/**
+ * Fail-closed guard for the specific over-claiming pattern reported live:
+ * the model asserting a specific attack-chain STAGE (initial access,
+ * persistence, lateral movement, credential theft, exfiltration, ransomware
+ * deployment, C2) from the mere existence of a malicious indicator, with no
+ * actual behavioral evidence for that stage. `hasBehavioralEvidence` is a
+ * real, code-computed boolean (server/investigationAi.js -- true only when a
+ * sandbox execution report or this platform's own real, evidence-backed
+ * MITRE ATT&CK mapping is actually present for this indicator) -- a
+ * multi-engine malicious verdict alone is never sufficient. Whole-field
+ * replacement (not a caveat) since "attacker used this for initial access"
+ * is exactly the kind of confident-sounding but unsupported claim this
+ * redesign exists to stop.
+ */
+export function checkAttackChainStageClaim(text, hasBehavioralEvidence) {
+  if (!text || typeof text !== "string") return { text, flagged: false };
+  if (hasBehavioralEvidence || !ATTACK_CHAIN_STAGE_LANGUAGE.test(text)) return { text, flagged: false };
+  return {
+    text: "Potential role in the attack chain: the available intelligence does not establish this indicator's exact position in the attack chain (no sandbox execution report or behavioral evidence was found) -- it may represent a payload, a later-stage component, or unrelated activity.",
+    flagged: true,
+  };
+}
+
 const IOC_ATTRIBUTION_LANGUAGE = /\b(associated with|linked to|attributed to|used by|belongs to|part of the infrastructure (for|of)|tied to|connected to)\b/i;
 
 /**

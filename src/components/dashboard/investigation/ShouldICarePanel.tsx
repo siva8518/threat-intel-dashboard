@@ -1,19 +1,18 @@
 // Renders server/investigation/shouldICare.js's synthesis layer -- the
 // section that sits ABOVE EvidencePanel.tsx's per-source card grid and never
-// restates it. Three explicit blocks: a deterministic OVERALL ASSESSMENT
+// restates it. Two explicit blocks: a deterministic OVERALL ASSESSMENT
 // (Risk/Confidence/Analyst Decision/Reason -- straight from the verdict
-// engine, never model-authored), COMBINED INTELLIGENCE ASSESSMENT (what the
-// evidence indicates once compared -- conflicts, independence, shared
-// infrastructure), and LIKELY MALICIOUS INTENT (only ever populated when
-// real evidence supports a specific intent -- fail-closed enforced
-// server-side), plus ENVIRONMENTAL RELEVANCE. `assessment.nextAction` is
-// deliberately NOT rendered here -- it's folded into the standalone "What To
-// Investigate Next" section instead (see WhatToInvestigateNextPanel.tsx),
-// so a next-step recommendation lives in exactly one place on the page.
-// `analystDecision` is deterministic pass-through; the prose fields are the
-// model's narrative synthesis, grounded and validated server-side before
-// this component ever sees them.
-import { Sparkles, ShieldAlert, Layers, Target, Building2 } from "lucide-react";
+// engine, never model-authored) and ENVIRONMENTAL RELEVANCE. (The Combined
+// Intelligence Assessment and Likely Malicious Intent prose blocks were
+// removed from this view per user request -- the backend still computes
+// assessment.combinedAssessment/likelyMaliciousIntent, just unused here.)
+// `assessment.nextAction` is deliberately NOT rendered here -- it's folded
+// into the standalone "What To Investigate Next" section instead (see
+// WhatToInvestigateNextPanel.tsx), so a next-step recommendation lives in
+// exactly one place on the page. `analystDecision` is deterministic
+// pass-through; the prose fields are the model's narrative synthesis,
+// grounded and validated server-side before this component ever sees them.
+import { Sparkles, ShieldAlert, Building2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Section } from "../reportPrimitives";
@@ -104,20 +103,6 @@ export function ShouldICarePanel({ assessment, pending, error, overview }: Shoul
     <Section title="Should I Care?">
       <div className="space-y-4">
         <OverallAssessment overview={overview} />
-
-        <div>
-          <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
-            <Layers className="h-3.5 w-3.5" /> Combined Intelligence Assessment
-          </p>
-          <p className="text-sm text-foreground">{assessment.combinedAssessment}</p>
-        </div>
-
-        <div>
-          <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
-            <Target className="h-3.5 w-3.5" /> Likely Malicious Intent
-          </p>
-          <p className="text-sm text-foreground">{assessment.likelyMaliciousIntent}</p>
-        </div>
 
         <div>
           <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
