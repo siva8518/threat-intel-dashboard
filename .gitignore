@@ -38,11 +38,13 @@ server/.cache/*
 !server/.cache/attack-technique-mentions.json
 !server/.cache/campaign-intelligence.json
 !server/.cache/darkweb-intelligence.json
+!server/.cache/detection-backlog-tracker.json
 !server/.cache/ioc-extraction-metrics.json
 !server/.cache/ioc-intelligence.json
 !server/.cache/malware-intelligence.json
 !server/.cache/malware-trend-history.json
 !server/.cache/remediation-tracker.json
+!server/.cache/sandbox-intelligence.json
 !server/.cache/source-reliability-history.json
 !server/.cache/threat-actor-intelligence.json
 !server/.cache/threat-score-history.json
