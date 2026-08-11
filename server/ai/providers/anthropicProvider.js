@@ -27,9 +27,9 @@ const JSON_ONLY_INSTRUCTION = "\n\nRespond with ONLY the raw JSON object -- no m
 
 /**
  * @param {string} prompt
- * @param {{systemPrompt?: string, temperature?: number, jsonMode?: boolean, tier?: "fast"}} options
+ * @param {{systemPrompt?: string, jsonMode?: boolean, tier?: "fast"}} options
  */
-async function callAnthropic(prompt, { systemPrompt, temperature, jsonMode = false, tier } = {}) {
+async function callAnthropic(prompt, { systemPrompt, jsonMode = false, tier } = {}) {
   const { apiKey, model: defaultModel, fastModel } = AI_ROUTER_CONFIG.anthropic;
   const model = tier === "fast" ? fastModel : defaultModel;
   const system = jsonMode ? `${systemPrompt ?? ""}${JSON_ONLY_INSTRUCTION}` : systemPrompt;
@@ -40,12 +40,18 @@ async function callAnthropic(prompt, { systemPrompt, temperature, jsonMode = fal
       source: LABEL,
       method: "POST",
       headers: { "x-api-key": apiKey, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" },
+      // NOTE: `temperature` is deliberately never sent -- the configured
+      // model (see AI_ROUTER_CONFIG.anthropic.model) rejects it outright
+      // with a 400 ("temperature is deprecated for this model"), which was
+      // silently taking Anthropic out of the provider rotation on every
+      // single call from every caller that passed one (investigationAi.js,
+      // aiThreatSummary.js, industryBriefing.js, etc.) -- confirmed live via
+      // a raw curl against the Anthropic API.
       body: JSON.stringify({
         model,
         max_tokens: MAX_TOKENS,
         ...(system ? { system } : {}),
         messages: [{ role: "user", content: prompt }],
-        ...(temperature !== undefined ? { temperature } : {}),
       }),
       timeoutMs: REQUEST_TIMEOUT_MS,
     });
@@ -79,7 +85,7 @@ export const anthropicProvider = {
 
   /**
    * @param {string} userPrompt
-   * @param {{systemPrompt?: string, temperature?: number, tier?: "fast"}} [options]
+   * @param {{systemPrompt?: string, tier?: "fast"}} [options]
    * @returns {Promise<{summary: string, model: string, tokensUsed?: number}>}
    */
   async summarizeJson(userPrompt, options = {}) {
