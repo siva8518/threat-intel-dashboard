@@ -68,6 +68,13 @@ function defaultRecord(type, value) {
     // from "the network path to this provider is blocked" without reading
     // server logs. null until a failure is actually recorded.
     diagnostics: null,
+    // When this indicator's Hybrid Analysis check was last actually
+    // attempted (success or failure) -- lets the status route retry a
+    // "failed" hash after a cooldown instead of returning the same stale
+    // failure forever (the literal fix for a real gap: once a hash check
+    // failed once, it could never self-heal even after the underlying
+    // cause -- a bad API key, a rate limit -- was fixed).
+    lastAttemptAt: null,
   };
 }
 
@@ -112,7 +119,27 @@ function upsert(type, value, patch) {
 
 /** An existing report found via a check-only lookup (e.g. a hash overview hit) -- never counted as "we submitted", since nothing was submitted. */
 export function recordExistingReport(type, value, report, provider) {
-  return upsert(type, value, { status: "existing_available", provider, report, completedAt: report?.analyzedAt ?? new Date().toISOString(), error: null });
+  return upsert(type, value, { status: "existing_available", provider, report, completedAt: report?.analyzedAt ?? new Date().toISOString(), error: null, errorClassification: null, diagnostics: null, lastAttemptAt: new Date().toISOString() });
+}
+
+// A hash check is a cheap, read-only GET (unlike a submission, which
+// consumes real sandbox quota) -- retrying a previously-failed hash after
+// this cooldown lets the record self-heal once the underlying cause (a bad
+// API key, a rate limit, a transient network block) is fixed, without
+// hammering the upstream on every single page view. The circuit breaker
+// (server/sandbox/sandboxProviderHealth.js) still applies underneath this
+// -- if it's open, the retry attempt fails fast rather than hitting the
+// network anyway.
+const FAILED_HASH_RETRY_COOLDOWN_MS = 60_000;
+
+/** Whether a "failed" hash record is old enough to retry -- see FAILED_HASH_RETRY_COOLDOWN_MS. Always true for "not_analyzed" (nothing to cool down from). */
+export function isHashCheckDue(type, value) {
+  if (type !== "hash") return false;
+  const record = getSandboxRecord(type, value);
+  if (record.status === "not_analyzed") return true;
+  if (record.status !== "failed") return false;
+  if (!record.lastAttemptAt) return true;
+  return Date.now() - new Date(record.lastAttemptAt).getTime() >= FAILED_HASH_RETRY_COOLDOWN_MS;
 }
 
 export function recordSubmission(type, value, { provider, jobId }) {
@@ -124,7 +151,7 @@ export function recordInProgress(type, value) {
 }
 
 export function recordCompleted(type, value, report) {
-  return upsert(type, value, { status: "completed", report, completedAt: new Date().toISOString(), error: null });
+  return upsert(type, value, { status: "completed", report, completedAt: new Date().toISOString(), error: null, errorClassification: null, diagnostics: null });
 }
 
 /**
@@ -139,11 +166,12 @@ export function recordFailed(type, value, error, classified) {
     error: error?.message ?? String(error),
     errorClassification: classified?.classification ?? error?.classification ?? null,
     diagnostics: classified ? { isEdgeOrWafBlock: classified.isEdgeOrWafBlock ?? false, status: error?.status ?? null, headers: classified.headers ?? {}, bodySnippet: classified.bodySnippet ?? "" } : null,
+    lastAttemptAt: new Date().toISOString(),
   });
 }
 
 export function recordRateLimited(type, value, error) {
-  return upsert(type, value, { status: "rate_limited", error: error?.message ?? String(error), errorClassification: "HYBRID_ANALYSIS_RATE_LIMITED" });
+  return upsert(type, value, { status: "rate_limited", error: error?.message ?? String(error), errorClassification: "HYBRID_ANALYSIS_RATE_LIMITED", lastAttemptAt: new Date().toISOString() });
 }
 
 /**

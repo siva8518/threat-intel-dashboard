@@ -61,6 +61,7 @@ import { getSandboxHealthSnapshot } from "../sandbox/sandboxProviderHealth.js";
 import {
   getSandboxRecord,
   hasActiveOrCompletedRecord,
+  isHashCheckDue,
   recordSubmission,
   recordInProgress,
   recordCompleted,
@@ -1171,7 +1172,11 @@ router.get("/dashboard/sandbox/status", async (req, res) => {
   // for a hash with no record yet is what actually performs that check
   // (cheap, cached by hashModule.js's own throttleAndCache wrapping the
   // same underlying lookup).
-  if (type === "hash" && record.status === "not_analyzed") {
+  // Retries a previously-failed hash check after a cooldown (see
+  // isHashCheckDue), not just a never-checked one -- a hash stuck on
+  // "failed" forever (even after the underlying cause, e.g. a bad API key,
+  // is fixed) was a real gap: without this it could never self-heal.
+  if (type === "hash" && isHashCheckDue(type, value)) {
     try {
       const provider = getSandboxProvider();
       const report = await provider.checkExistingHash(value);
