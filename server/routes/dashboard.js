@@ -57,7 +57,7 @@ import { generateShouldICare } from "../investigation/shouldICare.js";
 import { getProvider as getSandboxProvider } from "../sandbox/index.js";
 import { assessSandboxApplicability } from "../sandboxApplicability.js";
 import { classifyHybridAnalysisFailure, HA_FAILURE } from "../sandbox/hybridAnalysisDiagnostics.js";
-import { getSandboxHealthSnapshot } from "../sandbox/sandboxProviderHealth.js";
+import { getSandboxHealthSnapshot, resetSandboxHealth } from "../sandbox/sandboxProviderHealth.js";
 import {
   getSandboxRecord,
   hasActiveOrCompletedRecord,
@@ -1159,6 +1159,15 @@ router.post("/dashboard/sandbox/submit", async (req, res) => {
 // sandboxProviderHealth.js (the circuit breaker + evidence store this
 // reads) and hybridAnalysisDiagnostics.js (the classification taxonomy).
 router.get("/dashboard/sandbox/health", (_req, res) => {
+  res.json(getSandboxHealthSnapshot("Hybrid Analysis"));
+});
+
+// Manual circuit-breaker reset -- for the one case the automatic breaker
+// can't know about on its own: an operator just fixed the actual cause
+// (rotated a bad API key, resolved a network block) and wants to verify it
+// worked immediately instead of waiting out the automatic re-probe cooldown.
+router.post("/dashboard/sandbox/health/reset", (_req, res) => {
+  resetSandboxHealth("Hybrid Analysis");
   res.json(getSandboxHealthSnapshot("Hybrid Analysis"));
 });
 

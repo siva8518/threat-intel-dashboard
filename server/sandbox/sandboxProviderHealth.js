@@ -60,6 +60,21 @@ export function circuitOpenRemainingMs(label) {
   return Math.max(0, s.circuitOpenUntil - Date.now());
 }
 
+/**
+ * Manual override -- closes an open circuit immediately instead of waiting
+ * out CIRCUIT_OPEN_COOLDOWN_MS. For the one legitimate case an automatic
+ * breaker can't know about on its own: an operator just fixed the actual
+ * cause (rotated a bad API key, resolved a network block) and wants to
+ * verify it worked right now rather than wait up to 10 minutes for the
+ * next automatic re-probe.
+ */
+export function resetSandboxHealth(label) {
+  const s = getOrCreate(label);
+  s.consecutiveFailures = 0;
+  s.consecutiveFailureReason = null;
+  s.circuitOpenUntil = null;
+}
+
 export function recordSandboxSuccess(label) {
   const s = getOrCreate(label);
   s.consecutiveFailures = 0;
