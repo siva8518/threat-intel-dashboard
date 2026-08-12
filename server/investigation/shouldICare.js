@@ -5,25 +5,33 @@
 // finding" entries. This module answers the question the cards alone can't:
 // what does the COMBINED picture mean, is there a specific malicious intent
 // the evidence actually supports, is this indicator known to be relevant to
-// THIS environment, and what should the analyst do next. Four explicit,
-// non-overlapping sections:
-//   COMBINED INTELLIGENCE ASSESSMENT -- what the evidence indicates once
-//     compared: how strong/consistent it is, how conflicts were resolved (if
-//     any), whether shared/cloud/CDN/VPN infrastructure tempers the read,
-//     and whether multiple "sources" are actually independent or the same
-//     underlying report redistributed.
+// THIS environment, and what should the analyst do next. Four separate,
+// never-interchangeable concepts (Threat Signal / Confidence / Internal
+// Exposure / Operational Priority -- see verdictEngine.js), surfaced as five
+// explicit, non-overlapping prose/structured sections:
+//   WHY IT MATTERS -- the single strongest, most credible piece of evidence
+//     and why it's operationally significant. Never a source-by-source recap.
+//   WHAT THE EVIDENCE TELLS US -- explicitly separates IOC reputation/
+//     behavioral signal from evidence of actual compromise in the analyst's
+//     own environment. When sources conflict this must name the conflict and
+//     NEVER average/reconcile it into one generic risk read (e.g. never
+//     "malicious + clean = moderate risk") -- see the CRITICAL RULE in
+//     SYSTEM_PROMPT below. Also covers whether shared/cloud/CDN/VPN
+//     infrastructure tempers the read, and whether multiple "sources" are
+//     actually independent or the same underlying report redistributed.
 //   LIKELY MALICIOUS INTENT -- only populated when evidence genuinely
 //     supports a specific intent (real attribution, or direct behavioral/
 //     malware-association evidence) -- never inferred from bare reputation
 //     scores, ASN/cloud ownership, domain-naming patterns, or multi-domain
 //     resolution alone. Fail-closed enforced in code (see
 //     groundClaims.js#checkMaliciousIntentClaim), not just prompted.
-//   ENVIRONMENTAL RELEVANCE -- whether it's known to have touched THIS
-//     environment. Always the honest "cannot be determined" statement today
-//     (this platform has no SIEM/EDR/network-telemetry integration) --
-//     computed in code, never left to the model to invent or imply.
-//   NEXT ACTION -- a concrete next step, grounded in the three sections
-//     above, not a generic "investigate the IOC."
+//   ENVIRONMENTAL RELEVANCE (Internal Exposure) -- whether it's known to
+//     have touched THIS environment. Always the honest "cannot be
+//     determined" statement today (this platform has no SIEM/EDR/network-
+//     telemetry integration) -- computed in code, never left to the model to
+//     invent or imply.
+//   NEXT ACTION -- a concrete next step, grounded in the sections above, not
+//     a generic "investigate the IOC."
 // Same hybrid-grounding discipline as graphInsights.js/correlationSummary.js:
 // every countable/classified fact (evidence items and cards, their
 // categories, attribution, shared-infrastructure detection, source
@@ -92,7 +100,7 @@ const SYSTEM_PROMPT =
   "\n\nYOUR JOB: produce a human-centric analyst synthesis in exactly the schema below. Never lead with a source name (\"VirusTotal reports...\", \"OTX says...\") -- lead with the conclusion. Never treat reputation alone as proof of anything -- distinguish a bare reputation SCORE from actual BEHAVIORAL evidence from real THREAT CONTEXT (a named malware/actor/campaign); these are not equivalent. " +
   "\n\nGROUNDING RULES:\n" +
   "- Every claim must trace to a specific evidence item, relationship, or field you were given. Never invent a count, a relationship, or a claim not present in the data.\n" +
-  "- If hasConflict is true, your combinedAssessment MUST explain what conflicts and why (e.g. one source flags malicious while another reports clean/benign) -- never just say \"conflicting intelligence\" and stop.\n" +
+  "- If hasConflict is true, your whatEvidenceTellsUs MUST explain what conflicts and why (e.g. one source flags malicious while another reports clean/benign) -- never just say \"conflicting intelligence\" and stop. CRITICAL RULE: NEVER average or reconcile conflicting reputation/behavioral signals into one generic risk read (e.g. never conclude or imply \"malicious + clean = moderate/average risk\"). Instead state explicitly that one source provides a malicious/suspicious signal while another provides a limited or conflicting signal; a clean or \"unknown\" sandbox/behavioral result must be described as inconclusive, never as proof the indicator is benign; and the available intelligence does NOT by itself establish that the analyst's own environment has been compromised -- reputation and internal compromise are different questions, and you must keep them visibly separate.\n" +
   "- If independentSourceCount is meaningfully lower than sourceCount, note that some of the apparent agreement may be the same underlying report counted more than once -- do not describe repeated/redistributed feeds as independent confirmation.\n" +
   "- NEVER write \"multiple sources\", \"multiple independent sources\", or \"corroborated by multiple sources\" unless at least 2 DISTINCT source names appear together in evidenceByCategory.direct or evidenceByCategory.corroborating. If exactly one source (e.g. only VirusTotal) provided the malicious/suspicious signal and every other queried source shows no finding, say exactly that -- e.g. \"VirusTotal is the only source currently providing a malicious signal ... ; no other configured source corroborated this finding.\" This is a hard rule, not a style preference -- a programmatic check runs after your response and will strip any unsupported multi-source claim.\n" +
   "- Shared/cloud/CDN/VPN/datacenter infrastructure ownership is NEVER evidence of malicious activity -- if infrastructureContext is present, acknowledge it explicitly as a reason for caution, not as something to ignore.\n" +
@@ -105,7 +113,8 @@ const SYSTEM_PROMPT =
   "- For an entity-type search (a threat actor/malware family/ransomware group/campaign, indicated by hasVerifiedEntityProfile being non-null) your combinedAssessment should read differently than for a bare IOC: if hasVerifiedEntityProfile is true, ground the assessment in the entity's real correlated profile depth (not just a reputation verdict); if false but victim disclosures still exist, say so plainly (a tracked ransomware group with disclosed victims but no deeper platform-verified profile) rather than implying more is known than the data supports. If victimIndustryConcentration is present, you may note the concentration as a targeting pattern -- but only if it's genuinely present in the data.\n" +
   "- RECENCY: you may also be given `recentActivity` -- what this entity has ACTUALLY done in the last `recentActivity.windowDays` days, separate from its all-time profile. This platform has a confirmed history of over-broad, stale summaries (e.g. \"targets all industries\") burying a specific recent development -- your combinedAssessment and nextAction must prioritize `recentActivity` when `hasRecentSignal` is true (name the actual recent industry/country/CVE/victim, don't generalize it away), and explicitly say so when it's false (no recent activity found in the tracked window) rather than silently falling back to the all-time picture. Never describe something as \"recent\"/\"current\"/\"ongoing\" unless it's actually in `recentActivity`.\n" +
   "\n\nRespond with ONLY a single JSON object with exactly these top-level keys:\n" +
-  '"combinedAssessment": string -- 2-4 sentences synthesizing what the evidence indicates ONCE COMPARED: overall strength/consistency, how any conflict was resolved or why it remains unresolved, whether apparent multi-source agreement is genuinely independent, and how shared-infrastructure context (if any) tempers the read. Never source-name-first, never restate the raw evidence list.\n' +
+  '"whyItMatters": string -- 2-3 sentences naming the single strongest, most credible piece of evidence (not a source-by-source recap) and explaining in plain operational terms why it matters. Lead with the conclusion, not a source name.\n' +
+  '"whatEvidenceTellsUs": string -- 2-3 sentences that explicitly separate IOC reputation/behavioral signal from evidence of actual compromise in the analyst\'s own environment. Follow the CRITICAL RULE above exactly when hasConflict is true. When hasConflict is false, state plainly what the uncontested evidence establishes and its limits -- never overstate a reputation-only signal as confirmed compromise.\n' +
   '"likelyMaliciousIntent": string -- 1-3 sentences. Follow the grounding rule above exactly.\n' +
   '"nextAction": string -- 2-4 sentences: a CONCRETE next step grounded in the assessment above and the fact that environmental relevance is unknown. Distinguish what this platform can do (pivot to related malware/hashes/domains/IPs/campaigns/actors -- external intelligence) from what the analyst must do in their own tools (conditionally: "if observed in your EDR/SIEM/logs, then...") -- never a generic "investigate the IOC" line, and never phrase an internal-tool check as something already done.\n' +
   "No other text, no markdown formatting, no code fences.";
@@ -236,14 +245,16 @@ export async function generateShouldICare(result) {
     return out;
   };
 
-  const combinedAssessment = ground(safeString(parsed.combinedAssessment, "Not enough data to characterize the combined intelligence picture for this indicator."));
+  const whyItMatters = ground(safeString(parsed.whyItMatters, "Not enough data to characterize the strongest evidence for this indicator."));
+  const whatEvidenceTellsUs = ground(safeString(parsed.whatEvidenceTellsUs, "Not enough data to separate reputation signal from evidence of actual compromise for this indicator."));
   const rawIntent = safeString(parsed.likelyMaliciousIntent, null);
   const likelyMaliciousIntent = checkMaliciousIntentClaim(rawIntent ? ground(rawIntent) : rawIntent, intentEvidence).text;
   const nextAction = ground(safeString(parsed.nextAction, "Insufficient evidence to recommend a specific next step -- re-check if new context emerges."));
 
   return {
     analystDecision: verdict.analystDecision,
-    combinedAssessment: infraNote ? `${combinedAssessment} ${infraNote}` : combinedAssessment,
+    whyItMatters,
+    whatEvidenceTellsUs: infraNote ? `${whatEvidenceTellsUs} ${infraNote}` : whatEvidenceTellsUs,
     likelyMaliciousIntent,
     // Always the deterministic, code-computed structured object today -- see
     // ENVIRONMENTAL_RELEVANCE_UNKNOWN's own comment. hasEnvironmentalTelemetry

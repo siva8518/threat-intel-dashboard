@@ -1080,24 +1080,33 @@ export interface CorrelationSummary {
  * human-centric synthesis layer that sits ABOVE the per-source Evidence
  * Cards (EvidenceReconciliation.cards) -- it never restates what each source
  * found (the cards already show that individually); it answers what the
- * combined picture means. Four explicit sections: Combined Intelligence
- * Assessment (combinedAssessment -- what the evidence indicates once
- * compared, including how conflicts/shared-infrastructure/independence were
- * weighed), Likely Malicious Intent (likelyMaliciousIntent -- only populated
- * when evidence genuinely supports a specific intent; otherwise an honest
- * "not established" statement, never inferred from reputation/ASN/naming
- * alone), Environmental Relevance (environmentalRelevance -- whether this
- * indicator is known to have touched this environment -- always the
- * deterministic, code-computed "UNKNOWN" object below, this platform has no
- * EDR/SIEM/network-telemetry integration anywhere and the model is never
- * asked to author this field), and Next Action (nextAction -- a concrete
- * analyst step, grounded to never imply the platform already searched an
- * internal tool). `analystDecision` is deterministic pass-through from the
- * verdict engine, never model-authored; the three prose fields
- * (combinedAssessment/likelyMaliciousIntent/nextAction) are the model's
- * narrative synthesis over the real evidence/verdict data it was given,
- * fail-closed validated against it (see groundClaims.js) before being
- * returned.
+ * combined picture means. Five explicit sections, deliberately kept
+ * NON-overlapping and never averaged together: Why It Matters (whyItMatters
+ * -- the single strongest, most credible piece of evidence and why it's
+ * operationally significant), What The Evidence Tells Us (whatEvidenceTellsUs
+ * -- explicitly separates IOC reputation/behavioral signal from evidence of
+ * actual compromise in the analyst's own environment; when sources conflict
+ * this must name the conflict and never reconcile it into one generic risk
+ * read -- see the CRITICAL RULE in shouldICare.js's SYSTEM_PROMPT), Likely
+ * Malicious Intent (likelyMaliciousIntent -- only populated when evidence
+ * genuinely supports a specific intent; otherwise an honest "not established"
+ * statement, never inferred from reputation/ASN/naming alone), Environmental
+ * Relevance (environmentalRelevance -- whether this indicator is known to
+ * have touched this environment -- always the deterministic, code-computed
+ * "UNKNOWN" object below, this platform has no EDR/SIEM/network-telemetry
+ * integration anywhere and the model is never asked to author this field),
+ * and Next Action (nextAction -- a concrete analyst step, grounded to never
+ * imply the platform already searched an internal tool). `analystDecision`
+ * is deterministic pass-through from the verdict engine, never
+ * model-authored; the four prose fields (whyItMatters/whatEvidenceTellsUs/
+ * likelyMaliciousIntent/nextAction) are the model's narrative synthesis over
+ * the real evidence/verdict data it was given, fail-closed validated against
+ * it (see groundClaims.js) before being returned. Priority/Confidence shown
+ * alongside this assessment come straight from VerdictResult.severity/
+ * confidence -- Threat Signal (severity/state), Confidence (corroboration
+ * quality), Internal Exposure (environmentalRelevance), and Operational
+ * Priority (analystDecision) are four separate, never-interchangeable
+ * concepts by design (see verdictEngine.js).
  */
 export interface EnvironmentalRelevance {
   label: "UNKNOWN";
@@ -1107,7 +1116,8 @@ export interface EnvironmentalRelevance {
 
 export interface ShouldICareAssessment {
   analystDecision: AnalystDecision;
-  combinedAssessment: string;
+  whyItMatters: string;
+  whatEvidenceTellsUs: string;
   likelyMaliciousIntent: string;
   environmentalRelevance: EnvironmentalRelevance;
   nextAction: string;

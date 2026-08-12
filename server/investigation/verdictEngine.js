@@ -59,10 +59,22 @@ function computeConfidenceFactors(evidence) {
   return { sourceCount: evidence.sourceCount, independentSourceCount: evidence.independentSourceCount, corroborationCount, recencyDays, reasoning };
 }
 
-function deriveConfidenceLevel(factors, evidence) {
-  if (evidence.hasConflict) return "Low"; // disagreeing sources make the TRUTH less certain, regardless of any one source's own strength
+function deriveConfidenceLevel(factors, evidence, signals) {
   const bearing = evidenceBearingItems(evidence);
   const hasStrongSingleSource = bearing.some((i) => i.weight >= 0.8);
+  if (evidence.hasConflict) {
+    // Disagreeing sources make the TRUTH less certain, but collapsing
+    // straight to "Low" whenever ANY two sources disagree -- regardless of
+    // how strong the malicious side of that disagreement is -- produced the
+    // reported "CRITICAL severity + Low confidence" incoherent combination
+    // (e.g. a 34-engine VirusTotal detection disputed by one inconclusive
+    // sandbox result read as "barely anything is known," when the malicious
+    // signal itself is actually solid). A credible, first-party malicious
+    // signal disputed by a conflicting source is "Medium" (moderate) --
+    // reduced from what it would be uncontested, but not reduced to the
+    // same floor as a single weak/unweighted signal.
+    return signals.independentDirectSources >= 1 && (signals.strongestDirect?.weight ?? 0) >= 0.6 ? "Medium" : "Low";
+  }
   if (factors.independentSourceCount >= 2 && factors.corroborationCount >= 2) return "High";
   if (hasStrongSingleSource && factors.independentSourceCount >= 1) return "High";
   if (factors.independentSourceCount >= 1 && factors.corroborationCount >= 1) return "Medium";
@@ -241,9 +253,23 @@ function computeSeverityLevel(entityType, evidence, context) {
   const malwareFamilies = context.crossRef?.matchedMalwareFamilies ?? [];
   const maxWeight = bearing.reduce((max, i) => Math.max(max, i.weight), 0);
   const independentDirectMaliciousSources = new Set(maliciousLike.filter((i) => i.category === "direct").map((i) => i.source)).size;
-  if (malwareFamilies.length > 0 && independentDirectMaliciousSources >= 1) return "CRITICAL"; // attributed to a known malware family with direct confirmation
+  if (evidence.hasConflict) {
+    // A source directly disputing the malicious read (e.g. a clean/unknown
+    // sandbox verdict against a malicious reputation score) means this is
+    // NOT a confirmed read no matter how strong the malicious side looks in
+    // isolation -- malware-family attribution must never push this to
+    // CRITICAL while another source is actively conflicting with it. This
+    // is the literal fix for the reported "CRITICAL severity + Low
+    // confidence + Investigate If Observed Internally" incoherent
+    // combination: CRITICAL is reserved for confirmed/uncontested reads,
+    // conflicting evidence caps at HIGH ("credible signal requiring timely
+    // investigation, not confirmed compromise") or MEDIUM when the
+    // malicious side is itself also weak.
+    return independentDirectMaliciousSources >= 1 || maxWeight >= 0.8 ? "HIGH" : "MEDIUM";
+  }
+  if (malwareFamilies.length > 0 && independentDirectMaliciousSources >= 1) return "CRITICAL"; // attributed to a known malware family with direct confirmation, uncontested
   if (independentDirectMaliciousSources >= 2 || maxWeight >= 0.8) return "HIGH"; // strong or multiply-confirmed malicious signal, even without family attribution
-  return "MEDIUM"; // a malicious/suspicious signal exists but isn't yet strongly corroborated -- uncharacterized potential impact, never downgraded to LOW just because the evidence is weak or conflicting
+  return "MEDIUM"; // a malicious/suspicious signal exists but isn't yet strongly corroborated -- uncharacterized potential impact, never downgraded to LOW just because the evidence is weak
 }
 
 // --- Verdict state -- the one decision table every entity type shares.
@@ -479,9 +505,9 @@ function computeBlockRecommendation(entityType, analystDecision, analystDecision
  * @returns {import("../../src/types/threat-intel.js").VerdictResult}
  */
 export function computeVerdict({ entityType, evidence, cveExploitationState = null, context = {} }) {
-  const confidenceFactors = computeConfidenceFactors(evidence);
-  const confidence = deriveConfidenceLevel(confidenceFactors, evidence);
   const signals = evidenceSignals(evidence);
+  const confidenceFactors = computeConfidenceFactors(evidence);
+  const confidence = deriveConfidenceLevel(confidenceFactors, evidence, signals);
   const state = computeVerdictState(entityType, evidence, cveExploitationState, signals);
   const severityFactors = computeSeverityFactors(entityType, evidence, cveExploitationState, context);
   const severity = computeSeverityLevel(entityType, evidence, context);
