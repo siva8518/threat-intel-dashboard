@@ -136,12 +136,18 @@ function hybridAnalysisRule(r) {
 }
 
 // Team Cymru's Malware Hash Registry (hash lookups only) -- distinct from
-// its IP-to-ASN service below, which is always contextual.
+// its IP-to-ASN service below, which is always contextual. `r` may carry
+// `crossHashEnrichmentNote` (see hashModule.js) when this result came from
+// querying Team Cymru with a related MD5/SHA1 cross-referenced from
+// VirusTotal rather than the SHA256 the analyst actually submitted -- that
+// provenance is appended to the claim so the Evidence Card itself never
+// implies Team Cymru was queried by the submitted hash when it wasn't.
 function teamCymruMhrRule(r) {
   const pct = r.detectionPercent;
   if (pct == null) return [];
-  if (pct >= 50) return [item({ category: "direct", source: "Team Cymru MHR", claim: `${pct}% detection in Malware Hash Registry`, polarity: "malicious", weight: 0.75, rawField: "detectionPercent", lastSeen: r.lastSeen })];
-  if (pct > 0) return [item({ category: "corroborating", source: "Team Cymru MHR", claim: `${pct}% detection in Malware Hash Registry`, polarity: "suspicious", weight: 0.4, rawField: "detectionPercent", lastSeen: r.lastSeen })];
+  const claim = `${pct}% detection in Malware Hash Registry${r.crossHashEnrichmentNote ? ` (${r.crossHashEnrichmentNote})` : ""}`;
+  if (pct >= 50) return [item({ category: "direct", source: "Team Cymru MHR", claim, polarity: "malicious", weight: 0.75, rawField: "detectionPercent", lastSeen: r.lastSeen })];
+  if (pct > 0) return [item({ category: "corroborating", source: "Team Cymru MHR", claim, polarity: "suspicious", weight: 0.4, rawField: "detectionPercent", lastSeen: r.lastSeen })];
   return [];
 }
 

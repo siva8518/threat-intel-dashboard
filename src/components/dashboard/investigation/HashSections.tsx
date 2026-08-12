@@ -8,7 +8,17 @@ interface HashModuleData {
   detection: { malicious: number; suspicious: number; harmless: number; threatLabel: string | null } | null;
   malwareFamily: string | null;
   behavior: { available: boolean; malwareFamily?: string | null; threatScore?: number | null; detailedBehaviorAvailable?: boolean; detailedBehaviorNote?: string; reason?: string };
-  registryHistory: { detectionPercent: number | null; lastSeen: string | null } | null;
+  registryHistory: {
+    detectionPercent: number | null;
+    lastSeen: string | null;
+    // Present only when the submitted hash was SHA256 and Team Cymru MHR
+    // (MD5/SHA1-only) was queried using the same file's MD5/SHA1 as
+    // reported by VirusTotal for this exact hash -- a real, provider-
+    // reported association between hash algorithms for the same file,
+    // never a mathematical conversion (cryptographically impossible). See
+    // server/investigation/hashModule.js#buildCrossHashEnrichmentNote.
+    crossHashEnrichment: { discoveredHashType: string; discoveredHash: string; discoveredVia: string; note: string } | null;
+  } | null;
 }
 
 export function HashIntelligenceSection({ data }: { data: HashModuleData }) {
@@ -51,13 +61,16 @@ export function HashIntelligenceSection({ data }: { data: HashModuleData }) {
       </Section>
 
       {data.registryHistory && (
-        <KeyValueBlock
-          title="Malware Hash Registry History"
-          pairs={[
-            ["Historical Detection", data.registryHistory.detectionPercent != null ? `${data.registryHistory.detectionPercent}%` : null],
-            ["Last Seen", data.registryHistory.lastSeen ? new Date(data.registryHistory.lastSeen).toLocaleDateString() : null],
-          ]}
-        />
+        <div className="space-y-1.5">
+          <KeyValueBlock
+            title="Malware Hash Registry History"
+            pairs={[
+              ["Historical Detection", data.registryHistory.detectionPercent != null ? `${data.registryHistory.detectionPercent}%` : null],
+              ["Last Seen", data.registryHistory.lastSeen ? new Date(data.registryHistory.lastSeen).toLocaleDateString() : null],
+            ]}
+          />
+          {data.registryHistory.crossHashEnrichment && <p className="text-xs text-muted">{data.registryHistory.crossHashEnrichment.note}</p>}
+        </div>
       )}
     </div>
   );

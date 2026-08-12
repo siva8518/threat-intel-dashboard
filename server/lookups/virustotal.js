@@ -48,5 +48,16 @@ export async function checkIndicator(type, value) {
     // above), but do have last_analysis_date -- real, feeds the Timeline
     // sub-panel and firstLastSeenFor's lastSeen scan.
     lastSeen: attributes.last_analysis_date ? new Date(attributes.last_analysis_date * 1000).toISOString() : null,
+    // File-only (undefined for ip/domain/url): VirusTotal computes and
+    // stores MD5/SHA1/SHA256 for every file in its corpus, so a lookup by
+    // any one of the three returns all three -- this is a real, provider-
+    // reported association for the EXACT same file, never a mathematical
+    // conversion between hash algorithms (which is impossible; hashes are
+    // one-way). Used by hashModule.js for cross-hash enrichment: when a
+    // provider that only accepts MD5/SHA1 (e.g. Team Cymru MHR) is given a
+    // SHA256 IOC, the file's own MD5/SHA1 discovered here lets that
+    // provider still be queried instead of being skipped as "not
+    // applicable".
+    relatedHashes: attributes.md5 || attributes.sha1 || attributes.sha256 ? { md5: attributes.md5 ?? null, sha1: attributes.sha1 ?? null, sha256: attributes.sha256 ?? null } : null,
   };
 }
