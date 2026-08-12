@@ -112,6 +112,21 @@ export function recordSandboxFailure(label, classified, diagnostics = {}) {
   }
 }
 
+/**
+ * Records a 404 ("not found") into recentDiagnostics for visibility WITHOUT
+ * counting it as a health failure or touching the circuit breaker -- a 404
+ * is a normal, expected outcome for most lookups (see hybridAnalysis.js's
+ * own "never throws for not found" contract). This exists purely so a
+ * SPECIFIC 404 that's suspicious (e.g. a hash independently confirmed to
+ * exist, returning 404 only from this deployment) can still be inspected
+ * via GET /api/dashboard/sandbox/health instead of vanishing untraceably.
+ */
+export function recordSandboxNotFoundDiagnostic(label, diagnostics = {}) {
+  const s = getOrCreate(label);
+  s.recentDiagnostics.push({ at: new Date().toISOString(), classification: "NOT_FOUND_404 (excluded from failure counters)", isEdgeOrWafBlock: false, ...diagnostics });
+  if (s.recentDiagnostics.length > MAX_DIAGNOSTIC_SAMPLES) s.recentDiagnostics.shift();
+}
+
 /** Full diagnostic snapshot -- the evidence base for GET /api/dashboard/sandbox/health. */
 export function getSandboxHealthSnapshot(label) {
   const s = state.get(label) ?? freshState();

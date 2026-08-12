@@ -1,6 +1,6 @@
 import { ApiError, fetchJson } from "../lib/http.js";
 import { classifyHybridAnalysisFailure, HA_FAILURE } from "../sandbox/hybridAnalysisDiagnostics.js";
-import { isCircuitOpen, circuitOpenRemainingMs, recordSandboxSuccess, recordSandboxFailure } from "../sandbox/sandboxProviderHealth.js";
+import { isCircuitOpen, circuitOpenRemainingMs, recordSandboxSuccess, recordSandboxFailure, recordSandboxNotFoundDiagnostic } from "../sandbox/sandboxProviderHealth.js";
 
 const HA_URL = "https://hybrid-analysis.com/api/v2/overview";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
@@ -73,6 +73,14 @@ export async function checkIndicator(type, value) {
       // Attach the classification to the error so callers (routes/dashboard.js,
       // hybridAnalysisProvider.js) can persist it without re-deriving it.
       if (error instanceof ApiError) error.classification = classified.classification;
+    } else {
+      // Still capture the raw evidence for a 404 -- visible only via GET
+      // /api/dashboard/sandbox/health, never affects the circuit breaker or
+      // this call's normal "not found" behavior. Exists specifically to
+      // distinguish a genuine "this hash has no report" 404 from a 404
+      // that's actually masking something else (auth/network/WAF) for a
+      // hash independently confirmed to exist.
+      recordSandboxNotFoundDiagnostic(HEALTH_LABEL, { status: error.status, headers: error.diagnostics?.headers, bodySnippet: error.diagnostics?.bodySnippet });
     }
     throw error;
   }
