@@ -29,6 +29,40 @@
 import { ApiError, fetchJson } from "../../lib/http.js";
 import { checkIndicator as checkHashOverview } from "../../lookups/hybridAnalysis.js";
 import { withRetry } from "../../lib/retry.js";
+import { classifyHybridAnalysisFailure, HA_FAILURE } from "../hybridAnalysisDiagnostics.js";
+import { isCircuitOpen, circuitOpenRemainingMs, recordSandboxSuccess, recordSandboxFailure } from "../sandboxProviderHealth.js";
+
+// Same health label as server/lookups/hybridAnalysis.js -- submit/poll hit
+// the same origin (and, per the reported issue, potentially the same edge/
+// WAF layer) as the hash-overview endpoint, so they share one circuit
+// breaker rather than each code path tracking Hybrid Analysis's
+// availability independently.
+const HEALTH_LABEL = "Hybrid Analysis";
+
+function assertCircuitClosed() {
+  if (!isCircuitOpen(HEALTH_LABEL)) return;
+  const remainingSeconds = Math.ceil(circuitOpenRemainingMs(HEALTH_LABEL) / 1000);
+  throw new ApiError(
+    `Hybrid Analysis circuit breaker is open (repeated network-level failures) -- skipping this call, re-probing in ${remainingSeconds}s. See GET /api/dashboard/sandbox/health for diagnostics.`,
+    "Hybrid Analysis",
+    undefined,
+    undefined,
+    { classification: HA_FAILURE.UNAVAILABLE, circuitOpen: true },
+  );
+}
+
+async function callAndClassify(fn) {
+  try {
+    const result = await fn();
+    recordSandboxSuccess(HEALTH_LABEL);
+    return result;
+  } catch (error) {
+    const classified = classifyHybridAnalysisFailure(error);
+    recordSandboxFailure(HEALTH_LABEL, classified, { status: error?.status, headers: error?.diagnostics?.headers, bodySnippet: error?.diagnostics?.bodySnippet });
+    if (error instanceof ApiError) error.classification = classified.classification;
+    throw error;
+  }
+}
 
 // No "www." -- that subdomain does not serve this API (confirmed live: it
 // 404s locally and appears to 403 from some networks/WAF paths, e.g.
@@ -164,17 +198,20 @@ async function checkExistingHash(sha256) {
 
 /** @returns {Promise<{ jobId: string, submittedAt: string }>} */
 async function submitUrl(url) {
+  assertCircuitClosed();
   const form = new URLSearchParams({ url, environment_id: DEFAULT_ENVIRONMENT_ID });
-  const raw = await withRetry(
-    () =>
-      fetchJson(`${BASE_URL}/submit/url`, {
-        method: "POST",
-        source: "Hybrid Analysis",
-        headers: headers({ "Content-Type": "application/x-www-form-urlencoded" }),
-        body: form.toString(),
-        timeoutMs: 20_000,
-      }),
-    { retries: 2, isRetryable: (e) => e.status == null || e.status >= 500 }, // never retry a 4xx (bad key, bad URL, already-queued) -- only transient network/5xx
+  const raw = await callAndClassify(() =>
+    withRetry(
+      () =>
+        fetchJson(`${BASE_URL}/submit/url`, {
+          method: "POST",
+          source: "Hybrid Analysis",
+          headers: headers({ "Content-Type": "application/x-www-form-urlencoded" }),
+          body: form.toString(),
+          timeoutMs: 20_000,
+        }),
+      { retries: 2, isRetryable: (e) => e.status == null || e.status >= 500 }, // never retry a 4xx (bad key, bad URL, already-queued) -- only transient network/5xx
+    ),
   );
   const jobId = raw?.job_id ?? raw?.id;
   if (!jobId) throw new ApiError("Hybrid Analysis submission did not return a job id", "Hybrid Analysis", 502);
@@ -187,18 +224,23 @@ async function submitUrl(url) {
  * @returns {Promise<{ status: "in_progress" | "completed" | "failed", report: import("../../../src/types/threat-intel.js").SandboxReport | null, error: string | null }>}
  */
 async function pollStatus(jobId) {
+  assertCircuitClosed();
   let state;
   try {
     state = await fetchJson(`${BASE_URL}/report/${jobId}/state`, { source: "Hybrid Analysis", headers: headers(), timeoutMs: 15_000 });
+    recordSandboxSuccess(HEALTH_LABEL);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) return { status: "in_progress", report: null, error: null }; // job registered but not yet queryable
+    if (error instanceof ApiError && error.status === 404) return { status: "in_progress", report: null, error: null }; // job registered but not yet queryable -- a normal transient state, never recorded as a health failure
+    const classified = classifyHybridAnalysisFailure(error);
+    recordSandboxFailure(HEALTH_LABEL, classified, { status: error?.status, headers: error?.diagnostics?.headers, bodySnippet: error?.diagnostics?.bodySnippet });
+    if (error instanceof ApiError) error.classification = classified.classification;
     throw error;
   }
   const raw = (state?.state ?? "").toString().toUpperCase();
   if (raw === "IN_QUEUE" || raw === "IN_PROGRESS" || raw === "") return { status: "in_progress", report: null, error: null };
   if (raw === "ERROR") return { status: "failed", report: null, error: state?.error ?? "Hybrid Analysis reported analysis error" };
 
-  const summary = await fetchJson(`${BASE_URL}/report/${jobId}/summary`, { source: "Hybrid Analysis", headers: headers(), timeoutMs: 15_000 });
+  const summary = await callAndClassify(() => fetchJson(`${BASE_URL}/report/${jobId}/summary`, { source: "Hybrid Analysis", headers: headers(), timeoutMs: 15_000 }));
   return { status: "completed", report: normalizeSummary(jobId, summary), error: null };
 }
 

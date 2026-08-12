@@ -1,7 +1,7 @@
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 export class ApiError extends Error {
-  constructor(message, source, status, retryAfterMs) {
+  constructor(message, source, status, retryAfterMs, diagnostics) {
     super(message);
     this.name = "ApiError";
     this.source = source;
@@ -11,6 +11,37 @@ export class ApiError extends Error {
     // any response that didn't send the header, so existing callers that
     // never look at this field are entirely unaffected.
     this.retryAfterMs = retryAfterMs;
+    // Optional {headers: Record<string,string>, bodySnippet: string} --
+    // present only when request() below captured it (see
+    // DIAGNOSTIC_HEADER_ALLOWLIST). Every existing caller only ever reads
+    // .message/.status/.retryAfterMs, so this is purely additive. Built for
+    // distinguishing WAF/edge-level blocks (e.g. a `server: cloudflare` +
+    // `cf-ray` 403 with an HTML challenge body) from an application-level
+    // error (a JSON body with a real error message) without guessing --
+    // see server/sandbox/hybridAnalysisDiagnostics.js, the first consumer.
+    this.diagnostics = diagnostics;
+  }
+}
+
+// A curated allowlist, not the full header set -- avoids ever capturing
+// something that could carry a session/auth-adjacent value, while keeping
+// every header actually useful for telling "this app rejected the request"
+// apart from "an edge/WAF in front of the app rejected it first" (the
+// specific ambiguity behind the reported Hybrid Analysis 403).
+const DIAGNOSTIC_HEADER_ALLOWLIST = ["server", "via", "cf-ray", "cf-mitigated", "cf-cache-status", "x-cache", "x-amz-cf-id", "x-amz-cf-pop", "x-served-by", "x-akamai-request-id", "retry-after", "content-type", "date"];
+const DIAGNOSTIC_BODY_SNIPPET_MAX_CHARS = 500;
+
+async function captureDiagnostics(response) {
+  try {
+    const headers = {};
+    for (const name of DIAGNOSTIC_HEADER_ALLOWLIST) {
+      const value = response.headers.get(name);
+      if (value) headers[name] = value;
+    }
+    const bodySnippet = (await response.clone().text()).slice(0, DIAGNOSTIC_BODY_SNIPPET_MAX_CHARS);
+    return { headers, bodySnippet };
+  } catch {
+    return { headers: {}, bodySnippet: "" }; // never let diagnostic capture itself break the real error path
   }
 }
 
@@ -30,7 +61,8 @@ async function request(url, { source, timeoutMs = DEFAULT_TIMEOUT_MS, ...init })
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     if (!response.ok) {
-      throw new ApiError(`${source} responded with ${response.status} ${response.statusText}`, source, response.status, parseRetryAfterMs(response));
+      const diagnostics = await captureDiagnostics(response);
+      throw new ApiError(`${source} responded with ${response.status} ${response.statusText}`, source, response.status, parseRetryAfterMs(response), diagnostics);
     }
     return response;
   } catch (error) {

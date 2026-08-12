@@ -36,6 +36,7 @@ import type {
   CorrelationSummary,
   ShouldICareAssessment,
   SandboxRecord,
+  SandboxHealthSnapshot,
   KevEntry,
   MalwareIntelligenceEntity,
   IocIntelligenceEntity,
@@ -408,6 +409,11 @@ export async function submitSandboxAnalysis(type: string, value: string): Promis
 /** Read-mostly -- returns the current sandbox record, polling the provider once if a job is genuinely in flight. Safe to call on every search (a hash's "existing report" check happens here, not on /investigate itself, keeping that endpoint's own timeout budget untouched). */
 export async function fetchSandboxStatus(type: string, value: string): Promise<SandboxRecord> {
   return fetchJson(`/api/dashboard/sandbox/status?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`, { source: "Sandbox Analysis", timeoutMs: 20_000 });
+}
+
+/** Diagnostic snapshot for the Hybrid Analysis integration -- circuit-breaker state, failure classification counts, and the last few captured failure diagnostics (edge/WAF headers, body snippet). See server/sandbox/sandboxProviderHealth.js. */
+export async function fetchSandboxHealth(): Promise<SandboxHealthSnapshot> {
+  return fetchJson("/api/dashboard/sandbox/health", { source: "Sandbox Analysis", timeoutMs: 10_000 });
 }
 
 // The full-profile (fetchThreatActorProfile) and list (fetchThreatActorList)

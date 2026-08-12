@@ -4,18 +4,34 @@
 // an explicit "Analyze in Sandbox" action. This platform NEVER auto-submits
 // an IOC; submission only ever happens from this button, on an explicit
 // analyst click.
-import { FlaskConical, Loader2, ShieldAlert, ShieldQuestion, Clock3 } from "lucide-react";
+import { FlaskConical, Loader2, ShieldAlert, ShieldQuestion, Clock3, Wifi } from "lucide-react";
 import { Section } from "../reportPrimitives";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useSandboxStatus, useSubmitSandboxAnalysis } from "@/hooks/useSandboxAnalysis";
-import type { InvestigationSandboxContext, SandboxReport } from "@/types/threat-intel";
+import type { InvestigationSandboxContext, SandboxReport, SandboxErrorClassification } from "@/types/threat-intel";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Unknown";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "Unknown" : d.toLocaleString();
 }
+
+// A specific title per failure class instead of one generic "Analysis
+// Failed" for every kind of error -- the direct fix for the reported
+// problem that a network/WAF block, a bad API key, a rate limit, and a
+// genuine provider outage all rendered identically. See server/sandbox/
+// hybridAnalysisDiagnostics.js for how these are derived from real
+// response data (status code + captured headers/body), never guessed.
+const CLASSIFICATION_TITLE: Record<SandboxErrorClassification, string> = {
+  HYBRID_ANALYSIS_SUCCESS: "Analysis Succeeded",
+  HYBRID_ANALYSIS_RATE_LIMITED: "Rate Limited",
+  HYBRID_ANALYSIS_AUTH_FAILURE: "API Key Problem",
+  HYBRID_ANALYSIS_NETWORK_ERROR: "Network Unreachable",
+  HYBRID_ANALYSIS_FORBIDDEN: "Blocked (403 Forbidden)",
+  HYBRID_ANALYSIS_TIMEOUT: "Request Timed Out",
+  HYBRID_ANALYSIS_UNAVAILABLE: "Provider Unavailable",
+};
 
 const VERDICT_VARIANT: Record<SandboxReport["verdict"], "critical" | "high" | "low" | "muted"> = {
   malicious: "critical",
@@ -195,9 +211,43 @@ export function SandboxAnalysisPanel({ sandbox }: { sandbox: InvestigationSandbo
         )}
 
         {record.status === "failed" && (
-          <p className="flex items-center gap-1.5 text-xs text-critical">
-            <ShieldAlert className="h-3.5 w-3.5" /> {record.error ?? "Sandbox analysis failed."}
-          </p>
+          <div className="space-y-1.5 text-xs text-critical">
+            <p className="flex items-center gap-1.5 font-semibold">
+              {record.diagnostics?.isEdgeOrWafBlock ? <Wifi className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />}
+              {record.errorClassification ? CLASSIFICATION_TITLE[record.errorClassification] : "Analysis Failed"}
+            </p>
+            <p>{record.error ?? "Sandbox analysis failed."}</p>
+            {record.diagnostics?.isEdgeOrWafBlock && (
+              <p className="rounded-lg border border-critical/30 bg-critical/10 p-2.5 text-foreground/90">
+                This was rejected before reaching Hybrid Analysis's own application ({record.diagnostics.headers?.server ?? "an edge/WAF layer"} responded, not their API) -- consistent with a network/IP-level block on this deployment, not a bug in this app or an invalid API key. Contact Hybrid Analysis support with this deployment's outbound IP and the details below to request an allowlist.
+              </p>
+            )}
+            {record.diagnostics && (record.diagnostics.status || Object.keys(record.diagnostics.headers ?? {}).length > 0) && (
+              <details className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2">
+                <summary className="cursor-pointer text-muted">Diagnostic details (for a Hybrid Analysis support request)</summary>
+                <dl className="mt-1.5 space-y-0.5 text-foreground/90">
+                  {record.diagnostics.status != null && (
+                    <div>
+                      <dt className="inline font-semibold">HTTP status: </dt>
+                      <dd className="inline">{record.diagnostics.status}</dd>
+                    </div>
+                  )}
+                  {Object.entries(record.diagnostics.headers ?? {}).map(([k, v]) => (
+                    <div key={k}>
+                      <dt className="inline font-semibold">{k}: </dt>
+                      <dd className="inline break-all">{v}</dd>
+                    </div>
+                  ))}
+                  {record.completedAt && (
+                    <div>
+                      <dt className="inline font-semibold">Observed at: </dt>
+                      <dd className="inline">{formatDate(record.completedAt)}</dd>
+                    </div>
+                  )}
+                </dl>
+              </details>
+            )}
+          </div>
         )}
 
         {record.status === "rate_limited" && (

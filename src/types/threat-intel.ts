@@ -680,6 +680,17 @@ export interface SandboxReport {
  * checks before ever calling out to a provider, so the same indicator is
  * never submitted twice. See server/sandboxIntelligence.js.
  */
+/** One of the 7 buckets server/sandbox/hybridAnalysisDiagnostics.js classifies a failure into -- lets the UI say specifically what happened (auth, rate limit, network/WAF block, timeout, provider outage) instead of a generic "Analysis Failed". */
+export type SandboxErrorClassification = "HYBRID_ANALYSIS_SUCCESS" | "HYBRID_ANALYSIS_RATE_LIMITED" | "HYBRID_ANALYSIS_AUTH_FAILURE" | "HYBRID_ANALYSIS_NETWORK_ERROR" | "HYBRID_ANALYSIS_FORBIDDEN" | "HYBRID_ANALYSIS_TIMEOUT" | "HYBRID_ANALYSIS_UNAVAILABLE";
+
+/** Captured at failure time -- the concrete evidence (which edge/WAF vendor responded, what headers/body came back) an analyst needs to tell "this app is broken" apart from "the network path to this provider is blocked" without reading server logs. */
+export interface SandboxFailureDiagnostics {
+  isEdgeOrWafBlock: boolean;
+  status: number | null;
+  headers: Record<string, string>;
+  bodySnippet: string;
+}
+
 export interface SandboxRecord {
   indicatorType: string;
   indicatorValue: string;
@@ -690,6 +701,26 @@ export interface SandboxRecord {
   completedAt: string | null;
   report: SandboxReport | null;
   error: string | null;
+  errorClassification: SandboxErrorClassification | null;
+  diagnostics: SandboxFailureDiagnostics | null;
+}
+
+/** GET /api/dashboard/sandbox/health -- see server/sandbox/sandboxProviderHealth.js. */
+export interface SandboxHealthSnapshot {
+  label: string;
+  circuitOpen: boolean;
+  circuitOpenRemainingMs: number;
+  consecutiveFailures: number;
+  consecutiveFailureReason: string | null;
+  totalSuccess: number;
+  totalFailure: number;
+  successRate: number | null;
+  countsByClassification: Record<string, number>;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastClassification: string | null;
+  lastHumanSummary: string | null;
+  recentDiagnostics: Array<{ at: string; classification: string; isEdgeOrWafBlock: boolean; status?: number; headers?: Record<string, string>; bodySnippet?: string }>;
 }
 
 /**

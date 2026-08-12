@@ -58,6 +58,16 @@ function defaultRecord(type, value) {
     completedAt: null,
     report: null,
     error: null,
+    // HYBRID_ANALYSIS_* classification (see server/sandbox/
+    // hybridAnalysisDiagnostics.js) -- lets the UI render a specific,
+    // accurate failure reason instead of a generic "Analysis Failed" for
+    // every kind of error. null until a failure is actually recorded.
+    errorClassification: null,
+    // {isEdgeOrWafBlock, status, headers, bodySnippet} captured at failure
+    // time -- the evidence an analyst needs to tell "my app is broken" apart
+    // from "the network path to this provider is blocked" without reading
+    // server logs. null until a failure is actually recorded.
+    diagnostics: null,
   };
 }
 
@@ -117,12 +127,23 @@ export function recordCompleted(type, value, report) {
   return upsert(type, value, { status: "completed", report, completedAt: new Date().toISOString(), error: null });
 }
 
-export function recordFailed(type, value, error) {
-  return upsert(type, value, { status: "failed", error: error?.message ?? String(error) });
+/**
+ * @param {string} type
+ * @param {string} value
+ * @param {unknown} error
+ * @param {{classification?: string, isEdgeOrWafBlock?: boolean, headers?: Record<string,string>, bodySnippet?: string}} [classified] From classifyHybridAnalysisFailure() -- optional so existing callers that don't yet classify still work.
+ */
+export function recordFailed(type, value, error, classified) {
+  return upsert(type, value, {
+    status: "failed",
+    error: error?.message ?? String(error),
+    errorClassification: classified?.classification ?? error?.classification ?? null,
+    diagnostics: classified ? { isEdgeOrWafBlock: classified.isEdgeOrWafBlock ?? false, status: error?.status ?? null, headers: classified.headers ?? {}, bodySnippet: classified.bodySnippet ?? "" } : null,
+  });
 }
 
 export function recordRateLimited(type, value, error) {
-  return upsert(type, value, { status: "rate_limited", error: error?.message ?? String(error) });
+  return upsert(type, value, { status: "rate_limited", error: error?.message ?? String(error), errorClassification: "HYBRID_ANALYSIS_RATE_LIMITED" });
 }
 
 /**

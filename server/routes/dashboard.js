@@ -56,6 +56,8 @@ import { generateCorrelationSummary } from "../investigation/correlationSummary.
 import { generateShouldICare } from "../investigation/shouldICare.js";
 import { getProvider as getSandboxProvider } from "../sandbox/index.js";
 import { assessSandboxApplicability } from "../sandboxApplicability.js";
+import { classifyHybridAnalysisFailure, HA_FAILURE } from "../sandbox/hybridAnalysisDiagnostics.js";
+import { getSandboxHealthSnapshot } from "../sandbox/sandboxProviderHealth.js";
 import {
   getSandboxRecord,
   hasActiveOrCompletedRecord,
@@ -1139,9 +1141,24 @@ router.post("/dashboard/sandbox/submit", async (req, res) => {
     const record = recordSubmission(type, value, { provider: provider.label, jobId });
     res.json(record);
   } catch (error) {
-    const record = error?.status === 429 ? recordRateLimited(type, value, error) : recordFailed(type, value, error);
-    res.status(error?.status === 429 ? 429 : 502).json(record);
+    if (error?.status === 429) {
+      res.status(429).json(recordRateLimited(type, value, error));
+      return;
+    }
+    const classified = classifyHybridAnalysisFailure(error);
+    const record = recordFailed(type, value, error, { classification: classified.classification, isEdgeOrWafBlock: classified.isEdgeOrWafBlock, headers: error?.diagnostics?.headers, bodySnippet: error?.diagnostics?.bodySnippet });
+    res.status(502).json(record);
   }
+});
+
+// Diagnostic snapshot for the Hybrid Analysis integration -- the concrete
+// answer to "is a Hybrid Analysis failure caused by my application, API
+// authentication, network/WAF blocking, rate limiting, or genuine provider
+// unavailability" without reading server logs. See server/sandbox/
+// sandboxProviderHealth.js (the circuit breaker + evidence store this
+// reads) and hybridAnalysisDiagnostics.js (the classification taxonomy).
+router.get("/dashboard/sandbox/health", (_req, res) => {
+  res.json(getSandboxHealthSnapshot("Hybrid Analysis"));
 });
 
 router.get("/dashboard/sandbox/status", async (req, res) => {
@@ -1160,7 +1177,18 @@ router.get("/dashboard/sandbox/status", async (req, res) => {
       const report = await provider.checkExistingHash(value);
       if (report) record = recordExistingReport(type, value, report, provider.label);
     } catch (error) {
-      if (error?.status && error.status !== 401 && error.status !== 404) record = recordFailed(type, value, error);
+      // A 404 ("no report for this hash") is already translated to a clean
+      // `null` return inside checkExistingHash and never reaches here. What
+      // does reach here is every genuine failure -- auth, rate limit,
+      // network/WAF block, circuit-breaker-open, upstream 5xx -- classified
+      // so the UI can say specifically what happened instead of a generic
+      // "Analysis Failed" (see server/sandbox/hybridAnalysisDiagnostics.js).
+      // 401 (bad/missing API key) is a configuration issue surfaced via the
+      // sandbox health endpoint, not persisted per-indicator on every lookup.
+      const classified = classifyHybridAnalysisFailure(error);
+      if (classified.classification !== HA_FAILURE.AUTH_FAILURE) {
+        record = recordFailed(type, value, error, { classification: classified.classification, isEdgeOrWafBlock: classified.isEdgeOrWafBlock, headers: error?.diagnostics?.headers, bodySnippet: error?.diagnostics?.bodySnippet });
+      }
     }
     return res.json(record);
   }
