@@ -25,17 +25,6 @@
 // routing hint, not a guarantee, and bump via env override if a provider
 // changes its served context length.
 export const AI_ROUTER_CONFIG = {
-  // The one PAID provider in this list -- every other entry below is a
-  // free/trial tier with real, low, shared-across-this-app rate limits that
-  // can (and did) all cool down at once under normal usage. Anthropic is
-  // listed first in aiRouter.js's PROVIDER_DEFS specifically so a working
-  // key here is tried BEFORE burning through the free tiers, not after.
-  anthropic: {
-    apiKey: process.env.ANTHROPIC_API_KEY,
-    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5",
-    fastModel: process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5-20251001",
-    contextWindow: Number(process.env.ANTHROPIC_CONTEXT_WINDOW) || 200_000,
-  },
   gemini: {
     apiKey: process.env.GEMINI_API_KEY,
     // Confirmed live that a pinned "gemini-2.5-flash" 404s for newer API
@@ -46,13 +35,6 @@ export const AI_ROUTER_CONFIG = {
     // Flash-Lite: Google's own lighter/faster/higher-quota tier below Flash.
     fastModel: process.env.GEMINI_FAST_MODEL || "gemini-flash-lite-latest",
     contextWindow: Number(process.env.GEMINI_CONTEXT_WINDOW) || 1_000_000,
-  },
-  mistral: {
-    apiKey: process.env.MISTRAL_API_KEY,
-    model: process.env.MISTRAL_MODEL || "mistral-small-latest",
-    // Ministral 8B: Mistral's dedicated small/edge model family, well below Small.
-    fastModel: process.env.MISTRAL_FAST_MODEL || "ministral-8b-latest",
-    contextWindow: Number(process.env.MISTRAL_CONTEXT_WINDOW) || 32_000,
   },
   groq: {
     apiKey: process.env.GROQ_API_KEY,
@@ -77,24 +59,8 @@ export const AI_ROUTER_CONFIG = {
     fastModel: process.env.COHERE_FAST_MODEL || "command-r7b-12-2024",
     contextWindow: Number(process.env.COHERE_CONTEXT_WINDOW) || 128_000,
   },
-  // -- Everything below is new: 6 additional free-tier-friendly providers,
-  // every key optional and independently skippable exactly like the four
-  // above (see providers/*.js's isConfigured()). None are configured in
-  // this deployment yet, so none of this is live-exercised until a key is
-  // added -- see .env.example for signup links and per-provider notes.
-  cerebras: {
-    apiKey: process.env.CEREBRAS_API_KEY,
-    // Cerebras's own inference hardware trades some context length for very
-    // low latency -- verify against https://inference-docs.cerebras.ai/models
-    // before relying on a larger window than this. The old llama-3.3-70b /
-    // llama3.1-8b defaults were retired from Cerebras's catalog (confirmed
-    // live via GET /v1/models -- only gpt-oss-120b, gemma-4-31b, and
-    // zai-glm-4.7 are served now); gpt-oss-120b is the largest/best-quality
-    // of the three, gemma-4-31b the smallest/fastest.
-    model: process.env.CEREBRAS_MODEL || "gpt-oss-120b",
-    fastModel: process.env.CEREBRAS_FAST_MODEL || "gemma-4-31b",
-    contextWindow: Number(process.env.CEREBRAS_CONTEXT_WINDOW) || 8_192,
-  },
+  // -- Everything below is free-tier-friendly, every key optional and
+  // independently skippable (see providers/*.js's isConfigured()).
   // OpenRouter is a MODEL ROUTER, not a single model -- OPENROUTER_MODEL
   // picks which upstream model it forwards to. Defaults to a ":free"-tagged
   // model (OpenRouter's own convention for its no-cost tier); verify current

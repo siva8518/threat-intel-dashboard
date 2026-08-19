@@ -436,11 +436,10 @@ intel, executive leadership).
 - `server/aiThreatSummary.js` builds the prompt and calls `aiRouter.summarizeJson()` (see **AI Router**
   below) — unlike the RAG Assistant above, this does **not** run on local Ollama. It's this app's single
   heaviest LLM call (a 25+ section structured report per article, seen live running past 16,000 tokens),
-  and routing it through Gemini → Mistral → Groq → Cohere (rather than a single hosted provider) means it
-  keeps working even when one provider's free tier is exhausted. At least one of `GEMINI_API_KEY`,
-  `MISTRAL_API_KEY`, `GROQ_API_KEY`, or `COHERE_API_KEY` needs to be set in `.env` — with none set, AI
-  Summarization reports itself unavailable, same "quiet not-configured" pattern as every other optional
-  keyed source in this app.
+  and routing it through the full provider chain (see **AI Router** below, rather than a single hosted
+  provider) means it keeps working even when one provider's free tier is exhausted. At least one provider
+  key needs to be set in `.env` — with none set, AI Summarization reports itself unavailable, same
+  "quiet not-configured" pattern as every other optional keyed source in this app.
 - The AI Technical Summary is explicitly a technical-extraction task, not an executive summary --
   the prompt instructs the model to preserve named vulnerability classes, exact configuration/trigger
   names, and precise exploitation mechanisms verbatim rather than abstracting them into generic
@@ -491,15 +490,16 @@ interprets/narrates over that real data, and never overrides it (enforced in cod
 renders the full deterministic verdict, evidence roster, and relationship graph; only the AI narrative panels
 show a plain "AI narrative unavailable" note in their place.
 
-- **Provider chain** (all optional — an unset key is skipped, not treated as a failure): **Gemini → Cerebras →
-  Groq → OpenRouter → Mistral → Hugging Face → Cohere → Together AI → Cloudflare Workers AI → GitHub Models →
-  Ollama Cloud**. OpenRouter is a model *router*, not one fixed model — `OPENROUTER_MODEL` picks which upstream
-  model it forwards to. Override the order with `AI_PROVIDER_ORDER` (comma-separated provider keys) — see
-  `.env.example`.
+- **Provider chain** (all optional — an unset key is skipped, not treated as a failure): **Gemini → Groq →
+  OpenRouter → Hugging Face → Cohere → Together AI → Cloudflare Workers AI → GitHub Models → Ollama Cloud**.
+  Anthropic, Mistral, and Cerebras are deliberately not in this chain — all three are paid/billing-gated
+  tiers this deployment doesn't fund. OpenRouter is a model *router*, not one fixed model — `OPENROUTER_MODEL`
+  picks which upstream model it forwards to. Override the order with `AI_PROVIDER_ORDER` (comma-separated
+  provider keys) — see `.env.example`.
 - `server/ai/providers/*.js` each implement the same shape — `{ label, model, isConfigured(), summarize(prompt), summarizeJson(prompt, opts) }`
   — via plain `fetch` against each vendor's REST API (`server/lib/http.js`, the same foundation every other
   client in this app uses), no vendor SDKs. Cloudflare Workers AI and Ollama Cloud are the two exceptions with
-  their own request/response envelope (Cloudflare also needs a 2nd credential, an account ID). Adding a 13th
+  their own request/response envelope (Cloudflare also needs a 2nd credential, an account ID). Adding a 10th
   provider is a two-file change: one new `providers/*.js` file, one entry in `server/ai/aiRouter.js`'s
   `PROVIDER_DEFS` array.
 - **Circuit breaker** (`server/ai/providerHealth.js`): a provider that fails is put into a cooldown before
