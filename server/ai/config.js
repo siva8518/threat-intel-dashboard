@@ -144,4 +144,16 @@ export const AI_ROUTER_CONFIG = {
     fastModel: process.env.GITHUB_MODELS_FAST_MODEL || "meta/Meta-Llama-3.1-8B-Instruct",
     contextWindow: Number(process.env.GITHUB_MODELS_CONTEXT_WINDOW) || 16_000,
   },
+  // Ollama Cloud -- free, no-credit-card signup at ollama.com, generate a
+  // key under Settings -> API Keys. Free tier is GPU-time-based (session
+  // limits resetting every 5h, weekly limits every 7 days) rather than a
+  // fixed per-day request count like the others here -- see
+  // https://docs.ollama.com/cloud. Own request/response envelope, see
+  // providers/ollamaProvider.js.
+  ollama: {
+    apiKey: process.env.OLLAMA_API_KEY,
+    model: process.env.OLLAMA_MODEL || "gpt-oss",
+    fastModel: process.env.OLLAMA_FAST_MODEL || "gemma4",
+    contextWindow: Number(process.env.OLLAMA_CONTEXT_WINDOW) || 32_000,
+  },
 };

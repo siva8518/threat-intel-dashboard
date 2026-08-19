@@ -492,15 +492,16 @@ renders the full deterministic verdict, evidence roster, and relationship graph;
 show a plain "AI narrative unavailable" note in their place.
 
 - **Provider chain** (all optional — an unset key is skipped, not treated as a failure): **Gemini → Cerebras →
-  Groq → OpenRouter → Mistral → Hugging Face → Cohere → Together AI → Cloudflare Workers AI → GitHub Models**.
-  OpenRouter is a model *router*, not one fixed model — `OPENROUTER_MODEL` picks which upstream model it
-  forwards to. Override the order with `AI_PROVIDER_ORDER` (comma-separated provider keys) — see
+  Groq → OpenRouter → Mistral → Hugging Face → Cohere → Together AI → Cloudflare Workers AI → GitHub Models →
+  Ollama Cloud**. OpenRouter is a model *router*, not one fixed model — `OPENROUTER_MODEL` picks which upstream
+  model it forwards to. Override the order with `AI_PROVIDER_ORDER` (comma-separated provider keys) — see
   `.env.example`.
 - `server/ai/providers/*.js` each implement the same shape — `{ label, model, isConfigured(), summarize(prompt), summarizeJson(prompt, opts) }`
   — via plain `fetch` against each vendor's REST API (`server/lib/http.js`, the same foundation every other
-  client in this app uses), no vendor SDKs. Cloudflare Workers AI is the one exception with its own
-  request/response envelope and a 2nd credential (account ID). Adding an 11th provider is a two-file change:
-  one new `providers/*.js` file, one entry in `server/ai/aiRouter.js`'s `PROVIDER_DEFS` array.
+  client in this app uses), no vendor SDKs. Cloudflare Workers AI and Ollama Cloud are the two exceptions with
+  their own request/response envelope (Cloudflare also needs a 2nd credential, an account ID). Adding a 13th
+  provider is a two-file change: one new `providers/*.js` file, one entry in `server/ai/aiRouter.js`'s
+  `PROVIDER_DEFS` array.
 - **Circuit breaker** (`server/ai/providerHealth.js`): a provider that fails is put into a cooldown before
   the router will try it again — duration depends on the failure reason (short for a timeout/5xx, the
   upstream's own `Retry-After` header when a 429 sends one, much longer for a quota exhaustion or an

@@ -19,11 +19,11 @@
 //
 // Provider order defaults to Anthropic -> Gemini -> Cerebras -> Groq ->
 // OpenRouter -> Mistral -> Hugging Face -> Cohere -> Together AI ->
-// Cloudflare Workers AI -> GitHub Models, overridable via the
+// Cloudflare Workers AI -> GitHub Models -> Ollama Cloud, overridable via the
 // AI_PROVIDER_ORDER env var (comma-separated provider keys, see
 // DEFAULT_ORDER below for the exact keys).
 //
-// Adding a 12th provider is a two-file change: write one more
+// Adding a 13th provider is a two-file change: write one more
 // server/ai/providers/*.js implementing { label, model, isConfigured(),
 // summarize(prompt, opts), summarizeJson(prompt, opts) }, add its config to
 // server/ai/config.js, then add one entry to PROVIDER_DEFS below. Nothing
@@ -47,6 +47,7 @@ import { cohereProvider } from "./providers/cohereProvider.js";
 import { togetherProvider } from "./providers/togetherProvider.js";
 import { cloudflareProvider } from "./providers/cloudflareProvider.js";
 import { githubModelsProvider } from "./providers/githubModelsProvider.js";
+import { ollamaProvider } from "./providers/ollamaProvider.js";
 
 // Default priority order -- Anthropic first: the one PAID key in this
 // list, so a working key there is tried before any of the free tiers below
@@ -67,6 +68,7 @@ const PROVIDER_DEFS = [
   { key: "together", provider: togetherProvider, contextWindow: AI_ROUTER_CONFIG.together.contextWindow },
   { key: "cloudflare", provider: cloudflareProvider, contextWindow: AI_ROUTER_CONFIG.cloudflare.contextWindow },
   { key: "githubmodels", provider: githubModelsProvider, contextWindow: AI_ROUTER_CONFIG.githubModels.contextWindow },
+  { key: "ollama", provider: ollamaProvider, contextWindow: AI_ROUTER_CONFIG.ollama.contextWindow },
 ];
 const DEFAULT_ORDER = PROVIDER_DEFS.map((d) => d.key);
 
