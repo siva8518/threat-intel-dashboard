@@ -59,8 +59,10 @@ export const AI_ROUTER_CONFIG = {
     model: process.env.GROQ_CHAT_MODEL || "llama-3.3-70b-versatile",
     // Same env var server/combinedExtraction.js already read directly for
     // this before it moved onto the router -- kept so existing deployments'
-    // .env configuration doesn't need to change.
-    fastModel: process.env.GROQ_EXTRACTION_MODEL || "llama-3.1-8b-instant",
+    // .env configuration doesn't need to change. llama-3.1-8b-instant was
+    // decommissioned by Groq (confirmed live: 404 model_not_found) --
+    // replaced with a currently-available small/fast model.
+    fastModel: process.env.GROQ_EXTRACTION_MODEL || "openai/gpt-oss-20b",
     contextWindow: Number(process.env.GROQ_CONTEXT_WINDOW) || 128_000,
   },
   cohere: {
