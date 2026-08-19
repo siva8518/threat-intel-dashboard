@@ -38,7 +38,13 @@ export const AI_ROUTER_CONFIG = {
   },
   groq: {
     apiKey: process.env.GROQ_API_KEY,
-    model: process.env.GROQ_CHAT_MODEL || "llama-3.3-70b-versatile",
+    // llama-3.3-70b-versatile was ALSO decommissioned by Groq (confirmed
+    // live: 404 model_not_found, discovered live via aiThreatSummary.js's
+    // 25+ section report generation silently going 9 days with zero new
+    // reports -- this is the default tier every non-fast call uses, so its
+    // breakage is a much bigger deal than the fast-tier one below).
+    // openai/gpt-oss-120b is the largest real chat model currently served.
+    model: process.env.GROQ_CHAT_MODEL || "openai/gpt-oss-120b",
     // Same env var server/combinedExtraction.js already read directly for
     // this before it moved onto the router -- kept so existing deployments'
     // .env configuration doesn't need to change. llama-3.1-8b-instant was
@@ -118,7 +124,11 @@ export const AI_ROUTER_CONFIG = {
   // providers/ollamaProvider.js.
   ollama: {
     apiKey: process.env.OLLAMA_API_KEY,
-    model: process.env.OLLAMA_MODEL || "gpt-oss",
+    // Confirmed live: the bare "gpt-oss" tag 404s -- Ollama Cloud's model
+    // registry requires the size tag (":120b"/":20b") explicitly, unlike
+    // Ollama's local-server convention where an untagged name resolves to
+    // a default. "gemma4" below happens to work untagged; "gpt-oss" doesn't.
+    model: process.env.OLLAMA_MODEL || "gpt-oss:120b",
     fastModel: process.env.OLLAMA_FAST_MODEL || "gemma4",
     contextWindow: Number(process.env.OLLAMA_CONTEXT_WINDOW) || 32_000,
   },
