@@ -49,6 +49,19 @@ export function classifyProviderError(providerLabel, error) {
   if (QUOTA_PATTERN.test(message)) return new AIProviderUnavailableError(providerLabel, "quota_exceeded", message);
 
   if (error instanceof ApiError) {
+    // 402 -- confirmed live across multiple providers (Hugging Face:
+    // "depleted your monthly included credits"; SambaNova:
+    // PAYMENT_METHOD_REQUIRED) that this is always billing/credit
+    // exhaustion, just worded differently per provider, never matching
+    // QUOTA_PATTERN's literal "quota" text above. Checked before the 429
+    // branch below since QUOTA_PATTERN already runs first for anything that
+    // does say "quota" -- this catches the ones that don't. Matters because
+    // "other" gets a 5-10min retry cooldown while quota_exceeded gets a full
+    // day; misclassifying this meant retrying a monthly cap every 10
+    // minutes for the rest of the month.
+    if (error.status === 402) {
+      return new AIProviderUnavailableError(providerLabel, "quota_exceeded", message);
+    }
     if (error.status === 429 || RATE_LIMIT_PATTERN.test(message)) {
       return new AIProviderUnavailableError(providerLabel, "rate_limited", message, error.retryAfterMs);
     }
