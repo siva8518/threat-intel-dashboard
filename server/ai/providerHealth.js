@@ -10,28 +10,37 @@
 // concrete mechanism behind "if a provider 429s, don't hammer it again on
 // the very next unrelated request; skip it until the cooldown clears."
 
-// Base cooldown per failure reason, escalated (see cooldownForFailure)
-// on repeated back-to-back failures, capped at MAX_COOLDOWN_MS below.
-// quota_exceeded/auth_error start (and cap) far higher than a transient
-// blip -- neither self-resolves by waiting 30 seconds.
+// Base cooldown per failure reason, escalated (see cooldownForFailure) on
+// repeated back-to-back failures for the two reasons given a range rather
+// than a fixed duration, capped at MAX_COOLDOWN_MS below. Durations are a
+// direct requirement, not a guess: rate limits get a full hour (a 429 rarely
+// clears sooner, and hammering it just burns the failover budget on every
+// other call in that window); a 5xx/timeout gets 5-10 min (genuinely
+// transient, worth retrying soon); quota/billing exhaustion gets a full day
+// (it never self-resolves faster than that, whether it's a daily quota reset
+// or an operator adding funds); 401/403 gets the same day-long window so a
+// bad/revoked key doesn't get hammered every few minutes -- there's nothing
+// to retry into, only an operator fixing the key ends it early (the manual
+// override already exists elsewhere in this app for exactly this shape of
+// problem, see server/sandbox/sandboxProviderHealth.js#resetSandboxHealth).
 const BASE_COOLDOWN_MS = {
-  rate_limited: 30_000,
-  quota_exceeded: 30 * 60_000,
-  timeout: 15_000,
-  server_error: 20_000,
-  network_error: 20_000,
-  auth_error: 30 * 60_000,
-  other: 30_000,
+  rate_limited: 60 * 60_000,
+  quota_exceeded: 24 * 60 * 60_000,
+  timeout: 5 * 60_000,
+  server_error: 5 * 60_000,
+  network_error: 5 * 60_000,
+  auth_error: 24 * 60 * 60_000,
+  other: 5 * 60_000,
 };
 
 const MAX_COOLDOWN_MS = {
-  rate_limited: 5 * 60_000,
-  quota_exceeded: 60 * 60_000,
-  timeout: 2 * 60_000,
-  server_error: 3 * 60_000,
-  network_error: 3 * 60_000,
-  auth_error: 60 * 60_000,
-  other: 5 * 60_000,
+  rate_limited: 60 * 60_000,
+  quota_exceeded: 24 * 60 * 60_000,
+  timeout: 10 * 60_000,
+  server_error: 10 * 60_000,
+  network_error: 10 * 60_000,
+  auth_error: 24 * 60 * 60_000,
+  other: 10 * 60_000,
 };
 
 const MAX_LATENCY_SAMPLES = 20;
@@ -88,6 +97,28 @@ export function cooldownRemainingMs(label) {
   return Math.max(0, s.cooldownUntil - Date.now());
 }
 
+/**
+ * True exactly once per cooldown cycle: the cooldown window has elapsed
+ * (isInCooldown() now returns false) but nothing has actually re-verified
+ * the provider yet -- recordSuccess()/recordFailure() are the only two
+ * things that ever change cooldownUntil, so "still set, but now in the
+ * past" is a precise, self-clearing signal that aiRouter.js uses to run one
+ * cheap health-check call before letting real production traffic reach a
+ * provider that was just failing. Once that health check (or the real
+ * request) resolves either way, cooldownUntil gets reset (to null on
+ * success, to a fresh future timestamp on failure) and this goes false on
+ * its own -- no separate flag to remember to clear.
+ */
+export function isPendingHealthCheck(label) {
+  const s = state.get(label);
+  return Boolean(s?.cooldownUntil && s.cooldownUntil <= Date.now());
+}
+
+/** Most recent failure reason recorded for `label`, or null if it has never failed. */
+export function getLastFailureReason(label) {
+  return state.get(label)?.lastFailureReason ?? null;
+}
+
 export function recordSuccess(label, latencyMs) {
   const s = getOrCreate(label);
   s.consecutiveFailures = 0;
@@ -130,6 +161,33 @@ function averageLatency(latenciesMs) {
 }
 
 /**
+ * Canonical uppercase state enum -- AVAILABLE | RATE_LIMITED | COOLING_DOWN |
+ * QUOTA_EXCEEDED | AUTH_ERROR | ERROR | NOT_CONFIGURED. Additive alongside
+ * the lowercase status/statusLabel pair below (which the existing AI
+ * Provider Health panel already renders) rather than replacing them, so
+ * this is a pure API addition, not a UI change. The three reason-specific
+ * states only apply while actively cooling down for that exact reason;
+ * COOLING_DOWN is the generic bucket for the rest (timeout/server_error/
+ * network_error/other). ERROR is distinct from all of those: it's the
+ * "cooldown just expired but nothing has re-verified this provider yet"
+ * window (see isPendingHealthCheck above) -- a provider stays ERROR, not
+ * AVAILABLE, until a real health check or request actually succeeds, so a
+ * timer running out is never mistaken for the provider being healthy again.
+ */
+function stateFor(label, configured) {
+  if (!configured) return "NOT_CONFIGURED";
+  if (isPendingHealthCheck(label)) return "ERROR";
+  if (isInCooldown(label)) {
+    const reason = state.get(label)?.cooldownReason;
+    if (reason === "rate_limited") return "RATE_LIMITED";
+    if (reason === "quota_exceeded") return "QUOTA_EXCEEDED";
+    if (reason === "auth_error") return "AUTH_ERROR";
+    return "COOLING_DOWN";
+  }
+  return "AVAILABLE";
+}
+
+/**
  * Human-readable status for the admin health panel -- mirrors the exact
  * "Gemini ● HEALTHY" / "Groq ● RATE LIMITED — retry in 42 seconds" shape.
  */
@@ -157,6 +215,7 @@ export function getHealthSnapshot(providers) {
       label,
       model,
       configured,
+      state: stateFor(label, configured),
       ...statusFor(label, configured),
       cooldownRemainingMs: cooldownRemainingMs(label),
       successRate: total > 0 ? Math.round((s.totalSuccess / total) * 100) : null,

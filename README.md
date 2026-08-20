@@ -491,17 +491,28 @@ renders the full deterministic verdict, evidence roster, and relationship graph;
 show a plain "AI narrative unavailable" note in their place.
 
 - **Provider chain** (all optional — an unset key is skipped, not treated as a failure): **Gemini → Groq →
-  OpenRouter → Hugging Face → Cohere → Together AI → Cloudflare Workers AI → GitHub Models → Ollama Cloud**.
-  Anthropic, Mistral, and Cerebras are deliberately not in this chain — all three are paid/billing-gated
-  tiers this deployment doesn't fund. OpenRouter is a model *router*, not one fixed model — `OPENROUTER_MODEL`
-  picks which upstream model it forwards to. Override the order with `AI_PROVIDER_ORDER` (comma-separated
-  provider keys) — see `.env.example`.
+  NVIDIA NIM → OpenRouter → Ollama Cloud → Hugging Face → Cohere → Together AI → Cloudflare Workers AI →
+  GitHub Models**. Anthropic, Mistral, Cerebras, and SambaNova are deliberately not in this chain — all four
+  are paid/billing-gated (confirmed live: SambaNova returns 402 `PAYMENT_METHOD_REQUIRED`, balance 0, on every
+  model) and this deployment doesn't fund them. OpenRouter is a model *router*, not one fixed model —
+  `OPENROUTER_MODEL` picks which upstream model it forwards to. Override the order with `AI_PROVIDER_ORDER`
+  (comma-separated provider keys) — see `.env.example`.
 - `server/ai/providers/*.js` each implement the same shape — `{ label, model, isConfigured(), summarize(prompt), summarizeJson(prompt, opts) }`
   — via plain `fetch` against each vendor's REST API (`server/lib/http.js`, the same foundation every other
   client in this app uses), no vendor SDKs. Cloudflare Workers AI and Ollama Cloud are the two exceptions with
-  their own request/response envelope (Cloudflare also needs a 2nd credential, an account ID). Adding a 10th
+  their own request/response envelope (Cloudflare also needs a 2nd credential, an account ID). Adding an 11th
   provider is a two-file change: one new `providers/*.js` file, one entry in `server/ai/aiRouter.js`'s
   `PROVIDER_DEFS` array.
+- **Provider health states** (`server/ai/providerHealth.js`): each provider is always in exactly one of
+  `AVAILABLE`, `RATE_LIMITED`, `COOLING_DOWN`, `QUOTA_EXCEEDED`, `AUTH_ERROR`, `ERROR`, or `NOT_CONFIGURED`
+  (returned as `state` on `/api/dashboard/ai-provider-health`, alongside the existing lowercase
+  `status`/`statusLabel` the health panel already renders). Cooldown durations are fixed per failure reason,
+  not guessed: a 429 gets a full hour, a 5xx/timeout gets 5–10 minutes, quota/billing exhaustion and a
+  401/403 both get a full day (long enough that a bad key or exhausted quota isn't hammered every few
+  minutes — there's nothing to retry into until an operator actually fixes it). When a cooldown elapses, the
+  provider doesn't go straight back to production traffic — `aiRouter.js` runs one cheap health-check call
+  first (`isPendingHealthCheck()`/`performHealthCheck()`); only a passing check clears it to `AVAILABLE`, so a
+  provider that's still down gets caught by a throwaway ping instead of a real request.
 - **Circuit breaker** (`server/ai/providerHealth.js`): a provider that fails is put into a cooldown before
   the router will try it again — duration depends on the failure reason (short for a timeout/5xx, the
   upstream's own `Retry-After` header when a 429 sends one, much longer for a quota exhaustion or an

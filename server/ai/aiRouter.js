@@ -17,17 +17,21 @@
 // omitting all of them behaves exactly as this router did before any of
 // this existed.
 //
-// Provider order defaults to Gemini -> Groq -> OpenRouter -> Hugging Face ->
-// Cohere -> Together AI -> Cloudflare Workers AI -> GitHub Models -> Ollama
-// Cloud, overridable via the AI_PROVIDER_ORDER env var (comma-separated
-// provider keys, see DEFAULT_ORDER below for the exact keys). Anthropic,
-// Mistral, and Cerebras were removed from this chain entirely (not just
-// unconfigured) -- all three are paid/billing-gated tiers this deployment
-// isn't funding, and a removed provider can't show up as a confusing
+// Provider order defaults to Gemini -> Groq -> NVIDIA NIM -> OpenRouter ->
+// Ollama Cloud -> Hugging Face -> Cohere -> Together AI -> Cloudflare
+// Workers AI -> GitHub Models, overridable via the AI_PROVIDER_ORDER env var
+// (comma-separated provider keys, see DEFAULT_ORDER below for the exact
+// keys) -- this specific order (Gemini -> Groq -> NVIDIA -> OpenRouter ->
+// Ollama -> everything else) was requested directly rather than picked by
+// the usual "most generous free tier first" heuristic below. Anthropic,
+// Mistral, Cerebras, and SambaNova are deliberately not in this chain --
+// all four are paid/billing-gated (confirmed live: SambaNova returns 402
+// PAYMENT_METHOD_REQUIRED, balance 0, on every model) and this deployment
+// isn't funding them. A removed provider can't show up as a confusing
 // "needs billing" entry in the AI Provider Health panel the way an unset
 // key would.
 //
-// Adding a 10th provider is a two-file change: write one more
+// Adding an 11th provider is a two-file change: write one more
 // server/ai/providers/*.js implementing { label, model, isConfigured(),
 // summarize(prompt, opts), summarizeJson(prompt, opts) }, add its config to
 // server/ai/config.js, then add one entry to PROVIDER_DEFS below. Nothing
@@ -42,27 +46,28 @@ import { recordAiRequest } from "./aiRequestLog.js";
 import { getCached, setCached } from "./aiResponseCache.js";
 import { geminiProvider } from "./providers/geminiProvider.js";
 import { groqProvider } from "./providers/groqProvider.js";
+import { nvidiaProvider } from "./providers/nvidiaProvider.js";
 import { openRouterProvider } from "./providers/openRouterProvider.js";
+import { ollamaProvider } from "./providers/ollamaProvider.js";
 import { huggingFaceProvider } from "./providers/huggingFaceProvider.js";
 import { cohereProvider } from "./providers/cohereProvider.js";
 import { togetherProvider } from "./providers/togetherProvider.js";
 import { cloudflareProvider } from "./providers/cloudflareProvider.js";
 import { githubModelsProvider } from "./providers/githubModelsProvider.js";
-import { ollamaProvider } from "./providers/ollamaProvider.js";
 
-// Default priority order -- Gemini first (generous always-free tier,
-// largest free-tier context window), then fastest/most-generous free
-// tiers, general-purpose paid-adjacent ones (Together, GitHub Models) last.
+// Default priority order -- see the header comment above for why this
+// specific sequence (not the usual "most generous free tier first").
 const PROVIDER_DEFS = [
   { key: "gemini", provider: geminiProvider, contextWindow: AI_ROUTER_CONFIG.gemini.contextWindow },
   { key: "groq", provider: groqProvider, contextWindow: AI_ROUTER_CONFIG.groq.contextWindow },
+  { key: "nvidia", provider: nvidiaProvider, contextWindow: AI_ROUTER_CONFIG.nvidia.contextWindow },
   { key: "openrouter", provider: openRouterProvider, contextWindow: AI_ROUTER_CONFIG.openrouter.contextWindow },
+  { key: "ollama", provider: ollamaProvider, contextWindow: AI_ROUTER_CONFIG.ollama.contextWindow },
   { key: "huggingface", provider: huggingFaceProvider, contextWindow: AI_ROUTER_CONFIG.huggingface.contextWindow },
   { key: "cohere", provider: cohereProvider, contextWindow: AI_ROUTER_CONFIG.cohere.contextWindow },
   { key: "together", provider: togetherProvider, contextWindow: AI_ROUTER_CONFIG.together.contextWindow },
   { key: "cloudflare", provider: cloudflareProvider, contextWindow: AI_ROUTER_CONFIG.cloudflare.contextWindow },
   { key: "githubmodels", provider: githubModelsProvider, contextWindow: AI_ROUTER_CONFIG.githubModels.contextWindow },
-  { key: "ollama", provider: ollamaProvider, contextWindow: AI_ROUTER_CONFIG.ollama.contextWindow },
 ];
 const DEFAULT_ORDER = PROVIDER_DEFS.map((d) => d.key);
 
@@ -117,6 +122,33 @@ const REASON_LABEL = {
   cooling_down: "Cooling Down",
   other: "Error",
 };
+
+// Deliberately plain text, not JSON mode -- a couple of providers here
+// (see groqProvider.js) reject response_format: json_object unless the
+// prompt itself contains the word "json", which a minimal health-check
+// ping has no reason to. Not sent through recordAiRequest/aiRequestLog --
+// this is an internal circuit-breaker probe, not real app usage, and
+// mixing it into the AI Usage tab's token/request totals would misrepresent
+// what this app actually asked providers to do. It IS fully text-logged
+// (provider, status, latency) via log.info/warn below, same as every real
+// attempt, and it still updates providerHealth exactly like a real
+// success/failure would.
+async function performHealthCheck(provider) {
+  const start = Date.now();
+  try {
+    await provider.summarize("Respond with the single word: ready", { tier: "fast", temperature: 0 });
+    const latency = Date.now() - start;
+    providerHealth.recordSuccess(provider.label, latency);
+    log.info("ai-router", `Provider: ${provider.label} | Health check: Passed | Latency: ${(latency / 1000).toFixed(1)}s -- returning to production traffic`);
+    return true;
+  } catch (rawError) {
+    const error = rawError.name === "AIProviderUnavailableError" ? rawError : classifyProviderError(provider.label, rawError);
+    const latency = Date.now() - start;
+    providerHealth.recordFailure(provider.label, error.reason, { retryAfterMs: error.retryAfterMs });
+    log.warn("ai-router", `Provider: ${provider.label} | Health check: Failed | Status: ${REASON_LABEL[error.reason] ?? "Error"} | Latency: ${(latency / 1000).toFixed(1)}s -- staying in cooldown`);
+    return false;
+  }
+}
 
 /** Thrown only once every configured, non-cooling-down provider has actually been attempted. */
 export class AllProvidersFailedError extends Error {
@@ -192,6 +224,18 @@ async function runWithFailover(method, promptArg, options = {}) {
       continue;
     }
 
+    // Cooldown window just elapsed but nothing has re-verified this
+    // provider yet -- run one cheap health check before letting the real
+    // request (potentially carrying a large prompt, on a hard platform
+    // timeout budget) be the thing that discovers it's still down.
+    if (providerHealth.isPendingHealthCheck(provider.label)) {
+      const healthy = await performHealthCheck(provider);
+      if (!healthy) {
+        attempts.push({ provider: provider.label, reason: providerHealth.getLastFailureReason(provider.label) ?? "other" });
+        continue;
+      }
+    }
+
     const start = Date.now();
     try {
       const result = await withRetry(() => provider[method](promptArg, callOptions), {
@@ -200,16 +244,17 @@ async function runWithFailover(method, promptArg, options = {}) {
         isRetryable: isRetryableReason,
       });
       const latency = Date.now() - start;
-      const tokenPart = result.tokensUsed ? ` | Tokens: ${result.tokensUsed}` : "";
-      const failoverPart = attempts.length > 0 ? ` | Failovers: ${attempts.length}` : "";
-      log.info("ai-router", `Provider: ${provider.label} | Status: Success | Latency: ${(latency / 1000).toFixed(1)}s${tokenPart}${failoverPart}`);
-
-      providerHealth.recordSuccess(provider.label, latency);
       // result.model is the actual model that answered -- differs from
       // provider.model (the provider's default) whenever the caller passed
       // {tier: "fast"}, so a fast-tier response never gets misreported as
       // having come from the default model.
       const model = result.model ?? provider.model;
+      const tokenPart = result.tokensUsed ? ` | Tokens: ${result.tokensUsed}` : "";
+      const priorFailures = attempts.filter((a) => a.reason !== "not_configured" && a.reason !== "cooling_down");
+      const fallbackPart = priorFailures.length > 0 ? ` | Fallback from: ${priorFailures.map((a) => a.provider).join(", ")}` : "";
+      log.info("ai-router", `Provider: ${provider.label} | Model: ${model} | Status: Success | Latency: ${(latency / 1000).toFixed(1)}s${tokenPart}${fallbackPart}`);
+
+      providerHealth.recordSuccess(provider.label, latency);
       recordAiRequest({ task, provider: provider.label, model, status: "success", latencyMs: latency, totalTokens: result.tokensUsed, fallbackUsed: attempts.length > 0 });
 
       const finalResult = { provider: provider.label, model, summary: result.summary, latency, success: true };
@@ -222,7 +267,7 @@ async function runWithFailover(method, promptArg, options = {}) {
       const error = rawError.name === "AIProviderUnavailableError" ? rawError : classifyProviderError(provider.label, rawError);
       const latency = Date.now() - start;
       attempts.push({ provider: provider.label, reason: error.reason, message: error.message });
-      log.warn("ai-router", `Provider: ${provider.label} | Status: ${REASON_LABEL[error.reason] ?? "Error"} | Latency: ${(latency / 1000).toFixed(1)}s | Failing over...`);
+      log.warn("ai-router", `Provider: ${provider.label} | Model: ${provider.model} | Status: ${REASON_LABEL[error.reason] ?? "Error"} | Latency: ${(latency / 1000).toFixed(1)}s | Failing over...`);
 
       providerHealth.recordFailure(provider.label, error.reason, { retryAfterMs: error.retryAfterMs });
       recordAiRequest({ task, provider: provider.label, model: provider.model, status: "failure", latencyMs: latency, errorReason: error.reason });

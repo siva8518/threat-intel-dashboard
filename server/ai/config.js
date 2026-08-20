@@ -116,6 +116,20 @@ export const AI_ROUTER_CONFIG = {
     fastModel: process.env.GITHUB_MODELS_FAST_MODEL || "meta/Meta-Llama-3.1-8B-Instruct",
     contextWindow: Number(process.env.GITHUB_MODELS_CONTEXT_WINDOW) || 16_000,
   },
+  // NVIDIA NIM -- free developer tier, sign up at build.nvidia.com, open any
+  // model card and click "Get API Key" (key starts with nvapi-). Confirmed
+  // live: meta/llama-3.3-70b-instruct and meta/llama-3.1-70b-instruct both
+  // hang indefinitely on this account (no error, no response, 90s+) --
+  // nvidia/llama-3.3-nemotron-super-49b-v1 (49B, Llama-3.3 lineage) answers
+  // normally and supports JSON mode, so that's the default instead.
+  // contextWindow is a soft estimate from that lineage (128k), not directly
+  // confirmed via this account.
+  nvidia: {
+    apiKey: process.env.NVIDIA_API_KEY,
+    model: process.env.NVIDIA_MODEL || "nvidia/llama-3.3-nemotron-super-49b-v1",
+    fastModel: process.env.NVIDIA_FAST_MODEL || "meta/llama-3.1-8b-instruct",
+    contextWindow: Number(process.env.NVIDIA_CONTEXT_WINDOW) || 128_000,
+  },
   // Ollama Cloud -- free, no-credit-card signup at ollama.com, generate a
   // key under Settings -> API Keys. Free tier is GPU-time-based (session
   // limits resetting every 5h, weekly limits every 7 days) rather than a
