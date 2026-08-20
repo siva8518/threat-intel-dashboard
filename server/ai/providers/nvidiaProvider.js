@@ -12,7 +12,17 @@ import { classifyProviderError } from "../aiProviderError.js";
 import { AI_ROUTER_CONFIG } from "../config.js";
 
 const BASE_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
-const REQUEST_TIMEOUT_MS = 60_000;
+// nvidia/llama-3.3-nemotron-super-49b-v1 (the default-tier model) has real,
+// high latency variance on this free account -- confirmed live with 4 back-
+// to-back identical-sized requests: 21s, 32s, 44s, 68s. A 60s timeout was
+// cutting off genuinely-completing requests, not just hung ones. Raised to
+// 80s -- DigitalOcean App Platform's actual hard request-timeout cap is
+// 100s (confirmed against DO's own docs, not the "well under a minute"
+// guess this value and aiRouter.js's RETRIES_PER_PROVIDER=0 comment were
+// both originally based on), leaving ~20s of headroom for the rest of the
+// failover chain's remaining attempts (every other provider here answers,
+// succeeds or fails, in low single-digit seconds when actually attempted).
+const REQUEST_TIMEOUT_MS = 80_000;
 const LABEL = "NVIDIA NIM";
 
 /**

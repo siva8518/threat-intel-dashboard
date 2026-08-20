@@ -94,9 +94,11 @@ const PROVIDERS = resolveProviderOrder().map((key) => PROVIDER_DEFS.find((d) => 
 // latency (up to REQUEST_TIMEOUT_MS again) betting on the same provider
 // recovering; failing over spends that time on a provider that might
 // already be healthy instead. Matters a lot for any caller sitting behind a
-// hard platform request timeout (e.g. DigitalOcean App Platform's own edge
-// timeout, well under a minute) -- one retried timeout used to be enough by
-// itself to blow that budget before failover even started.
+// hard platform request timeout -- DigitalOcean App Platform's real hard
+// cap is 100s (confirmed against DO's own docs; a slower provider's single
+// REQUEST_TIMEOUT_MS attempt already eats a real chunk of that, see
+// nvidiaProvider.js) -- one retried timeout used to be enough by itself to
+// blow that budget before failover even started.
 const RETRIES_PER_PROVIDER = 0;
 const RETRY_BASE_DELAY_MS = 1000;
 
